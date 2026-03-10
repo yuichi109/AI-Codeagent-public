@@ -111,7 +111,12 @@ def run_command(command: str, work_dir: str = None) -> dict:
         }
 
     # 作業ディレクトリの検証
-    resolved_work_dir = Path(work_dir or ALLOWED_WORK_DIR).resolve()
+    # 相対パスは ALLOWED_WORK_DIR 基準で解決（Python プロセスの CWD ではない）
+    if work_dir:
+        p = Path(work_dir)
+        resolved_work_dir = (p if p.is_absolute() else ALLOWED_WORK_DIR / p).resolve()
+    else:
+        resolved_work_dir = ALLOWED_WORK_DIR
     if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
         return {"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1}
 

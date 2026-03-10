@@ -18,3 +18,7 @@ ALLOWED_WORK_DIR: Path = Path(_work_dir_raw).resolve()
 ALLOWED_WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
+
+# GitLab 連携 (省略可)
+GITLAB_USER: str = os.getenv("GITLAB_USER", "")
+GITLAB_PAT: str  = os.getenv("GITLAB_PAT", "")

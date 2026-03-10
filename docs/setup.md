@@ -147,6 +147,31 @@ AI-Codeagent/
 
 ---
 
+## 社内プロキシ環境での設定
+
+社内ネットワークのプロキシが有効な場合、Azure OpenAI や GitLab への通信がブロックされることがある。
+その場合は `.env` に以下を追記してプロキシを迂回させる。
+
+```env
+# プロキシバイパス対象ドメイン
+no_proxy=*.azure.com,*.openai.azure.com,gitlab.com,api.duckduckgo.com,ja.wikipedia.org,en.wikipedia.org,localhost,127.0.0.1
+NO_PROXY=*.azure.com,*.openai.azure.com,gitlab.com,api.duckduckgo.com,ja.wikipedia.org,en.wikipedia.org,localhost,127.0.0.1
+```
+
+> **注意:** `no_proxy` (小文字) と `NO_PROXY` (大文字) の両方を書くこと。
+> ツール (Python の `requests` ライブラリなど) によって参照する変数が異なるため。
+
+プロキシ経由で通信したいドメインがある場合は、`HTTP_PROXY` / `HTTPS_PROXY` も `.env` に追記する:
+
+```env
+HTTP_PROXY=http://proxy.your-company.com:8080
+HTTPS_PROXY=http://proxy.your-company.com:8080
+```
+
+`.env.example` にも同じ設定がテンプレートとして含まれているので参照すること。
+
+---
+
 ## よくあるエラーと対処法
 
 ### `KeyError: 'AZURE_OPENAI_API_KEY'`

@@ -17,7 +17,8 @@
   .user { align-self: flex-end; background: #89b4fa; color: #1e1e2e; }
   .ai { align-self: flex-start; background: #313244; }
   .tool-block { align-self: flex-start; background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px; padding: 8px 12px; font-family: monospace; font-size: 13px; max-width: 80%; }
-  .tool-block .label { color: #a6e3a1; font-size: 11px; margin-bottom: 4px; }
+  .tool-block .label { color: #a6e3a1; font-size: 11px; margin-bottom: 2px; }
+  .tool-block .tool-desc { color: #cba6f7; font-size: 12px; margin-bottom: 4px; font-style: italic; }
   .tool-block .args { color: #fab387; }
   .tool-block .result { color: #cdd6f4; margin-top: 4px; max-height: 120px; overflow-y: auto; }
   .folded-turns { margin-bottom: 12px; }
@@ -133,13 +134,60 @@
     return d;
   }
 
+  // ---- ツール説明の自動生成 ----
+  function inferCommandDesc(command) {
+    if (!command) return '';
+    const c = command.trim();
+    if (/^git push/.test(c))                          return 'GitLab へプッシュ';
+    if (/^git commit/.test(c))                        return 'コミットを作成';
+    if (/^git add/.test(c))                           return 'ファイルをステージング';
+    if (/^git init/.test(c))                          return 'Git リポジトリを初期化';
+    if (/^git remote add/.test(c))                    return 'リモートリポジトリを設定';
+    if (/^git clone/.test(c))                         return 'リポジトリをクローン';
+    if (/^git (status|log|diff)/.test(c))             return 'Git 状態を確認';
+    if (/gitlab\.com\/api\/v4\/projects/.test(c) && /POST/.test(c)) return 'GitLab プロジェクトを作成';
+    if (/gitlab\.com\/api\/v4/.test(c))               return 'GitLab API を呼び出し';
+    if (/^curl/.test(c))                              return 'HTTP リクエストを送信';
+    if (/^mkdir/.test(c))                             return 'ディレクトリを作成';
+    if (/^(python3?|python)\s+\S+\.py/.test(c))       return 'Python スクリプトを実行';
+    if (/^pip3?\s+install/.test(c))                   return 'パッケージをインストール';
+    if (/^(ruff|black|flake8|mypy)/.test(c))          return 'コードをチェック';
+    if (/^(ls|find)/.test(c))                         return 'ファイルを確認';
+    if (/^(cp|mv)/.test(c))                           return 'ファイルを操作';
+    const base = c.split(/\s+/)[0];
+    return `${base} を実行`;
+  }
+
+  function getToolDescription(name, args) {
+    // run_command: AI が description を付けた場合はそれを優先
+    if (name === 'run_command') {
+      return args.description || inferCommandDesc(args.command);
+    }
+    // その他ツールはツール名＋引数から自動生成
+    switch (name) {
+      case 'write_file':  return `${args.path} を書き込み`;
+      case 'read_file':   return `${args.path} を読み込み`;
+      case 'list_files':  return `${args.path || '.'} のファイル一覧を取得`;
+      case 'web_search':  return `「${args.query}」を検索`;
+      case 'web_fetch':   return `${args.url} を取得`;
+      case 'code_lint':   return `${args.file_path || 'コード'} を静的解析`;
+      default:            return '';
+    }
+  }
+
   function addToolBlock(parent, name, args) {
     const icon = TOOL_ICONS[name] || '🔧';
+    const desc = getToolDescription(name, args);
     const d = document.createElement('div');
     d.className = 'tool-block';
     const resultId = `r-${name}-${Date.now()}`;
     const isLong = ['web_fetch', 'read_file'].includes(name);
-    d.innerHTML = `<div class="label">${icon} ${name}</div><div class="args">${JSON.stringify(args)}</div>`
+    // args から description フィールドは表示しない（冗長なので）
+    const displayArgs = { ...args };
+    delete displayArgs.description;
+    d.innerHTML = `<div class="label">${icon} ${name}</div>`
+      + (desc ? `<div class="tool-desc">▶ ${desc}</div>` : '')
+      + `<div class="args">${JSON.stringify(displayArgs)}</div>`
       + (isLong
         ? `<details><summary style="color:#a6e3a1;cursor:pointer;font-size:12px">結果を展開</summary><div class="result" id="${resultId}"></div></details>`
         : `<div class="result" id="${resultId}"></div>`);

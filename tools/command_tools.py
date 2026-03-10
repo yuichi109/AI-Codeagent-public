@@ -89,7 +89,7 @@ def _run_bash_sandboxed(args: list) -> dict:
         return {"error": f"サンドボックス実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
 
 
-def run_command(command: str, work_dir: str = None) -> dict:
+def run_command(command: str, work_dir: str = None, description: str = "") -> dict:
     try:
         args = shlex.split(command)
     except ValueError as e:

@@ -35,6 +35,8 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
 
 def web_search(query: str, max_results: int = 5) -> dict:
     max_results = min(max_results, 10)
+
+    # --- 一次手段: Instant Answer API ---
     try:
         resp = requests.get(
             "https://api.duckduckgo.com/",
@@ -46,15 +48,12 @@ def web_search(query: str, max_results: int = 5) -> dict:
         data = resp.json()
 
         results = []
-        # Abstract (即時回答)
         if data.get("AbstractText") and data.get("AbstractURL"):
             results.append({
                 "title": data.get("Heading", ""),
                 "url": data["AbstractURL"],
                 "snippet": data["AbstractText"][:300],
             })
-
-        # RelatedTopics
         for topic in data.get("RelatedTopics", []):
             if len(results) >= max_results:
                 break
@@ -65,7 +64,67 @@ def web_search(query: str, max_results: int = 5) -> dict:
                     "snippet": topic.get("Text", "")[:300],
                 })
 
-        return {"results": results, "query": query, "source": "duckduckgo", "count": len(results)}
+        if results:
+            return {"results": results, "query": query, "source": "duckduckgo-api", "count": len(results)}
+    except Exception:
+        pass
+
+    # --- フォールバック: Wikipedia 検索 API (無料・APIキー不要・日本語対応) ---
+    try:
+        # 日本語 Wikipedia で検索
+        resp = requests.get(
+            "https://ja.wikipedia.org/w/api.php",
+            params={
+                "action": "opensearch",
+                "search": query,
+                "limit": max_results,
+                "format": "json",
+                "namespace": 0,
+            },
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        # [query, [titles], [snippets], [urls]]
+        titles = data[1] if len(data) > 1 else []
+        snippets = data[2] if len(data) > 2 else []
+        urls = data[3] if len(data) > 3 else []
+
+        results = []
+        for title, snippet, url in zip(titles, snippets, urls):
+            results.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet[:300] if snippet else f"Wikipedia: {title}",
+            })
+
+        if results:
+            return {"results": results, "query": query, "source": "wikipedia-ja", "count": len(results)}
+
+        # 日本語で見つからなければ英語 Wikipedia でも試す
+        resp_en = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "opensearch", "search": query, "limit": max_results, "format": "json", "namespace": 0},
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp_en.raise_for_status()
+        data_en = resp_en.json()
+        titles_en = data_en[1] if len(data_en) > 1 else []
+        snippets_en = data_en[2] if len(data_en) > 2 else []
+        urls_en = data_en[3] if len(data_en) > 3 else []
+
+        results_en = []
+        for title, snippet, url in zip(titles_en, snippets_en, urls_en):
+            results_en.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet[:300] if snippet else f"Wikipedia: {title}",
+            })
+
+        return {"results": results_en, "query": query, "source": "wikipedia-en", "count": len(results_en)}
+
     except Exception as e:
         return {"error": f"検索エラー: {e}", "results": [], "query": query}
 

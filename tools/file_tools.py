@@ -3,7 +3,22 @@ from datetime import datetime
 from config import ALLOWED_WORK_DIR
 
 
+def _normalize_path(path: str) -> str:
+    """'workspace' のように ALLOWED_WORK_DIR 自体を指す名前を '.' に正規化する。"""
+    p = Path(path)
+    # 絶対パスで ALLOWED_WORK_DIR と一致する場合も '.' 扱い
+    if p.resolve() == ALLOWED_WORK_DIR:
+        return "."
+    # 先頭セグメントが ALLOWED_WORK_DIR の名前と一致する場合は除去
+    parts = p.parts
+    if parts and parts[0] == ALLOWED_WORK_DIR.name:
+        remaining = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+        return str(remaining)
+    return path
+
+
 def _resolve_safe_path(path: str) -> Path:
+    path = _normalize_path(path)
     target = (ALLOWED_WORK_DIR / path).resolve()
     if not str(target).startswith(str(ALLOWED_WORK_DIR)):
         raise PermissionError(f"アクセス禁止: '{path}' は作業ディレクトリ外です")

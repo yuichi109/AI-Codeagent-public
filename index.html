@@ -6,8 +6,13 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
-  #header { padding: 12px 20px; background: #181825; border-bottom: 1px solid #313244; font-weight: bold; font-size: 16px; }
-  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  #header { padding: 10px 20px; background: #181825; border-bottom: 1px solid #313244; font-weight: bold; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  #header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  #turn-count { font-size: 11px; color: #6c7086; font-weight: normal; }
+  #clear-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #clear-btn:hover { background: #f38ba8; color: #1e1e2e; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 0; }
+  .turn { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
   .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .user { align-self: flex-end; background: #89b4fa; color: #1e1e2e; }
   .ai { align-self: flex-start; background: #313244; }
@@ -15,6 +20,18 @@
   .tool-block .label { color: #a6e3a1; font-size: 11px; margin-bottom: 4px; }
   .tool-block .args { color: #fab387; }
   .tool-block .result { color: #cdd6f4; margin-top: 4px; max-height: 120px; overflow-y: auto; }
+  .folded-turns { margin-bottom: 12px; }
+  .folded-turns > summary {
+    list-style: none; cursor: pointer; padding: 6px 14px;
+    color: #6c7086; font-size: 12px;
+    border: 1px dashed #313244; border-radius: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .folded-turns > summary:hover { background: #181825; color: #cdd6f4; }
+  .folded-turns[open] > summary { color: #cdd6f4; margin-bottom: 8px; }
+  .folded-turns > summary::before { content: '▸'; transition: transform 0.2s; }
+  .folded-turns[open] > summary::before { content: '▾'; }
+  .folded-inner { display: flex; flex-direction: column; gap: 0; }
   #input-area { display: flex; gap: 8px; padding: 12px 20px; background: #181825; border-top: 1px solid #313244; }
   #input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 14px; outline: none; }
   #input:focus { border-color: #89b4fa; }
@@ -23,7 +40,13 @@
 </style>
 </head>
 <body>
-<div id="header">🤖 Azure Code Agent</div>
+<div id="header">
+  🤖 Azure Code Agent
+  <div id="header-right">
+    <span id="turn-count"></span>
+    <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
+  </div>
+</div>
 <div id="chat"></div>
 <div id="input-area">
   <input id="input" type="text" placeholder="指示を入力してください..." />
@@ -31,28 +54,86 @@
 </div>
 
 <script>
-  let history = [];
-  const chat = document.getElementById('chat');
+  // ---- 設定 ----
+  const MAX_VISIBLE_TURNS = 5;   // これより古いターンは折りたたむ
+  const MAX_API_MESSAGES  = 20;  // APIに送る最大メッセージ数 (= 10ターン分)
+  const STORAGE_KEY = 'ai-codeagent-history';
+
+  // ---- 状態 ----
+  let history = [];   // API送信用 [{role, content}, ...]
+  let turns   = [];   // 表示ターン管理 [{el, userText, aiText}, ...]
+
+  const chat  = document.getElementById('chat');
   const input = document.getElementById('input');
-  const send = document.getElementById('send');
+  const send  = document.getElementById('send');
 
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendMessage(); });
 
-  function addMsg(cls, text) {
-    const d = document.createElement('div');
-    d.className = `msg ${cls}`;
-    d.textContent = text;
-    chat.appendChild(d);
-    chat.scrollTop = chat.scrollHeight;
-    return d;
-  }
-
+  // ---- ツールアイコン ----
   const TOOL_ICONS = {
     read_file: '📄', write_file: '✏️', list_files: '📁',
     run_command: '⚡', web_search: '🔍', web_fetch: '🌐', code_lint: '🔬',
   };
 
-  function addToolBlock(name, args) {
+  // ---- localStorage ----
+  function saveHistory() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        history,
+        saved: new Date().toISOString(),
+      }));
+    } catch(e) { console.warn('localStorage 保存失敗:', e); }
+  }
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data.history) || data.history.length === 0) return;
+      history = data.history;
+      // UI再構築: user/assistant ペアで簡略表示
+      for (let i = 0; i + 1 < history.length; i += 2) {
+        const u = history[i], a = history[i + 1];
+        if (u?.role === 'user' && a?.role === 'assistant') {
+          const turnEl = createTurnEl();
+          appendMsg(turnEl, 'user', u.content);
+          appendMsg(turnEl, 'ai',   a.content);
+          turns.push({ el: turnEl, userText: u.content, aiText: a.content });
+        }
+      }
+      foldOldTurns();
+      updateTurnCount();
+    } catch(e) { console.warn('履歴復元失敗:', e); }
+  }
+
+  function clearHistory() {
+    if (!confirm('会話履歴をすべて削除しますか？')) return;
+    history = [];
+    turns   = [];
+    localStorage.removeItem(STORAGE_KEY);
+    chat.innerHTML = '';
+    updateTurnCount();
+  }
+
+  // ---- DOM ヘルパー ----
+  function createTurnEl() {
+    const el = document.createElement('div');
+    el.className = 'turn';
+    chat.appendChild(el);
+    return el;
+  }
+
+  function appendMsg(parent, cls, text) {
+    const d = document.createElement('div');
+    d.className = `msg ${cls}`;
+    d.textContent = text;
+    parent.appendChild(d);
+    chat.scrollTop = chat.scrollHeight;
+    return d;
+  }
+
+  function addToolBlock(parent, name, args) {
     const icon = TOOL_ICONS[name] || '🔧';
     const d = document.createElement('div');
     d.className = 'tool-block';
@@ -62,55 +143,111 @@
       + (isLong
         ? `<details><summary style="color:#a6e3a1;cursor:pointer;font-size:12px">結果を展開</summary><div class="result" id="${resultId}"></div></details>`
         : `<div class="result" id="${resultId}"></div>`);
-    chat.appendChild(d);
+    parent.appendChild(d);
     chat.scrollTop = chat.scrollHeight;
     return d.querySelector('.result');
   }
 
+  // ---- 折りたたみ ----
+  function foldOldTurns() {
+    // 既存の折りたたみブロックを除去
+    const existing = chat.querySelector('.folded-turns');
+    if (existing) {
+      // 中のターンを chat に戻す
+      const inner = existing.querySelector('.folded-inner');
+      if (inner) {
+        [...inner.children].forEach(c => chat.insertBefore(c, existing));
+      }
+      existing.remove();
+    }
+
+    if (turns.length <= MAX_VISIBLE_TURNS) return;
+
+    const toFold = turns.slice(0, turns.length - MAX_VISIBLE_TURNS);
+    const details = document.createElement('details');
+    details.className = 'folded-turns';
+
+    const summary = document.createElement('summary');
+    summary.textContent = `過去 ${toFold.length} ターンの会話`;
+    details.appendChild(summary);
+
+    const inner = document.createElement('div');
+    inner.className = 'folded-inner';
+    toFold.forEach(t => inner.appendChild(t.el));
+    details.appendChild(inner);
+
+    chat.insertBefore(details, chat.firstChild);
+  }
+
+  function updateTurnCount() {
+    const el = document.getElementById('turn-count');
+    el.textContent = turns.length > 0 ? `${turns.length} ターン` : '';
+  }
+
+  // ---- 送信 ----
   async function sendMessage() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
     send.disabled = true;
 
-    addMsg('user', text);
-    const aiMsg = addMsg('ai', '考え中...');
+    // 新しいターンを開始
+    const turnEl = createTurnEl();
+    appendMsg(turnEl, 'user', text);
+    const aiMsg = appendMsg(turnEl, 'ai', '考え中...');
     let currentResultEl = null;
     let finalAnswer = '';
 
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history })
-    });
+    // API履歴は最新 MAX_API_MESSAGES 件のみ送信
+    const trimmedHistory = history.slice(-MAX_API_MESSAGES);
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history: trimmedHistory }),
+      });
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const lines = decoder.decode(value).split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = JSON.parse(line.slice(6));
-        if (data.type === 'tool_start') {
-          aiMsg.textContent = '';
-          currentResultEl = addToolBlock(data.name, data.args);
-        } else if (data.type === 'tool_result') {
-          if (currentResultEl) currentResultEl.textContent = data.result;
-        } else if (data.type === 'answer') {
-          finalAnswer = data.content;
-          aiMsg.textContent = data.content;
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = decoder.decode(value).split('\n');
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'tool_start') {
+            aiMsg.textContent = '';
+            currentResultEl = addToolBlock(turnEl, data.name, data.args);
+          } else if (data.type === 'tool_result') {
+            if (currentResultEl) currentResultEl.textContent = data.result;
+          } else if (data.type === 'answer') {
+            finalAnswer = data.content;
+            aiMsg.textContent = data.content;
+          }
         }
       }
+    } catch(e) {
+      aiMsg.textContent = `エラー: ${e.message}`;
     }
 
+    // 履歴・ターン更新
     history.push({ role: 'user', content: text });
     history.push({ role: 'assistant', content: finalAnswer });
+    turns.push({ el: turnEl, userText: text, aiText: finalAnswer });
+
+    foldOldTurns();
+    updateTurnCount();
+    saveHistory();
+
     send.disabled = false;
     input.focus();
   }
+
+  // ---- 起動時復元 ----
+  loadHistory();
 </script>
 </body>
 </html>

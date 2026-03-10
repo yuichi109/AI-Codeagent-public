@@ -156,8 +156,13 @@ class ChatRequest(BaseModel):
     history: list = []
 
 
+# サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
+MAX_HISTORY_MESSAGES = 20
+
+
 def agent_stream(user_message: str, history: list):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_message}]
+    trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_message}]
 
     while True:
         response = client.chat.completions.create(

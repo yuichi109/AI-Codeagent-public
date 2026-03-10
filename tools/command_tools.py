@@ -1,5 +1,6 @@
 import os
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from config import ALLOWED_WORK_DIR, COMMAND_TIMEOUT_SECONDS
@@ -16,6 +17,78 @@ ALLOWED_COMMANDS = {
 }
 
 
+def _run_bash_sandboxed(args: list) -> dict:
+    """
+    bubblewrap (bwrap) を使ってシェルスクリプトをサンドボックス内で実行する。
+    Claude Code と同じ方式 (Linux/WSL2)。
+
+    セキュリティ境界:
+      - ファイルシステム全体を読み取り専用にマウント
+      - ALLOWED_WORK_DIR のみ書き込み可
+      - ネットワーク遮断 (--unshare-net)
+      - 新しいセッション・PID namespace で隔離
+    """
+    if not shutil.which("bwrap"):
+        return {
+            "error": "bubblewrap がインストールされていません。'sudo apt install bubblewrap' を実行してください。",
+            "stdout": "", "stderr": "", "returncode": -1,
+        }
+
+    # bash script.sh の形式のみ許可（-c や複数引数は禁止）
+    if len(args) != 2 or not args[1].endswith(".sh"):
+        return {
+            "error": "bash はスクリプトファイルのみ許可されています (例: bash script.sh)",
+            "stdout": "", "stderr": "", "returncode": -1,
+        }
+
+    # スクリプトパスを ALLOWED_WORK_DIR 内に限定
+    script_path = (ALLOWED_WORK_DIR / args[1]).resolve()
+    if not str(script_path).startswith(str(ALLOWED_WORK_DIR)):
+        return {
+            "error": "スクリプトは作業ディレクトリ内のみ実行可能です",
+            "stdout": "", "stderr": "", "returncode": -1,
+        }
+
+    if not script_path.exists():
+        return {
+            "error": f"スクリプトが見つかりません: {args[1]}",
+            "stdout": "", "stderr": "", "returncode": -1,
+        }
+
+    bwrap_cmd = [
+        "bwrap",
+        "--ro-bind", "/", "/",                               # FS 全体を読み取り専用
+        "--dev", "/dev",                                     # デバイスファイル
+        "--proc", "/proc",                                   # プロセス情報
+        "--tmpfs", "/tmp",                                   # 一時領域（書き込み可）
+        "--bind", str(ALLOWED_WORK_DIR), str(ALLOWED_WORK_DIR),  # workspace のみ書き込み可
+        "--chdir", str(ALLOWED_WORK_DIR),                   # 作業ディレクトリを workspace に
+        "--unshare-net",                                     # ネットワーク遮断
+        "--new-session",                                     # 新しいセッション
+        "--die-with-parent",                                 # 親プロセス終了時に子も終了
+        "bash", str(script_path),
+    ]
+
+    try:
+        result = subprocess.run(
+            bwrap_cmd,
+            capture_output=True,
+            text=True,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        )
+        return {
+            "stdout": result.stdout[:4096],
+            "stderr": result.stderr[:2048],
+            "returncode": result.returncode,
+            "error": None,
+            "sandbox": "bubblewrap",
+        }
+    except subprocess.TimeoutExpired:
+        return {"error": f"{COMMAND_TIMEOUT_SECONDS}秒のタイムアウトを超えました", "stdout": "", "stderr": "", "returncode": -1}
+    except Exception as e:
+        return {"error": f"サンドボックス実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
+
+
 def run_command(command: str, work_dir: str = None) -> dict:
     try:
         args = shlex.split(command)
@@ -26,6 +99,11 @@ def run_command(command: str, work_dir: str = None) -> dict:
         return {"error": "コマンドが空です", "stdout": "", "stderr": "", "returncode": -1}
 
     base_cmd = os.path.basename(args[0])
+
+    # bash は bubblewrap サンドボックスで特別処理（ホワイトリストとは独立）
+    if base_cmd == "bash":
+        return _run_bash_sandboxed(args)
+
     if base_cmd not in ALLOWED_COMMANDS:
         return {
             "error": f"'{base_cmd}' は許可されていません。許可コマンド: {sorted(ALLOWED_COMMANDS)}",

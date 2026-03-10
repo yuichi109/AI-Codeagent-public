@@ -172,6 +172,34 @@ HTTPS_PROXY=http://proxy.your-company.com:8080
 
 ---
 
+## シェルスクリプトのサンドボックス実行 (bubblewrap)
+
+エージェントは `bash script.sh` を **bubblewrap (bwrap)** でサンドボックス化して実行します。
+Claude Code が Linux/WSL2 で採用しているのと同じ方式です。
+
+### bubblewrap のインストール
+
+```bash
+sudo apt install bubblewrap
+```
+
+### サンドボックスの保護範囲
+
+| 保護内容 | 詳細 |
+|---|---|
+| ファイルシステム | `workspace/` 以外は読み取り専用 |
+| ネットワーク | 完全遮断 (`--unshare-net`) |
+| `/tmp` | サンドボックス内の独立した tmpfs（ホストに漏れない）|
+| プロセス隔離 | 新しいセッション・親プロセス終了で子も終了 |
+
+### 制約
+
+- `bash script.sh` の形式のみ許可（`bash -c "..."` は不可）
+- スクリプトは `workspace/` 内に存在する必要がある
+- スクリプト内からのネットワークアクセスは不可
+
+---
+
 ## よくあるエラーと対処法
 
 ### `KeyError: 'AZURE_OPENAI_API_KEY'`

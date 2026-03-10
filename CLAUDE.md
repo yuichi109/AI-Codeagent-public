@@ -1,39 +1,177 @@
 # AI Code Agent プロジェクト
 
-このプロジェクトは Azure OpenAI を使った高機能コードエージェントです。
-**設計の詳細は `docs/design.md` を必ず参照してください。**
+Azure OpenAI (gpt-4.1-mini) を使った高機能コードエージェント。
+Web チャット UI からコード生成・編集・実行・GitLab 連携ができる。
 
-## プロジェクト概要
-Web チャット UI からコードの生成・編集・レビュー・実行ができるエージェント。
-ファイル操作・コマンド実行・Web 検索・コードリントをツールとして持つ。
+---
+
+## 作業再開時の手順
+
+```bash
+cd ~/AI-Codeagent
+source venv/bin/activate
+uvicorn server:app --reload
+# → http://localhost:8000 をブラウザで開く
+```
+
+確認事項:
+1. `.env` が存在するか (`cp .env.example .env` して値を設定)
+2. `bubblewrap` がインストール済みか (`which bwrap`)
+3. GitLab PAT が有効か (`.env` の `GITLAB_PAT`)
+
+---
 
 ## 重要なパス
-- 本プロジェクト: `~/AI-Codeagent`
-- 作業ディレクトリ: `~/AI-Codeagent/workspace`
-- ツール実装: `~/AI-Codeagent/tools/`
-- 設計ドキュメント: `~/AI-Codeagent/docs/design.md`
 
-## 作業再開時の確認事項
-1. `docs/design.md` を読んで設計とフェーズを把握する
-2. 現在の実装フェーズと次のアクションを確認する
-3. `.env` が存在するか確認する (なければ `.env.example` を参照して作成)
-4. `uvicorn server:app --reload` で起動できるか確認する
+| パス | 役割 |
+|---|---|
+| `~/AI-Codeagent/` | プロジェクトルート |
+| `~/AI-Codeagent/workspace/` | エージェントの作業ディレクトリ |
+| `~/AI-Codeagent/tools/` | ツール実装 |
+| `~/AI-Codeagent/docs/design.md` | 設計ドキュメント |
+| `~/AI-Codeagent/docs/setup.md` | セットアップ手順（別PC向け） |
 
-## 開発環境
-- 実行環境: WSL (Ubuntu)
-- Python 仮想環境: `~/AI-Codeagent/venv`
-- 起動: `source venv/bin/activate && uvicorn server:app --reload`
-- UI アクセス: http://localhost:8000
+---
 
 ## アーキテクチャ概要
+
 ```
-server.py       ← FastAPI エントリポイント (スリム)
-config.py       ← .env から設定読み込み
-prompts.py      ← システムプロンプト
+server.py           ← FastAPI + SSE ストリーミング、TOOL_REGISTRY
+config.py           ← .env 読み込み (Azure / GitLab / workspace設定)
+prompts.py          ← システムプロンプト (GitLab ワークフロー含む)
 tools/
-  file_tools.py    ← read_file / write_file / list_files
-  command_tools.py ← run_command (shell=False + ホワイトリスト)
-  web_tools.py     ← web_search / web_fetch
-  code_tools.py    ← code_lint (ruff)
-index.html      ← チャット UI (Catppuccin テーマ)
+  file_tools.py     ← read_file / write_file / list_files
+  command_tools.py  ← run_command + _run_bash_sandboxed (bubblewrap)
+  web_tools.py      ← web_search / web_fetch
+  code_tools.py     ← code_lint (ruff / eslint)
+index.html          ← チャット UI (Catppuccin テーマ)
+workspace/          ← エージェントの作業ディレクトリ (Git管理外)
 ```
+
+---
+
+## 実装済み機能 ✅
+
+### セキュリティ
+- [x] API キーを `.env` で管理（ハードコード排除）
+- [x] `shell=False` + コマンドホワイトリスト（`run_command`）
+- [x] パストラバーサル防止（`_resolve_safe_path` / `Path.resolve()`）
+- [x] **bubblewrap サンドボックス**（`bash script.sh` 実行時）
+  - FS 全体読み取り専用、workspace のみ書き込み可
+  - ネットワーク完全遮断（`--unshare-net`）
+  - Claude Code (Linux/WSL2) と同じ方式
+- [x] SSRF 防止（`web_fetch` でプライベート IP をブロック）
+
+### ツール
+- [x] `read_file` / `write_file` / `list_files`（パストラバーサル対策済み）
+- [x] `run_command`（ホワイトリスト + work_dir をworkspace相対で解決）
+- [x] `bash script.sh`（bubblewrap サンドボックス経由）
+- [x] `web_search`（DuckDuckGo API → Wikipedia API フォールバック）
+- [x] `web_fetch`（BeautifulSoup テキスト抽出、SSRF 対策）
+- [x] `code_lint`（Python: ruff、JS/TS: eslint）
+
+### GitLab 連携
+- [x] `.env` に `GITLAB_PAT` / `GITLAB_USER` を設定
+- [x] システムプロンプトに GitLab ワークフローを明記
+  - `curl` で API 呼び出し → プロジェクト作成
+  - `git init / add / commit / push`（`work_dir` をサブディレクトリ指定）
+- [x] **実証済み**：TEST1 / TEST2 プロジェクトを自律作成・push 完了
+
+### UI (index.html)
+- [x] Catppuccin テーマのチャット画面
+- [x] **localStorage 履歴永続化**（ページリロードで復元）
+- [x] **ターン折りたたみ**（古いターンを `<details>` に格納、MAX=5）
+- [x] **API 履歴切り捨て**（クライアント・サーバー両側、最新20件）
+- [x] 「履歴クリア」ボタン + ターンカウント表示
+- [x] **ツール実行の説明表示**（紫イタリック体）
+  - `run_command`: AI が書いた `description` を優先、なければ自動推定
+  - `write_file` / `web_search` 等: 引数から自動生成
+
+### バグ修正
+- [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
+- [x] `work_dir` の相対パス解決: Python CWD 基準 → ALLOWED_WORK_DIR 基準に修正
+- [x] `git init` をサブディレクトリで実行するようシステムプロンプトを整備
+- [x] 社内プロキシ対応（`no_proxy` / `NO_PROXY` を `.env` に追加）
+
+---
+
+## 残タスク・改善候補
+
+### 機能追加
+- [ ] `web_search` の精度向上（現在 Wikipedia フォールバック、DuckDuckGo の代替を検討）
+- [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）
+- [ ] GitLab の既存プロジェクト一覧取得・選択 UI
+- [ ] ファイル差分表示（`git diff` 結果をコードブロックで表示）
+- [ ] マルチターン時の tool メッセージ履歴の扱い改善
+
+### 品質・テスト
+- [ ] 各ツールの単体テスト（pytest）を書く
+- [ ] bubblewrap サンドボックスの脱出テスト
+- [ ] 長いプロンプトでのトークン上限テスト
+- [ ] 別 PC（社内プロキシあり）での動作確認
+
+### ドキュメント
+- [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記
+- [ ] `docs/design.md` を現在の実装に合わせて更新
+
+---
+
+## テスト項目チェックリスト
+
+### 基本動作
+- [ ] `uvicorn server:app --reload` で正常起動
+- [ ] `http://localhost:8000` でチャット UI 表示
+- [ ] メッセージ送信 → AI 応答が返ってくる
+
+### ツール動作確認
+- [ ] `list_files` → workspace のファイル一覧が返る
+- [ ] `write_file` → workspace にファイルが作成される
+- [ ] `read_file` → ファイル内容が返る
+- [ ] `run_command("python3 --version")` → バージョンが返る
+- [ ] `bash script.sh` → bubblewrap で実行される
+- [ ] `web_search "FastAPI"` → 検索結果が返る
+- [ ] `web_fetch "https://httpbin.org/get"` → コンテンツが返る
+- [ ] `code_lint` → ruff が動作する
+
+### セキュリティ確認
+- [ ] `read_file("../../etc/passwd")` → エラーで拒否される
+- [ ] `run_command("rm -rf /")` → ホワイトリスト拒否
+- [ ] `bash -c "rm -rf /"` → 形式エラーで拒否
+- [ ] bash スクリプト内の `curl` → bubblewrap でネットワーク遮断
+
+### GitLab 連携
+- [ ] `curl` で GitLab プロジェクト作成 → 成功
+- [ ] `git init` + `git push` → GitLab に反映
+- [ ] `.env` の PAT が切れた場合のエラーメッセージ確認
+
+### UI
+- [ ] ページリロードで履歴が復元される
+- [ ] 5ターン超えで古いターンが折りたたまれる
+- [ ] 「履歴クリア」で localStorage が消える
+- [ ] ツール実行ブロックに説明が表示される
+
+---
+
+## .env に必要な設定
+
+```env
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
+ALLOWED_WORK_DIR=./workspace
+COMMAND_TIMEOUT_SECONDS=30
+GITLAB_USER=yuichi.matsuo
+GITLAB_PAT=glpat-...
+# プロキシバイパス（社内環境）
+no_proxy=*.azure.com,*.openai.azure.com,gitlab.com,...
+NO_PROXY=*.azure.com,*.openai.azure.com,gitlab.com,...
+```
+
+---
+
+## GitLab リポジトリ
+
+- **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
+- **ブランチ**: main
+- **最終更新**: 2026-03-10

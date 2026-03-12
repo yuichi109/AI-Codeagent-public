@@ -1,13 +1,16 @@
 import json
+import subprocess
+from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse
 from openai import AzureOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED
 from prompts import SYSTEM_PROMPT
 from tools.file_tools import read_file, write_file, list_files
 from tools.command_tools import run_command
-from tools.web_tools import web_search, web_fetch
+from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from pydantic import BaseModel
 
@@ -17,7 +20,20 @@ client = AzureOpenAI(
     api_version=AZURE_OPENAI_API_VERSION,
 )
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # SearXNG を自動起動
+    if SEARXNG_ENABLED:
+        compose_file = Path(__file__).parent / "docker-compose.searxng.yml"
+        if compose_file.exists():
+            subprocess.run(
+                ["docker", "compose", "-f", str(compose_file), "up", "-d"],
+                capture_output=True,
+            )
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 TOOL_REGISTRY = {
     "read_file": read_file,
@@ -26,6 +42,7 @@ TOOL_REGISTRY = {
     "run_command": run_command,
     "web_search": web_search,
     "web_fetch": web_fetch,
+    "web_research": web_research,
     "code_lint": code_lint,
 }
 
@@ -120,6 +137,22 @@ TOOLS = [
                     "max_chars": {"type": "integer", "description": "最大文字数 (デフォルト: 8000)"},
                 },
                 "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_research",
+            "description": "検索→上位ページを自動取得→まとめて返す高レベル調査ツール。複数ソースを比較して提案したいときに使う。web_searchより詳細な情報が得られる。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "調査クエリ"},
+                    "max_sources": {"type": "integer", "description": "取得するソース数 (デフォルト: 3、最大: 5)"},
+                    "max_chars_per_page": {"type": "integer", "description": "1ページあたりの最大文字数 (デフォルト: 3000)"},
+                },
+                "required": ["query"],
             },
         },
     },

@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from config import SEARXNG_BASE_URL, SEARXNG_ENABLED
+
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CodeAgent/1.0)"}
 
 
@@ -33,10 +35,43 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _search_searxng(query: str, max_results: int = 5) -> dict | None:
+    """SearXNG JSON API を使った検索。失敗時は None を返す。"""
+    try:
+        resp = requests.get(
+            f"{SEARXNG_BASE_URL}/search",
+            params={"q": query, "format": "json", "language": "ja"},
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = []
+        for item in data.get("results", [])[:max_results]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", "")[:300],
+            })
+
+        if results:
+            return {"results": results, "query": query, "source": "searxng", "count": len(results)}
+    except Exception:
+        pass
+    return None
+
+
 def web_search(query: str, max_results: int = 5) -> dict:
     max_results = min(max_results, 10)
 
-    # --- 一次手段: Instant Answer API ---
+    # --- 一次手段: SearXNG (有効時) ---
+    if SEARXNG_ENABLED:
+        result = _search_searxng(query, max_results)
+        if result:
+            return result
+
+    # --- 二次手段: DuckDuckGo Instant Answer API ---
     try:
         resp = requests.get(
             "https://api.duckduckgo.com/",
@@ -170,3 +205,50 @@ def web_fetch(url: str, extract_text: bool = True, max_chars: int = 8000) -> dic
         return {"error": f"取得エラー: {e}", "url": url}
     except Exception as e:
         return {"error": f"処理エラー: {e}", "url": url}
+
+
+def web_research(query: str, max_sources: int = 3, max_chars_per_page: int = 3000) -> dict:
+    """
+    検索 → 上位ページを自動取得 → まとめて返す。
+    AIが複数ソースを参照して比較・提案できるようにするための高レベルツール。
+    """
+    max_sources = min(max_sources, 5)
+    max_chars_per_page = min(max_chars_per_page, 8000)
+
+    # Step 1: 検索
+    search_result = web_search(query, max_results=max_sources + 2)
+    if "error" in search_result or not search_result.get("results"):
+        return {"error": f"検索失敗: {search_result.get('error', '結果なし')}", "query": query, "sources": []}
+
+    # Step 2: 各ページを取得
+    sources = []
+    for item in search_result["results"]:
+        if len(sources) >= max_sources:
+            break
+        url = item.get("url", "")
+        if not url:
+            continue
+
+        fetched = web_fetch(url, extract_text=True, max_chars=max_chars_per_page)
+        if "error" in fetched:
+            # 取得失敗したページはスニペットだけ使う
+            sources.append({
+                "url": url,
+                "title": item.get("title", ""),
+                "content": item.get("snippet", ""),
+                "fetch_failed": True,
+            })
+        else:
+            sources.append({
+                "url": url,
+                "title": fetched.get("title") or item.get("title", ""),
+                "content": fetched.get("content", ""),
+                "fetch_failed": False,
+            })
+
+    return {
+        "query": query,
+        "sources": sources,
+        "source_count": len(sources),
+        "search_backend": search_result.get("source", "unknown"),
+    }

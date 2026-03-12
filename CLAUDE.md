@@ -14,10 +14,14 @@ uvicorn server:app --reload
 # → http://localhost:8000 をブラウザで開く
 ```
 
+※ `SEARXNG_ENABLED=true` の場合、サーバー起動時に SearXNG コンテナが自動起動する。
+  手動で起動する場合: `docker compose -f docker-compose.searxng.yml up -d`
+
 確認事項:
 1. `.env` が存在するか (`cp .env.example .env` して値を設定)
 2. `bubblewrap` がインストール済みか (`which bwrap`)
 3. GitLab PAT が有効か (`.env` の `GITLAB_PAT`)
+4. Docker が起動しているか (`docker info`)
 
 ---
 
@@ -36,16 +40,18 @@ uvicorn server:app --reload
 ## アーキテクチャ概要
 
 ```
-server.py           ← FastAPI + SSE ストリーミング、TOOL_REGISTRY
-config.py           ← .env 読み込み (Azure / GitLab / workspace設定)
-prompts.py          ← システムプロンプト (GitLab ワークフロー含む)
+server.py           ← FastAPI + SSE ストリーミング、TOOL_REGISTRY、SearXNG自動起動
+config.py           ← .env 読み込み (Azure / GitLab / SearXNG / workspace設定)
+prompts.py          ← システムプロンプト (今日の日付・GitLab ワークフロー含む)
 tools/
   file_tools.py     ← read_file / write_file / list_files
   command_tools.py  ← run_command + _run_bash_sandboxed (bubblewrap)
-  web_tools.py      ← web_search / web_fetch
+  web_tools.py      ← web_search / web_fetch / web_research (SearXNG優先)
   code_tools.py     ← code_lint (ruff / eslint)
 index.html          ← チャット UI (Catppuccin テーマ)
 workspace/          ← エージェントの作業ディレクトリ (Git管理外)
+docker-compose.searxng.yml  ← SearXNG コンテナ定義 (ポート8888)
+searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 ```
 
 ---
@@ -66,8 +72,9 @@ workspace/          ← エージェントの作業ディレクトリ (Git管理
 - [x] `read_file` / `write_file` / `list_files`（パストラバーサル対策済み）
 - [x] `run_command`（ホワイトリスト + work_dir をworkspace相対で解決）
 - [x] `bash script.sh`（bubblewrap サンドボックス経由）
-- [x] `web_search`（DuckDuckGo API → Wikipedia API フォールバック）
+- [x] `web_search`（SearXNG優先 → DuckDuckGo API → Wikipedia API フォールバック）
 - [x] `web_fetch`（BeautifulSoup テキスト抽出、SSRF 対策）
+- [x] `web_research`（検索→複数ページ自動取得→まとめて返す高レベルツール）
 - [x] `code_lint`（Python: ruff、JS/TS: eslint）
 
 ### GitLab 連携
@@ -91,14 +98,15 @@ workspace/          ← エージェントの作業ディレクトリ (Git管理
 - [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
 - [x] `work_dir` の相対パス解決: Python CWD 基準 → ALLOWED_WORK_DIR 基準に修正
 - [x] `git init` をサブディレクトリで実行するようシステムプロンプトを整備
-- [x] 社内プロキシ対応（`no_proxy` / `NO_PROXY` を `.env` に追加）
+- [x] 社内プロキシ対応（`no_proxy` / `NO_PROXY` を `.env` に追加、`load_dotenv(override=True)` で確実に適用）
+- [x] **SearXNG 自動起動**（`SEARXNG_ENABLED=true` 時、uvicorn 起動と同時に `docker compose up -d`）
+- [x] **今日の日付をシステムプロンプトに動的付与**（時事情報の検索クエリに正確な日付を使用）
 
 ---
 
 ## 残タスク・改善候補
 
 ### 機能追加
-- [ ] `web_search` の精度向上（現在 Wikipedia フォールバック、DuckDuckGo の代替を検討）
 - [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）
 - [ ] GitLab の既存プロジェクト一覧取得・選択 UI
 - [ ] ファイル差分表示（`git diff` 結果をコードブロックで表示）
@@ -166,6 +174,9 @@ GITLAB_PAT=glpat-...
 # プロキシバイパス（社内環境）
 no_proxy=*.azure.com,*.openai.azure.com,gitlab.com,...
 NO_PROXY=*.azure.com,*.openai.azure.com,gitlab.com,...
+# SearXNG
+SEARXNG_BASE_URL=http://localhost:8888
+SEARXNG_ENABLED=true
 ```
 
 ---
@@ -174,4 +185,4 @@ NO_PROXY=*.azure.com,*.openai.azure.com,gitlab.com,...
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-10
+- **最終更新**: 2026-03-12

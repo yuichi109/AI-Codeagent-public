@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # 必須: 未設定時は起動時に KeyError で即時エラー
 AZURE_OPENAI_API_KEY: str = os.environ["AZURE_OPENAI_API_KEY"]
@@ -22,3 +22,7 @@ COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
 # GitLab 連携 (省略可)
 GITLAB_USER: str = os.getenv("GITLAB_USER", "")
 GITLAB_PAT: str  = os.getenv("GITLAB_PAT", "")
+
+# SearXNG 検索バックエンド (省略可)
+SEARXNG_BASE_URL: str = os.getenv("SEARXNG_BASE_URL", "http://localhost:8888")
+SEARXNG_ENABLED: bool = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"

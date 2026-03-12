@@ -21,6 +21,11 @@
   .tool-block .tool-desc { color: #cba6f7; font-size: 12px; margin-bottom: 4px; font-style: italic; }
   .tool-block .args { color: #fab387; }
   .tool-block .result { color: #cdd6f4; margin-top: 4px; max-height: 120px; overflow-y: auto; }
+  .diff-block { font-family: monospace; font-size: 12px; line-height: 1.5; }
+  .diff-add  { color: #a6e3a1; background: rgba(166,227,161,0.08); display: block; }
+  .diff-del  { color: #f38ba8; background: rgba(243,139,168,0.08); display: block; }
+  .diff-hunk { color: #89dceb; display: block; }
+  .diff-meta { color: #6c7086; display: block; }
   .folded-turns { margin-bottom: 12px; }
   .folded-turns > summary {
     list-style: none; cursor: pointer; padding: 6px 14px;
@@ -73,7 +78,7 @@
   // ---- ツールアイコン ----
   const TOOL_ICONS = {
     read_file: '📄', write_file: '✏️', list_files: '📁',
-    run_command: '⚡', web_search: '🔍', web_fetch: '🌐', code_lint: '🔬',
+    run_command: '⚡', web_search: '🔍', web_fetch: '🌐', web_research: '🔭', code_lint: '🔬',
   };
 
   // ---- localStorage ----
@@ -168,11 +173,48 @@
       case 'write_file':  return `${args.path} を書き込み`;
       case 'read_file':   return `${args.path} を読み込み`;
       case 'list_files':  return `${args.path || '.'} のファイル一覧を取得`;
-      case 'web_search':  return `「${args.query}」を検索`;
-      case 'web_fetch':   return `${args.url} を取得`;
-      case 'code_lint':   return `${args.file_path || 'コード'} を静的解析`;
-      default:            return '';
+      case 'web_search':    return `「${args.query}」を検索`;
+      case 'web_fetch':     return `${args.url} を取得`;
+      case 'web_research':  return `「${args.query}」を調査`;
+      case 'code_lint':     return `${args.file_path || 'コード'} を静的解析`;
+      default:              return '';
     }
+  }
+
+  // ---- diff レンダリング ----
+  function isDiff(text) {
+    return /^(diff --git|--- [ab]\/|\+\+\+ [ab]\/|@@\s+-\d)/m.test(text);
+  }
+
+  function renderDiff(container, text) {
+    const block = document.createElement('div');
+    block.className = 'diff-block';
+    for (const line of text.split('\n')) {
+      const span = document.createElement('span');
+      if (line.startsWith('+') && !line.startsWith('+++'))      { span.className = 'diff-add'; }
+      else if (line.startsWith('-') && !line.startsWith('---')) { span.className = 'diff-del'; }
+      else if (line.startsWith('@@'))                           { span.className = 'diff-hunk'; }
+      else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+        span.className = 'diff-meta';
+      }
+      span.textContent = line;
+      block.appendChild(span);
+    }
+    container.appendChild(block);
+  }
+
+  function setResult(el, toolName, resultText) {
+    // run_command / git diff 系は stdout を取り出して diff 判定
+    try {
+      const parsed = JSON.parse(resultText);
+      const stdout = parsed.stdout || '';
+      if (isDiff(stdout)) {
+        renderDiff(el, stdout);
+        return;
+      }
+    } catch(_) {}
+    // 通常テキスト
+    el.textContent = resultText;
   }
 
   function addToolBlock(parent, name, args) {
@@ -244,6 +286,7 @@
     appendMsg(turnEl, 'user', text);
     const aiMsg = appendMsg(turnEl, 'ai', '考え中...');
     let currentResultEl = null;
+    let currentToolName = null;
     let finalAnswer = '';
 
     // API履歴は最新 MAX_API_MESSAGES 件のみ送信
@@ -268,9 +311,10 @@
           const data = JSON.parse(line.slice(6));
           if (data.type === 'tool_start') {
             aiMsg.textContent = '';
+            currentToolName = data.name;
             currentResultEl = addToolBlock(turnEl, data.name, data.args);
           } else if (data.type === 'tool_result') {
-            if (currentResultEl) currentResultEl.textContent = data.result;
+            if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
           } else if (data.type === 'answer') {
             finalAnswer = data.content;
             aiMsg.textContent = data.content;

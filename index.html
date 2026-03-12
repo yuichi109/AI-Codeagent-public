@@ -397,7 +397,7 @@
 
   // GitLab 設定チェック → ボタン表示
   fetch('/gitlab/projects').then(r => r.json()).then(data => {
-    if (!data.error) document.getElementById('gitlab-btn').style.display = '';
+    if (!data.error) document.getElementById('gitlab-btn').style.display = 'inline-block';
   }).catch(() => {});
 
   // ---- 送信 ----

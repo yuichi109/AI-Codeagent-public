@@ -11,6 +11,24 @@
   #turn-count { font-size: 11px; color: #6c7086; font-weight: normal; }
   #clear-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
   #clear-btn:hover { background: #f38ba8; color: #1e1e2e; }
+  #gitlab-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; display: none; }
+  #gitlab-btn:hover { background: #fab387; color: #1e1e2e; }
+  #gitlab-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
+  #gitlab-panel.open { transform: translateX(0); }
+  #gitlab-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  #gitlab-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
+  #gitlab-panel-close:hover { color: #cdd6f4; }
+  #gitlab-search { margin: 10px 12px; padding: 6px 10px; background: #313244; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 13px; outline: none; width: calc(100% - 24px); flex-shrink: 0; }
+  #gitlab-search:focus { border-color: #89b4fa; }
+  #gitlab-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .gl-project { padding: 9px 10px; border-radius: 8px; cursor: pointer; margin-bottom: 3px; border: 1px solid transparent; }
+  .gl-project:hover { background: #313244; border-color: #45475a; }
+  .gl-project-name { font-size: 13px; font-weight: bold; color: #cdd6f4; }
+  .gl-project-ns { font-size: 11px; color: #6c7086; margin-top: 1px; }
+  .gl-project-desc { font-size: 11px; color: #a6adc8; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gl-project-meta { font-size: 10px; color: #45475a; margin-top: 4px; display: flex; gap: 8px; align-items: center; }
+  .gl-badge { padding: 1px 5px; border-radius: 3px; background: #313244; color: #6c7086; }
+  #gitlab-status { padding: 24px 16px; text-align: center; color: #6c7086; font-size: 13px; }
   #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 0; }
   .turn { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
   .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
@@ -50,9 +68,23 @@
   🤖 Azure Code Agent
   <div id="header-right">
     <span id="turn-count"></span>
+    <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
     <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
   </div>
 </div>
+
+<!-- GitLab プロジェクトパネル -->
+<div id="gitlab-panel">
+  <div id="gitlab-panel-header">
+    🦊 GitLab プロジェクト
+    <button id="gitlab-panel-close" onclick="toggleGitLabPanel()">✕</button>
+  </div>
+  <input id="gitlab-search" type="text" placeholder="プロジェクトを絞り込み..." oninput="filterProjects(this.value)" />
+  <div id="gitlab-list">
+    <div id="gitlab-status">読み込み中...</div>
+  </div>
+</div>
+
 <div id="chat"></div>
 <div id="input-area">
   <input id="input" type="text" placeholder="指示を入力してください..." />
@@ -273,6 +305,100 @@
     const el = document.getElementById('turn-count');
     el.textContent = turns.length > 0 ? `${turns.length} ターン` : '';
   }
+
+  // ---- GitLab パネル ----
+  let glProjects = [];
+  let glPanelOpen = false;
+
+  async function toggleGitLabPanel() {
+    const panel = document.getElementById('gitlab-panel');
+    glPanelOpen = !glPanelOpen;
+    panel.classList.toggle('open', glPanelOpen);
+    if (glPanelOpen && glProjects.length === 0) {
+      await loadGitLabProjects();
+    }
+  }
+
+  async function loadGitLabProjects() {
+    const listEl = document.getElementById('gitlab-list');
+    listEl.innerHTML = '<div id="gitlab-status">読み込み中...</div>';
+    try {
+      const res = await fetch('/gitlab/projects');
+      const data = await res.json();
+      if (data.error) {
+        listEl.innerHTML = `<div id="gitlab-status">⚠️ ${data.error}</div>`;
+        return;
+      }
+      glProjects = data;
+      renderProjects(glProjects);
+    } catch(e) {
+      listEl.innerHTML = `<div id="gitlab-status">⚠️ 取得失敗: ${e.message}</div>`;
+    }
+  }
+
+  function renderProjects(projects) {
+    const listEl = document.getElementById('gitlab-list');
+    if (projects.length === 0) {
+      listEl.innerHTML = '<div id="gitlab-status">プロジェクトが見つかりません</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    for (const p of projects) {
+      const el = document.createElement('div');
+      el.className = 'gl-project';
+      const ago = p.last_activity_at ? timeAgo(p.last_activity_at) : '';
+      el.innerHTML =
+        `<div class="gl-project-name">${escHtml(p.name)}</div>`
+        + `<div class="gl-project-ns">${escHtml(p.path_with_namespace)}</div>`
+        + (p.description ? `<div class="gl-project-desc">${escHtml(p.description)}</div>` : '')
+        + `<div class="gl-project-meta">`
+        + `<span class="gl-badge">${escHtml(p.visibility)}</span>`
+        + (ago ? `<span>${ago}</span>` : '')
+        + `</div>`;
+      el.onclick = () => selectProject(p);
+      listEl.appendChild(el);
+    }
+  }
+
+  function filterProjects(query) {
+    const q = query.toLowerCase();
+    const filtered = q
+      ? glProjects.filter(p =>
+          p.name.toLowerCase().includes(q) ||
+          p.path_with_namespace.toLowerCase().includes(q) ||
+          (p.description || '').toLowerCase().includes(q))
+      : glProjects;
+    renderProjects(filtered);
+  }
+
+  function selectProject(p) {
+    // プロジェクト名と URL をチャット入力に挿入
+    const current = input.value.trim();
+    const ref = `[${p.path_with_namespace}](${p.web_url})`;
+    input.value = current ? `${current} ${ref}` : ref;
+    input.focus();
+    // パネルを閉じる
+    toggleGitLabPanel();
+  }
+
+  function timeAgo(isoStr) {
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const days = Math.floor(diff / 86400000);
+    if (days === 0) return '今日';
+    if (days === 1) return '昨日';
+    if (days < 30)  return `${days}日前`;
+    if (days < 365) return `${Math.floor(days / 30)}ヶ月前`;
+    return `${Math.floor(days / 365)}年前`;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // GitLab 設定チェック → ボタン表示
+  fetch('/gitlab/projects').then(r => r.json()).then(data => {
+    if (!data.error) document.getElementById('gitlab-btn').style.display = '';
+  }).catch(() => {});
 
   // ---- 送信 ----
   async function sendMessage() {

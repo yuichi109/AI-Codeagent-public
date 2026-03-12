@@ -1,12 +1,13 @@
 import json
 import subprocess
+import requests
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT
 from prompts import SYSTEM_PROMPT
 from tools.file_tools import read_file, write_file, list_files
 from tools.command_tools import run_command
@@ -235,6 +236,35 @@ async def chat(req: ChatRequest):
         agent_stream(req.message, req.history),
         media_type="text/event-stream",
     )
+
+
+@app.get("/gitlab/projects")
+async def gitlab_projects():
+    if not GITLAB_PAT:
+        return JSONResponse({"error": "GITLAB_PAT が設定されていません"}, status_code=400)
+    try:
+        resp = requests.get(
+            "https://gitlab.com/api/v4/projects",
+            headers={"PRIVATE-TOKEN": GITLAB_PAT},
+            params={"membership": "true", "order_by": "last_activity_at", "per_page": 50},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        projects = [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "path_with_namespace": p["path_with_namespace"],
+                "web_url": p["web_url"],
+                "description": p.get("description") or "",
+                "last_activity_at": p.get("last_activity_at", ""),
+                "visibility": p.get("visibility", ""),
+            }
+            for p in resp.json()
+        ]
+        return JSONResponse(projects)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/")

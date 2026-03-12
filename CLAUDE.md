@@ -118,6 +118,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [ ] **ストリーミング回答**（★★）: 現在は最終回答が一括表示。`stream=True` + `delta.content` を逐次 yield でリアルタイム表示
 - [ ] **tool メッセージの履歴保持**（★★）: 現在は `user`/`assistant` のみ保存。`tool` ロールを含めないとマルチターンで前回のツール結果が消える
 - [ ] **モデルを gpt-4.1 に変更**（★）: `gpt-4.1-mini` → `gpt-4.1` でコード生成精度向上（コスト増に注意）
+  - ※ `gpt-5.1-codex-mini` は Responses API 専用のため Chat Completions ベースの現構成では使用不可
 
 ### 機能追加
 - [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）※低優先度

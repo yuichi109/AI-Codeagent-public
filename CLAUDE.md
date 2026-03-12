@@ -1,6 +1,6 @@
 # AI Code Agent プロジェクト
 
-Azure OpenAI (gpt-4.1-mini) を使った高機能コードエージェント。
+Azure OpenAI (gpt-5-mini) を使った高機能コードエージェント。
 Web チャット UI からコード生成・編集・実行・GitLab 連携ができる。
 
 ---
@@ -117,8 +117,9 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [ ] **`grep` / `glob` ツールの追加**（★★★）: コードベース横断検索。「この関数がどこで使われているか」を調べるのに必須
 - [ ] **ストリーミング回答**（★★）: 現在は最終回答が一括表示。`stream=True` + `delta.content` を逐次 yield でリアルタイム表示
 - [ ] **tool メッセージの履歴保持**（★★）: 現在は `user`/`assistant` のみ保存。`tool` ロールを含めないとマルチターンで前回のツール結果が消える
-- [ ] **モデルを gpt-4.1 に変更**（★）: `gpt-4.1-mini` → `gpt-4.1` でコード生成精度向上（コスト増に注意）
+- [x] **モデルを gpt-5-mini に変更**（★）: `gpt-4.1-mini` → `gpt-5-mini` に変更済み（2026-03-12）
   - ※ `gpt-5.1-codex-mini` は Responses API 専用のため Chat Completions ベースの現構成では使用不可
+  - ※ `gpt-5-mini` は Chat Completions API 互換・動作確認済み
 
 ### 機能追加
 - [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）※低優先度
@@ -176,7 +177,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 ```env
 AZURE_OPENAI_API_KEY=...
 AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
+AZURE_OPENAI_DEPLOYMENT=gpt-5-mini
 AZURE_OPENAI_API_VERSION=2025-01-01-preview
 ALLOWED_WORK_DIR=./workspace
 COMMAND_TIMEOUT_SECONDS=30
@@ -196,4 +197,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-12（GitLabパネル・diffカラー表示・SearXNG統合）
+- **最終更新**: 2026-03-12（GitLabパネル・diffカラー表示・SearXNG統合・gpt-5-mini移行）

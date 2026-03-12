@@ -93,6 +93,12 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **ツール実行の説明表示**（紫イタリック体）
   - `run_command`: AI が書いた `description` を優先、なければ自動推定
   - `write_file` / `web_search` 等: 引数から自動生成
+- [x] **git diff カラー表示**（`run_command` の stdout を diff 判定し色付けレンダリング）
+- [x] **GitLab プロジェクトパネル**（🦊ボタン → スライドインパネル）
+  - `GET /gitlab/projects` で参加プロジェクト一覧を取得（最終アクティビティ順、最大50件）
+  - インクリメンタル絞り込み検索
+  - クリックで「workspace にクローンして」メッセージを入力欄に自動セット
+  - GITLAB_PAT 未設定時はボタン非表示
 
 ### バグ修正
 - [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
@@ -107,9 +113,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 ## 残タスク・改善候補
 
 ### 機能追加
-- [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）
-- [ ] GitLab の既存プロジェクト一覧取得・選択 UI
-- [ ] ファイル差分表示（`git diff` 結果をコードブロックで表示）
+- [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）※低優先度
 - [ ] マルチターン時の tool メッセージ履歴の扱い改善
 
 ### 品質・テスト
@@ -185,4 +189,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-12
+- **最終更新**: 2026-03-12（GitLabパネル・diffカラー表示・SearXNG統合）

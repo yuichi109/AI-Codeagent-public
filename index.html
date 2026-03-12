@@ -372,12 +372,9 @@
   }
 
   function selectProject(p) {
-    // プロジェクト名と URL をチャット入力に挿入
-    const current = input.value.trim();
-    const ref = `[${p.path_with_namespace}](${p.web_url})`;
-    input.value = current ? `${current} ${ref}` : ref;
+    // クローンメッセージを入力欄にセットしてパネルを閉じる
+    input.value = `${p.path_with_namespace} を workspace にクローンして: ${p.web_url}`;
     input.focus();
-    // パネルを閉じる
     toggleGitLabPanel();
   }
 

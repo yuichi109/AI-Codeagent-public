@@ -201,4 +201,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-13（edit_file/grep/glob追加・ストリーミング・tool履歴保持・自律プロンプト刷新・ツール結果折りたたみ）
+- **最終更新**: 2026-03-13（edit_file/grep/glob追加・ストリーミング・tool履歴保持・自律プロンプト刷新・ツール結果折りたたみ・発言3パターン分類プロンプト）

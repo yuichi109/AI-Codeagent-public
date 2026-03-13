@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from datetime import datetime
 from config import ALLOWED_WORK_DIR
@@ -49,6 +50,93 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
         return {"error": str(e)}
     except Exception as e:
         return {"error": f"書き込みエラー: {e}"}
+
+
+def edit_file(path: str, old_str: str, new_str: str, expected_replacements: int = 1) -> dict:
+    """ファイル内の特定文字列を置換します。old_str が一意でない場合はエラーを返します。"""
+    try:
+        target = _resolve_safe_path(path)
+        if not target.exists():
+            return {"error": f"ファイルが見つかりません: {path}"}
+        content = target.read_text(encoding="utf-8")
+        count = content.count(old_str)
+        if count == 0:
+            return {"error": f"置換対象の文字列が見つかりません。old_str を確認してください。"}
+        if count != expected_replacements:
+            return {
+                "error": f"置換対象が {count} 箇所見つかりましたが、expected_replacements={expected_replacements} と一致しません。"
+                         f" old_str をより具体的にするか、expected_replacements を {count} に設定してください。"
+            }
+        new_content = content.replace(old_str, new_str, expected_replacements)
+        target.write_text(new_content, encoding="utf-8")
+        return {
+            "message": f"{path} を編集しました ({count} 箇所置換)",
+            "path": str(target),
+            "replacements": count,
+        }
+    except PermissionError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"編集エラー: {e}"}
+
+
+def glob_files(pattern: str, path: str = ".") -> dict:
+    """glob パターンでファイルパスを検索します。** で再帰検索できます。"""
+    try:
+        base = _resolve_safe_path(path)
+        if not base.is_dir():
+            return {"error": f"ディレクトリが見つかりません: {path}"}
+        matches = []
+        for p in sorted(base.glob(pattern))[:500]:
+            if p.is_file():
+                matches.append(str(p.relative_to(ALLOWED_WORK_DIR)))
+        return {"files": matches, "total": len(matches), "pattern": pattern}
+    except PermissionError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"glob エラー: {e}"}
+
+
+def grep(pattern: str, path: str = ".", file_pattern: str = "**/*",
+         case_sensitive: bool = True, max_results: int = 100) -> dict:
+    """ファイル内容を正規表現で検索し、マッチした行をファイルパス・行番号付きで返します。"""
+    try:
+        base = _resolve_safe_path(path)
+        if not base.is_dir():
+            return {"error": f"ディレクトリが見つかりません: {path}"}
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            return {"error": f"正規表現エラー: {e}"}
+
+        results = []
+        for p in sorted(base.glob(file_pattern)):
+            if not p.is_file():
+                continue
+            try:
+                lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+            except Exception:
+                continue
+            for lineno, line in enumerate(lines, 1):
+                if regex.search(line):
+                    results.append({
+                        "file": str(p.relative_to(ALLOWED_WORK_DIR)),
+                        "line": lineno,
+                        "content": line,
+                    })
+                    if len(results) >= max_results:
+                        return {
+                            "matches": results,
+                            "total": len(results),
+                            "truncated": True,
+                            "message": f"結果が {max_results} 件を超えたため打ち切りました",
+                        }
+        return {"matches": results, "total": len(results), "truncated": False}
+    except PermissionError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"grep エラー: {e}"}
 
 
 def list_files(path: str = ".", pattern: str = "*") -> dict:

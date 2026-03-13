@@ -42,13 +42,13 @@ uvicorn server:app --reload
 ```
 server.py           ← FastAPI + SSE ストリーミング、TOOL_REGISTRY、SearXNG自動起動
 config.py           ← .env 読み込み (Azure / GitLab / SearXNG / workspace設定)
-prompts.py          ← システムプロンプト (今日の日付・GitLab ワークフロー含む)
+prompts.py          ← 自律エージェント用システムプロンプト（行動原則・完了定義・先読み指示）
 tools/
-  file_tools.py     ← read_file / write_file / list_files
+  file_tools.py     ← read_file / write_file / edit_file / list_files / glob_files / grep
   command_tools.py  ← run_command + _run_bash_sandboxed (bubblewrap)
   web_tools.py      ← web_search / web_fetch / web_research (SearXNG優先)
   code_tools.py     ← code_lint (ruff / eslint)
-index.html          ← チャット UI (Catppuccin テーマ)
+index.html          ← チャット UI (Catppuccin テーマ、ストリーミング・tool履歴対応)
 workspace/          ← エージェントの作業ディレクトリ (Git管理外)
 docker-compose.searxng.yml  ← SearXNG コンテナ定義 (ポート8888)
 searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
@@ -70,6 +70,9 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 
 ### ツール
 - [x] `read_file` / `write_file` / `list_files`（パストラバーサル対策済み）
+- [x] **`edit_file`**（old_str → new_str 部分置換、件数不一致エラー検出）
+- [x] **`glob_files`**（再帰 glob パターン検索）
+- [x] **`grep`**（正規表現・行番号付き横断検索、case_sensitive / max_results オプション）
 - [x] `run_command`（ホワイトリスト + work_dir をworkspace相対で解決）
 - [x] `bash script.sh`（bubblewrap サンドボックス経由）
 - [x] `web_search`（SearXNG優先 → DuckDuckGo API → Wikipedia API フォールバック）
@@ -99,6 +102,9 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
   - インクリメンタル絞り込み検索
   - クリックで「workspace にクローンして」メッセージを入力欄に自動セット
   - GITLAB_PAT 未設定時はボタン非表示
+- [x] **ストリーミング回答**（`answer_chunk` SSE イベントで delta を逐次表示）
+- [x] **tool メッセージ履歴保持**（`history_messages` SSE イベントでターン間引き継ぎ）
+- [x] **ツール結果折りたたみ表示**（`<details>/<summary>` 形式、デフォルト非表示）
 
 ### バグ修正
 - [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
@@ -112,17 +118,15 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 
 ## 残タスク・改善候補
 
-### Claude Code との差を埋める改善（優先度順）
-- [ ] **`edit_file` ツールの追加**（★★★）: 現在は全体上書きのみ。特定文字列の置換ができるとトークン節約・ミス減少
-- [ ] **`grep` / `glob` ツールの追加**（★★★）: コードベース横断検索。「この関数がどこで使われているか」を調べるのに必須
-- [ ] **ストリーミング回答**（★★）: 現在は最終回答が一括表示。`stream=True` + `delta.content` を逐次 yield でリアルタイム表示
-- [ ] **tool メッセージの履歴保持**（★★）: 現在は `user`/`assistant` のみ保存。`tool` ロールを含めないとマルチターンで前回のツール結果が消える
-- [x] **モデルを gpt-5-mini に変更**（★）: `gpt-4.1-mini` → `gpt-5-mini` に変更済み（2026-03-12）
+### Claude Code との差を埋める改善
+- [x] **`edit_file` ツールの追加**（★★★）: old_str → new_str 部分置換（2026-03-13）
+- [x] **`grep` / `glob` ツールの追加**（★★★）: 正規表現横断検索・再帰 glob（2026-03-13）
+- [x] **ストリーミング回答**（★★）: `stream=True` + `delta.content` 逐次 yield（2026-03-13）
+- [x] **tool メッセージの履歴保持**（★★）: `history_messages` SSE でターン間引き継ぎ（2026-03-13）
+- [x] **モデルを gpt-5-mini に変更**（★）: `gpt-4.1-mini` → `gpt-5-mini`（2026-03-12）
   - ※ `gpt-5.1-codex-mini` は Responses API 専用のため Chat Completions ベースの現構成では使用不可
-  - ※ `gpt-5-mini` は Chat Completions API 互換・動作確認済み
-
-### 機能追加
-- [ ] ツール結果のエラー時に UI 上でわかりやすく表示（赤文字など）※低優先度
+- [x] **自律エージェント用システムプロンプト刷新**（★★★）: 行動原則・完了定義・先読み指示（2026-03-13）
+- [x] **ツール結果折りたたみ表示**（★★）: `<details>` 形式でチャット画面をすっきり保つ（2026-03-13）
 
 ### 品質・テスト
 - [ ] 各ツールの単体テスト（pytest）を書く
@@ -197,4 +201,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-12（GitLabパネル・diffカラー表示・SearXNG統合・gpt-5-mini移行）
+- **最終更新**: 2026-03-13（edit_file/grep/glob追加・ストリーミング・tool履歴保持・自律プロンプト刷新・ツール結果折りたたみ）

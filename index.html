@@ -255,16 +255,12 @@
     const d = document.createElement('div');
     d.className = 'tool-block';
     const resultId = `r-${name}-${Date.now()}`;
-    const isLong = ['web_fetch', 'read_file'].includes(name);
     // args から description フィールドは表示しない（冗長なので）
     const displayArgs = { ...args };
     delete displayArgs.description;
     d.innerHTML = `<div class="label">${icon} ${name}</div>`
       + (desc ? `<div class="tool-desc">▶ ${desc}</div>` : '')
-      + `<div class="args">${JSON.stringify(displayArgs)}</div>`
-      + (isLong
-        ? `<details><summary style="color:#a6e3a1;cursor:pointer;font-size:12px">結果を展開</summary><div class="result" id="${resultId}"></div></details>`
-        : `<div class="result" id="${resultId}"></div>`);
+      + `<details><summary style="color:#a6e3a1;cursor:pointer;font-size:12px">結果を展開</summary><div class="args">${JSON.stringify(displayArgs)}</div><div class="result" id="${resultId}"></div></details>`;
     parent.appendChild(d);
     chat.scrollTop = chat.scrollHeight;
     return d.querySelector('.result');
@@ -411,6 +407,7 @@
     let currentResultEl = null;
     let currentToolName = null;
     let finalAnswer = '';
+    let turnMessages = [];  // tool含む完全なメッセージリスト
 
     // API履歴は最新 MAX_API_MESSAGES 件のみ送信
     const trimmedHistory = history.slice(-MAX_API_MESSAGES);
@@ -434,11 +431,21 @@
           const data = JSON.parse(line.slice(6));
           if (data.type === 'tool_start') {
             aiMsg.textContent = '';
+            finalAnswer = '';
             currentToolName = data.name;
             currentResultEl = addToolBlock(turnEl, data.name, data.args);
           } else if (data.type === 'tool_result') {
             if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
+          } else if (data.type === 'answer_chunk') {
+            if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
+            finalAnswer += data.content;
+            aiMsg.textContent = finalAnswer;
+          } else if (data.type === 'history_messages') {
+            turnMessages = data.messages;
+          } else if (data.type === 'answer_done') {
+            // ストリーム完了 (何もしない)
           } else if (data.type === 'answer') {
+            // フォールバック (後方互換)
             finalAnswer = data.content;
             aiMsg.textContent = data.content;
           }
@@ -448,9 +455,13 @@
       aiMsg.textContent = `エラー: ${e.message}`;
     }
 
-    // 履歴・ターン更新
+    // 履歴・ターン更新 (tool メッセージを含む完全な履歴を保持)
     history.push({ role: 'user', content: text });
-    history.push({ role: 'assistant', content: finalAnswer });
+    if (turnMessages.length > 0) {
+      turnMessages.forEach(m => history.push(m));
+    } else {
+      history.push({ role: 'assistant', content: finalAnswer });
+    }
     turns.push({ el: turnEl, userText: text, aiText: finalAnswer });
 
     foldOldTurns();

@@ -9,7 +9,7 @@ from openai import AzureOpenAI
 
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT
 from prompts import SYSTEM_PROMPT
-from tools.file_tools import read_file, write_file, list_files
+from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
@@ -39,7 +39,10 @@ app = FastAPI(lifespan=lifespan)
 TOOL_REGISTRY = {
     "read_file": read_file,
     "write_file": write_file,
+    "edit_file": edit_file,
     "list_files": list_files,
+    "glob_files": glob_files,
+    "grep": grep,
     "run_command": run_command,
     "web_search": web_search,
     "web_fetch": web_fetch,
@@ -76,6 +79,23 @@ TOOLS = [
                     "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "書き込みモード"},
                 },
                 "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "ファイル内の特定文字列を別の文字列に置換します。write_file より安全で効率的です。old_str は一意になるよう周辺の行を含めてください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "編集するファイルのパス (作業ディレクトリ相対)"},
+                    "old_str": {"type": "string", "description": "置換前の文字列 (ファイル内で一意になるよう十分な文脈を含めること)"},
+                    "new_str": {"type": "string", "description": "置換後の文字列"},
+                    "expected_replacements": {"type": "integer", "description": "置換が発生すべき回数 (デフォルト: 1)"},
+                },
+                "required": ["path", "old_str", "new_str"],
             },
         },
     },
@@ -160,6 +180,39 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "glob_files",
+            "description": "glob パターンでファイルパスを検索します。** を使うと再帰検索できます。例: **/*.py でPythonファイル全件取得。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "glob パターン (例: **/*.py, src/**/*.ts)"},
+                    "path": {"type": "string", "description": "検索ベースディレクトリ (デフォルト: .)"},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grep",
+            "description": "ファイル内容を正規表現で検索し、マッチした行をファイルパス・行番号付きで返します。関数の使用箇所やキーワード検索に使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "検索する正規表現パターン (例: def main, import os)"},
+                    "path": {"type": "string", "description": "検索ベースディレクトリ (デフォルト: .)"},
+                    "file_pattern": {"type": "string", "description": "対象ファイルのglobパターン (デフォルト: **/*、例: **/*.py)"},
+                    "case_sensitive": {"type": "boolean", "description": "大文字小文字を区別するか (デフォルト: true)"},
+                    "max_results": {"type": "integer", "description": "最大結果数 (デフォルト: 100)"},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "code_lint",
             "description": "コードの静的解析を実行してエラーや警告を検出します",
             "parameters": {
@@ -198,24 +251,75 @@ MAX_HISTORY_MESSAGES = 20
 def agent_stream(user_message: str, history: list):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_message}]
+    turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 
     while True:
-        response = client.chat.completions.create(
+        stream = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT,
             messages=messages,
             tools=TOOLS,
             tool_choice="auto",
+            stream=True,
         )
-        msg = response.choices[0].message
 
-        if not msg.tool_calls:
-            yield f"data: {json.dumps({'type': 'answer', 'content': msg.content})}\n\n"
+        content_parts = []
+        tool_calls_map = {}  # index -> {id, name, arguments}
+
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            # テキストチャンクをリアルタイム送信
+            if delta.content:
+                content_parts.append(delta.content)
+                yield f"data: {json.dumps({'type': 'answer_chunk', 'content': delta.content})}\n\n"
+
+            # ツール呼び出しデルタを蓄積
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_map:
+                        tool_calls_map[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc_delta.id:
+                        tool_calls_map[idx]["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tool_calls_map[idx]["name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tool_calls_map[idx]["arguments"] += tc_delta.function.arguments
+
+        # ツール呼び出しなし → 最終回答ストリーム完了
+        if not tool_calls_map:
+            final_answer = "".join(content_parts)
+            turn_messages.append({"role": "assistant", "content": final_answer})
+            yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
             break
 
-        messages.append(msg)
-        for tool_call in msg.tool_calls:
-            name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments)
+        # ツール呼び出しあり → アシスタントメッセージを履歴に追加してツール実行
+        tool_calls_list = [
+            {
+                "id": tool_calls_map[idx]["id"],
+                "type": "function",
+                "function": {
+                    "name": tool_calls_map[idx]["name"],
+                    "arguments": tool_calls_map[idx]["arguments"],
+                },
+            }
+            for idx in sorted(tool_calls_map.keys())
+        ]
+        assistant_msg = {
+            "role": "assistant",
+            "content": "".join(content_parts) or None,
+            "tool_calls": tool_calls_list,
+        }
+        messages.append(assistant_msg)
+        turn_messages.append(assistant_msg)
+
+        for tc in tool_calls_list:
+            name = tc["function"]["name"]
+            args = json.loads(tc["function"]["arguments"])
 
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
@@ -223,11 +327,13 @@ def agent_stream(user_message: str, history: list):
 
             yield f"data: {json.dumps({'type': 'tool_result', 'result': result})}\n\n"
 
-            messages.append({
+            tool_msg = {
                 "role": "tool",
-                "tool_call_id": tool_call.id,
+                "tool_call_id": tc["id"],
                 "content": result,
-            })
+            }
+            messages.append(tool_msg)
+            turn_messages.append(tool_msg)
 
 
 @app.post("/chat")

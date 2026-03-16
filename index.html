@@ -623,7 +623,7 @@
             if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
             finalAnswer += data.content;
             // <think>...</think> を非表示（Qwen CoT）
-            aiMsg.textContent = finalAnswer.replace(/<think>[\s\S]*?<\/think>\n*/g, '');
+            aiMsg.textContent = finalAnswer.replace(/<think>[\s\S]*?<\/think>\n*/g, '').replace(/<think>[\s\S]*/g, '');
           } else if (data.type === 'history_messages') {
             turnMessages = data.messages;
           } else if (data.type === 'answer_done') {

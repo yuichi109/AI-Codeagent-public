@@ -58,7 +58,7 @@
   .folded-inner { display: flex; flex-direction: column; gap: 0; }
   #input-area { display: flex; flex-direction: column; gap: 6px; padding: 10px 20px 12px; background: #181825; border-top: 1px solid #313244; }
   #input-row { display: flex; gap: 8px; align-items: center; }
-  #input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 14px; outline: none; }
+  #input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 14px; outline: none; resize: none; line-height: 1.5; max-height: 200px; overflow-y: auto; }
   #input:focus { border-color: #89b4fa; }
   #attach-btn { padding: 10px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1; }
   #attach-btn:hover { background: #585b70; }
@@ -120,11 +120,11 @@
   <div id="provider-panel-body">
     <div class="pv-group">
       <label>エンドポイントURL</label>
-      <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234" />
+      <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234></textarea>
     </div>
     <div class="pv-group">
       <label>APIキー（任意）</label>
-      <input id="pv-apikey" class="pv-input" type="password" placeholder="sk-... （LM Studioは不要）" />
+      <input id="pv-apikey" class="pv-input" type="password" placeholder="sk-... （LM Studioは不要）></textarea>
     </div>
     <button id="pv-fetch-btn" class="pv-btn" onclick="fetchProviderModels()">モデル一覧を取得</button>
     <div class="pv-group" id="pv-model-group" style="display:none">
@@ -149,7 +149,7 @@
     🦊 GitLab プロジェクト
     <button id="gitlab-panel-close" onclick="toggleGitLabPanel()">✕</button>
   </div>
-  <input id="gitlab-search" type="text" placeholder="プロジェクトを絞り込み..." oninput="filterProjects(this.value)" />
+  <input id="gitlab-search" type="text" placeholder="プロジェクトを絞り込み..." oninput="filterProjects(this.value)></textarea>
   <div id="gitlab-list">
     <div id="gitlab-status">読み込み中...</div>
   </div>
@@ -159,9 +159,9 @@
 <div id="input-area">
   <div id="image-preview-area"></div>
   <div id="input-row">
-    <input id="input" type="text" placeholder="指示を入力してください..." />
+    <textarea id="input" placeholder="指示を入力してください..." rows="1"></textarea>
     <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="画像を添付">📎</button>
-    <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)" />
+    <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)></textarea>
     <button id="send" onclick="sendMessage()">送信</button>
     <button id="stop" onclick="stopGeneration()">■ 停止</button>
   </div>
@@ -194,7 +194,8 @@
     if (abortController) abortController.abort();
   }
 
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendMessage(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; });
 
   // ---- 画像添付 ----
   function fileToBase64(file) {
@@ -659,6 +660,7 @@
     const text = input.value.trim();
     if (!text && pendingImages.length === 0) return;
     input.value = '';
+    input.style.height = 'auto';
     abortController = new AbortController();
     setGenerating(true);
 

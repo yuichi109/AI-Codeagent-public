@@ -120,11 +120,12 @@
   <div id="provider-panel-body">
     <div class="pv-group">
       <label>エンドポイントURL</label>
-      <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234></textarea>
+      <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234" list="pv-url-history">
+      <datalist id="pv-url-history"></datalist>
     </div>
     <div class="pv-group">
       <label>APIキー（任意）</label>
-      <input id="pv-apikey" class="pv-input" type="password" placeholder="sk-... （LM Studioは不要）></textarea>
+      <input id="pv-apikey" class="pv-input" type="password" placeholder="sk-... （LM Studioは不要）">
     </div>
     <button id="pv-fetch-btn" class="pv-btn" onclick="fetchProviderModels()">モデル一覧を取得</button>
     <div class="pv-group" id="pv-model-group" style="display:none">
@@ -540,11 +541,29 @@
 
   // ---- プロバイダー設定パネル ----
   let pvPanelOpen = false;
+  const PV_URL_HISTORY_KEY = 'pv_url_history';
+
+  function pvUrlHistoryLoad() {
+    try { return JSON.parse(localStorage.getItem(PV_URL_HISTORY_KEY) || '[]'); } catch { return []; }
+  }
+
+  function pvUrlHistorySave(url) {
+    if (!url) return;
+    const list = pvUrlHistoryLoad().filter(u => u !== url);
+    list.unshift(url);
+    localStorage.setItem(PV_URL_HISTORY_KEY, JSON.stringify(list.slice(0, 5)));
+  }
+
+  function pvUrlHistoryRender() {
+    const dl = document.getElementById('pv-url-history');
+    if (!dl) return;
+    dl.innerHTML = pvUrlHistoryLoad().map(u => `<option value="${escHtml(u)}">`).join('');
+  }
 
   async function toggleProviderPanel() {
     pvPanelOpen = !pvPanelOpen;
     document.getElementById('provider-panel').classList.toggle('open', pvPanelOpen);
-    if (pvPanelOpen) await loadCurrentProvider();
+    if (pvPanelOpen) { await loadCurrentProvider(); pvUrlHistoryRender(); }
   }
 
   async function loadCurrentProvider() {
@@ -611,6 +630,8 @@
       });
       const data = await res.json();
       if (data.status !== 'ok') { setPvStatus('⚠️ 設定失敗', false); return; }
+      pvUrlHistorySave(url);
+      pvUrlHistoryRender();
       updatePvCurrent(data.provider);
       setPvStatus('✓ 適用しました', true);
       if (document.getElementById('pv-reset-history').checked) {

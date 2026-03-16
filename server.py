@@ -306,9 +306,10 @@ def agent_stream(user_message: str, history: list, images: list = None):
 
 def _convert_messages_for_local(messages: list) -> list:
     """
-    ローカルモデル（LM Studio等）向けに role:tool メッセージを role:user に変換する。
-    一部モデルの Jinja テンプレートが role:tool を処理できず
-    "No user query found in messages." エラーになるため。
+    ローカルモデル（LM Studio等）向けにメッセージを変換する。
+    - role:tool → role:user に変換（Jinja テンプレートが tool ロールを処理できないモデル対応）
+    - assistant メッセージの tool_calls フィールドを除去し、テキスト表現に変換
+      （履歴に tool_calls が残っていると "No user query found in messages." エラーになるため）
     """
     result = []
     for msg in messages:
@@ -317,6 +318,15 @@ def _convert_messages_for_local(messages: list) -> list:
                 "role": "user",
                 "content": f"[Tool Result: {msg.get('tool_call_id', '')}]\n{msg['content']}",
             })
+        elif msg["role"] == "assistant" and msg.get("tool_calls"):
+            # tool_calls を除去してテキスト表現に変換
+            tool_names = ", ".join(
+                tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
+                for tc in msg["tool_calls"]
+            )
+            existing_content = msg.get("content") or ""
+            content = f"{existing_content}[ツール呼び出し: {tool_names}]".strip()
+            result.append({"role": "assistant", "content": content})
         else:
             result.append(msg)
     return result

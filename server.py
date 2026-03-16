@@ -286,15 +286,16 @@ def execute_tool(name: str, arguments: dict) -> str:
 class ChatRequest(BaseModel):
     message: str
     history: list = []
+    images: list = []  # base64 画像リスト [{data: "base64...", mime: "image/png"}, ...]
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
 MAX_HISTORY_MESSAGES = 20
 
 
-def agent_stream(user_message: str, history: list):
+def agent_stream(user_message: str, history: list, images: list = None):
     try:
-        yield from _agent_stream_inner(user_message, history)
+        yield from _agent_stream_inner(user_message, history, images or [])
     except Exception as e:
         import traceback
         err = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
@@ -303,9 +304,19 @@ def agent_stream(user_message: str, history: list):
         print(err)  # uvicornログに出力
 
 
-def _agent_stream_inner(user_message: str, history: list):
+def _agent_stream_inner(user_message: str, history: list, images: list = None):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_message}]
+    # 画像がある場合は content をリスト形式（vision API）にする
+    if images:
+        user_content = [{"type": "text", "text": user_message}]
+        for img in images:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img['mime']};base64,{img['data']}"},
+            })
+    else:
+        user_content = user_message
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 
     while True:
@@ -394,7 +405,7 @@ def _agent_stream_inner(user_message: str, history: list):
 @app.post("/chat")
 async def chat(req: ChatRequest):
     return StreamingResponse(
-        agent_stream(req.message, req.history),
+        agent_stream(req.message, req.history, req.images),
         media_type="text/event-stream",
     )
 

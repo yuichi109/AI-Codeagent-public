@@ -56,11 +56,19 @@
   .folded-turns > summary::before { content: '▸'; transition: transform 0.2s; }
   .folded-turns[open] > summary::before { content: '▾'; }
   .folded-inner { display: flex; flex-direction: column; gap: 0; }
-  #input-area { display: flex; gap: 8px; padding: 12px 20px; background: #181825; border-top: 1px solid #313244; }
+  #input-area { display: flex; flex-direction: column; gap: 6px; padding: 10px 20px 12px; background: #181825; border-top: 1px solid #313244; }
+  #input-row { display: flex; gap: 8px; align-items: center; }
   #input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 14px; outline: none; }
   #input:focus { border-color: #89b4fa; }
+  #attach-btn { padding: 10px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1; }
+  #attach-btn:hover { background: #585b70; }
   #send { padding: 10px 20px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  #image-preview-area { display: flex; gap: 8px; flex-wrap: wrap; }
+  .img-preview { position: relative; }
+  .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
+  .img-preview-del { position: absolute; top: -4px; right: -4px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; line-height: 16px; text-align: center; padding: 0; }
+  .msg-img { max-width: 200px; max-height: 200px; border-radius: 8px; margin-top: 6px; display: block; }
   /* ---- プロバイダー設定 ---- */
   #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
   #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
@@ -148,8 +156,13 @@
 
 <div id="chat"></div>
 <div id="input-area">
-  <input id="input" type="text" placeholder="指示を入力してください..." />
-  <button id="send" onclick="sendMessage()">送信</button>
+  <div id="image-preview-area"></div>
+  <div id="input-row">
+    <input id="input" type="text" placeholder="指示を入力してください..." />
+    <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="画像を添付">📎</button>
+    <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)" />
+    <button id="send" onclick="sendMessage()">送信</button>
+  </div>
 </div>
 
 <script>
@@ -161,12 +174,68 @@
   // ---- 状態 ----
   let history = [];   // API送信用 [{role, content}, ...]
   let turns   = [];   // 表示ターン管理 [{el, userText, aiText}, ...]
+  let pendingImages = [];  // 送信待ち画像 [{data, mime, url}, ...]
 
   const chat  = document.getElementById('chat');
   const input = document.getElementById('input');
   const send  = document.getElementById('send');
 
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendMessage(); });
+
+  // ---- 画像添付 ----
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const dataUrl = e.target.result;
+        const base64 = dataUrl.split(',')[1];
+        resolve({ data: base64, mime: file.type, url: dataUrl });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleFileSelect(event) {
+    for (const file of event.target.files) {
+      if (!file.type.startsWith('image/')) continue;
+      const img = await fileToBase64(file);
+      pendingImages.push(img);
+      addImagePreview(img);
+    }
+    event.target.value = '';
+  }
+
+  function addImagePreview(img) {
+    const area = document.getElementById('image-preview-area');
+    const wrap = document.createElement('div');
+    wrap.className = 'img-preview';
+    const imgEl = document.createElement('img');
+    imgEl.src = img.url;
+    const del = document.createElement('button');
+    del.className = 'img-preview-del';
+    del.textContent = '×';
+    del.onclick = () => {
+      pendingImages = pendingImages.filter(i => i !== img);
+      wrap.remove();
+    };
+    wrap.appendChild(imgEl);
+    wrap.appendChild(del);
+    area.appendChild(wrap);
+  }
+
+  // Ctrl+V でクリップボードから画像をペースト
+  document.addEventListener('paste', async e => {
+    const items = e.clipboardData?.items || [];
+    for (const item of items) {
+      if (!item.type.startsWith('image/')) continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      const img = await fileToBase64(file);
+      pendingImages.push(img);
+      addImagePreview(img);
+    }
+  });
 
   // ---- ツールアイコン ----
   const TOOL_ICONS = {
@@ -574,13 +643,25 @@
   // ---- 送信 ----
   async function sendMessage() {
     const text = input.value.trim();
-    if (!text) return;
+    if (!text && pendingImages.length === 0) return;
     input.value = '';
     send.disabled = true;
 
+    // 送信する画像を確定してプレビューエリアをクリア
+    const imagesToSend = [...pendingImages];
+    pendingImages = [];
+    document.getElementById('image-preview-area').innerHTML = '';
+
     // 新しいターンを開始
     const turnEl = createTurnEl();
-    appendMsg(turnEl, 'user', text);
+    const userMsgEl = appendMsg(turnEl, 'user', text || '(画像)');
+    // 添付画像をユーザーメッセージ内に表示
+    imagesToSend.forEach(img => {
+      const imgEl = document.createElement('img');
+      imgEl.src = img.url;
+      imgEl.className = 'msg-img';
+      userMsgEl.appendChild(imgEl);
+    });
     const aiMsg = appendMsg(turnEl, 'ai', '考え中...');
     let currentResultEl = null;
     let currentToolName = null;
@@ -594,7 +675,11 @@
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, history: trimmedHistory }),
+        body: JSON.stringify({
+          message: text || '(添付画像について教えてください)',
+          history: trimmedHistory,
+          images: imagesToSend.map(i => ({ data: i.data, mime: i.mime })),
+        }),
       });
 
       const reader  = res.body.getReader();

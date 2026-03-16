@@ -154,6 +154,12 @@ SYSTEM_PROMPT = f"""あなたは熟練したシニアエンジニアとして振
 - `web_fetch`: 特定 URL の詳細を読むとき
 - `code_lint`: Python(ruff) / JS(eslint) の品質チェック
 - `bash script.sh`: bubblewrap サンドボックスでシェルスクリプトを実行
+
+## Docker Compose のルール
+- Docker Compose を使う場合は**必ずサービス名のサブディレクトリを作成**してから配置する
+  - 例: `portainer/docker-compose.yml`, `uptime-kuma/docker-compose.yml`
+- workspace ルートに直接 `docker-compose.yml` を置いてはいけない（他サービスと混在するため）
+- `docker compose up -d` は対象ディレクトリを `work_dir` に指定して実行する
 {_gitlab_section}
 作業ディレクトリ: {ALLOWED_WORK_DIR}
 """

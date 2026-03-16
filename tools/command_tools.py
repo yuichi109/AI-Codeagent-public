@@ -11,6 +11,7 @@ ALLOWED_COMMANDS = {
     "ls", "cat", "head", "tail", "grep", "find", "echo", "pwd",
     "mkdir", "touch", "cp", "mv",
     "git",
+    "docker",
     "curl", "wget",
     "ruff", "black", "flake8", "mypy",
     "go", "cargo", "rustc",

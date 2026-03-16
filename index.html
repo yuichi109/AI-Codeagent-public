@@ -584,6 +584,8 @@
         const base = (data.url || '').replace(/\/v1$/, '');
         document.getElementById('pv-url').value = base;
         document.getElementById('pv-apikey').value = '';
+        // 現在設定済みのURLを履歴に自動追加（過去の適用分も補完に出るようにする）
+        if (base) { pvUrlHistorySave(base); pvUrlHistoryRender(); }
       }
       updatePvCurrent(data);
     } catch(e) {}

@@ -12,6 +12,7 @@ ALLOWED_COMMANDS = {
     "mkdir", "touch", "cp", "mv",
     "git",
     "docker",
+    "sudo", "apt", "apt-get",
     "curl", "wget",
     "ruff", "black", "flake8", "mypy",
     "go", "cargo", "rustc",

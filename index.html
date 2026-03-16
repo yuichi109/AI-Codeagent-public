@@ -259,6 +259,12 @@
     run_command: '⚡', web_search: '🔍', web_fetch: '🌐', web_research: '🔭', code_lint: '🔬',
   };
 
+  // ---- ユーティリティ ----
+  function stripThink(text) {
+    if (!text) return text;
+    return text.replace(/<think>[\s\S]*?<\/think>\n*/g, '').replace(/<think>[\s\S]*/g, '');
+  }
+
   // ---- localStorage ----
   function saveHistory() {
     try {
@@ -282,7 +288,7 @@
         if (u?.role === 'user' && a?.role === 'assistant') {
           const turnEl = createTurnEl();
           appendMsg(turnEl, 'user', u.content);
-          appendMsg(turnEl, 'ai',   a.content);
+          appendMsg(turnEl, 'ai', stripThink(a.content));
           turns.push({ el: turnEl, userText: u.content, aiText: a.content });
         }
       }
@@ -738,7 +744,7 @@
                 if (data.type === 'answer_chunk') {
                   if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
                   finalAnswer += data.content;
-                  aiMsg.textContent = finalAnswer.replace(/<think>[\s\S]*?<\/think>\n*/g, '').replace(/<think>[\s\S]*/g, '');
+                  aiMsg.textContent = stripThink(finalAnswer);
                 } else if (data.type === 'history_messages') {
                   turnMessages = data.messages;
                 }
@@ -766,7 +772,7 @@
             if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
             finalAnswer += data.content;
             // <think>...</think> を非表示（Qwen CoT）
-            aiMsg.textContent = finalAnswer.replace(/<think>[\s\S]*?<\/think>\n*/g, '').replace(/<think>[\s\S]*/g, '');
+            aiMsg.textContent = stripThink(finalAnswer);
           } else if (data.type === 'history_messages') {
             turnMessages = data.messages;
           } else if (data.type === 'answer_done') {

@@ -118,6 +118,16 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
   - Shift+Enter で改行、Enter で送信
   - 入力内容に応じて高さ自動リサイズ（最大200px）
 
+### その他の実装済み機能（2026-03-16 追加分）
+- [x] **sudo / docker / apt / apt-get をrun_commandホワイトリストに追加**（`tools/command_tools.py`）
+- [x] **systemd サービスファイル**（`ai-codeagent.service`）: WSL2 systemd 自動起動対応
+- [x] **URLオートコンプリート**（index.html）: LLM設定パネルのエンドポイントURL入力欄に `<datalist>` で最大5件の履歴補完
+- [x] **ローカルモデルへの tools 渡しを無効化**（server.py）: Qwen3等のJinjaテンプレートが壊れたtool_callsを生成して暴走するため。Phase 2（delegate_to_azure）で解決予定。**元に戻してはいけない**
+- [x] **`_sanitize_history()`**: トリミング後に孤立したrole:toolメッセージを除去（Azure 400対策）
+- [x] **ローリングサマリー**（server.py + index.html）: 履歴16件超で自動圧縮。`_recent_head_unsafe()` で境界を安全位置にスライド
+- [x] **SSE done:true バッファ修正**（index.html）: ストリーム終端でbuf残留データを処理してから break
+- [x] **`stripThink()` ヘルパー**（index.html）: localStorage復元時にも `<think>` タグを除去
+
 ### バグ修正
 - [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
 - [x] `work_dir` の相対パス解決: Python CWD 基準 → ALLOWED_WORK_DIR 基準に修正
@@ -237,4 +247,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-16（LLMプロバイダー切り替え・画像添付・停止ボタン・textarea・各バグ修正）
+- **最終更新**: 2026-03-16（ローリングサマリー・孤立toolメッセージ対策・sudo/docker/apt ホワイトリスト追加・systemd自動起動・URL履歴オートコンプリート・SSE done:true バッファ修正・Azure 400対策）

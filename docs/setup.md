@@ -238,6 +238,68 @@ pip install ruff
 
 ---
 
+## systemd による自動起動
+
+WSL2 で systemd が有効な場合（Ubuntu 22.04+）、サーバーを自動起動できます。
+
+### インストール
+
+```bash
+sudo cp ~/AI-Codeagent/ai-codeagent.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable ai-codeagent   # 自動起動を有効化
+sudo systemctl start ai-codeagent    # 今すぐ起動
+```
+
+### 状態確認・操作
+
+```bash
+systemctl status ai-codeagent        # 状態確認
+sudo systemctl restart ai-codeagent  # 再起動
+sudo systemctl stop ai-codeagent     # 停止
+journalctl -u ai-codeagent -f        # ログをリアルタイム表示
+```
+
+### WSL2 で systemd を有効にする方法
+
+`/etc/wsl.conf` に以下を追加して WSL2 を再起動：
+
+```ini
+[boot]
+systemd=true
+```
+
+```powershell
+# PowerShell で WSL2 を再起動
+wsl --shutdown
+```
+
+---
+
+## Docker コンテナ管理
+
+エージェントは Docker Compose でコンテナを管理できます。
+
+### ルール
+- 各サービスは `workspace/<サービス名>/docker-compose.yml` に配置
+- エージェントへの指示例: `「Portainer を workspace に作って起動して」`
+
+### Portainer（Docker 管理 Web UI）
+
+```bash
+# エージェントが自動作成・起動済みの場合
+# http://localhost:9000 でアクセス（初回は管理者アカウントを作成）
+```
+
+### 不要なイメージ・ボリュームの削除
+
+```bash
+docker system prune -a    # 未使用イメージ・コンテナをすべて削除
+docker volume prune       # 未使用ボリュームを削除
+```
+
+---
+
 ## 別 PC への移行チェックリスト
 
 - [ ] WSL2 + Ubuntu がインストールされている
@@ -248,3 +310,6 @@ pip install ruff
 - [ ] `.env` を作成して Azure の情報を設定した
 - [ ] `uvicorn server:app --reload` でサーバーが起動した
 - [ ] http://localhost:8000 でチャット画面が表示された
+- [ ] (任意) `bubblewrap` をインストールした (`sudo apt install bubblewrap`)
+- [ ] (任意) systemd サービスを登録して自動起動を設定した
+- [ ] (任意) Docker をインストールして Portainer 等のコンテナ管理 UI を起動した

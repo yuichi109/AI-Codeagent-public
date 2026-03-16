@@ -62,7 +62,7 @@ def _make_client():
         return OpenAI(
             base_url=_provider_config["url"].rstrip("/") + "/v1",
             api_key=_provider_config["api_key"] or "dummy",
-            http_client=httpx.Client(proxies={}),  # 社内プロキシをバイパス
+            http_client=httpx.Client(mounts={}),  # 社内プロキシをバイパス
         )
 
 @asynccontextmanager

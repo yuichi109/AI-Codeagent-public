@@ -64,6 +64,7 @@
   #attach-btn:hover { background: #585b70; }
   #send { padding: 10px 20px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  #stop { padding: 10px 20px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: none; }
   #image-preview-area { display: flex; gap: 8px; flex-wrap: wrap; }
   .img-preview { position: relative; }
   .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
@@ -162,6 +163,7 @@
     <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="画像を添付">📎</button>
     <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)" />
     <button id="send" onclick="sendMessage()">送信</button>
+    <button id="stop" onclick="stopGeneration()">■ 停止</button>
   </div>
 </div>
 
@@ -175,10 +177,22 @@
   let history = [];   // API送信用 [{role, content}, ...]
   let turns   = [];   // 表示ターン管理 [{el, userText, aiText}, ...]
   let pendingImages = [];  // 送信待ち画像 [{data, mime, url}, ...]
+  let abortController = null;  // 生成中断用
 
   const chat  = document.getElementById('chat');
   const input = document.getElementById('input');
   const send  = document.getElementById('send');
+  const stopBtn = document.getElementById('stop');
+
+  function setGenerating(flag) {
+    send.style.display    = flag ? 'none' : '';
+    stopBtn.style.display = flag ? '' : 'none';
+    send.disabled = flag;
+  }
+
+  function stopGeneration() {
+    if (abortController) abortController.abort();
+  }
 
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendMessage(); });
 
@@ -645,7 +659,8 @@
     const text = input.value.trim();
     if (!text && pendingImages.length === 0) return;
     input.value = '';
-    send.disabled = true;
+    abortController = new AbortController();
+    setGenerating(true);
 
     // 送信する画像を確定してプレビューエリアをクリア
     const imagesToSend = [...pendingImages];
@@ -675,6 +690,7 @@
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           message: text || '(添付画像について教えてください)',
           history: trimmedHistory,
@@ -721,7 +737,16 @@
         }
       }
     } catch(e) {
-      aiMsg.textContent = `エラー: ${e.message}`;
+      if (e.name === 'AbortError') {
+        if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
+        aiMsg.textContent += ' [停止]';
+      } else {
+        aiMsg.textContent = `エラー: ${e.message}`;
+      }
+    } finally {
+      abortController = null;
+      setGenerating(false);
+      input.focus();
     }
 
     // 履歴・ターン更新 (tool メッセージを含む完全な履歴を保持)
@@ -736,9 +761,6 @@
     foldOldTurns();
     updateTurnCount();
     saveHistory();
-
-    send.disabled = false;
-    input.focus();
   }
 
   // ---- 起動時復元 ----

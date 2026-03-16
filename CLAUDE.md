@@ -105,6 +105,18 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **ストリーミング回答**（`answer_chunk` SSE イベントで delta を逐次表示）
 - [x] **tool メッセージ履歴保持**（`history_messages` SSE イベントでターン間引き継ぎ）
 - [x] **ツール結果折りたたみ表示**（`<details>/<summary>` 形式、デフォルト非表示）
+- [x] **LLMプロバイダー切り替えパネル**（⚙️ボタン → スライドインパネル）（2026-03-16）
+  - URL入力 → `GET /providers/models` でモデル一覧取得 → ドロップダウン
+  - 適用 / Azureに戻す / 切り替え時履歴リセットオプション
+  - 現在のプロバイダー名をヘッダーに表示
+- [x] **生成中断ボタン**（■ 停止）（2026-03-16）
+  - 生成中は送信ボタンが■停止に切り替わり、`AbortController` でfetchをキャンセル
+- [x] **画像添付機能**（マルチモーダル対応）（2026-03-16）
+  - 📎ボタン or Ctrl+V でクリップボード画像を貼り付け
+  - サムネイルプレビュー表示、Vision API（`image_url` content type）でLLMに渡す
+- [x] **textarea 入力欄**（2026-03-16）
+  - Shift+Enter で改行、Enter で送信
+  - 入力内容に応じて高さ自動リサイズ（最大200px）
 
 ### バグ修正
 - [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
@@ -113,6 +125,12 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] 社内プロキシ対応（`no_proxy` / `NO_PROXY` を `.env` に追加、`load_dotenv(override=True)` で確実に適用）
 - [x] **SearXNG 自動起動**（`SEARXNG_ENABLED=true` 時、uvicorn 起動と同時に `docker compose up -d`）
 - [x] **今日の日付をシステムプロンプトに動的付与**（時事情報の検索クエリに正確な日付を使用）
+- [x] **httpx プロキシバイパス**（2026-03-16）: `trust_env=False` で社内プロキシを迂回（httpx 0.28+ で `proxies={}` 廃止 → `trust_env=False` に変更）
+- [x] **SSE JSON parse エラー修正**（2026-03-16）: `reader.read()` チャンク境界対策としてバッファリング実装
+- [x] **`<think>` タグ非表示**（2026-03-16）: Qwen の Chain-of-Thought を UI に表示しないよう 2段階 regex で除去（完結 + 未完結ブロック）
+- [x] **プロバイダー設定の永続化**（2026-03-16）: `.provider_config.json` へ保存し `--reload` 後も設定維持
+- [x] **停止ボタン表示バグ修正**（2026-03-16）: `style.display = ''` が CSS の `display:none` に戻る問題 → `'inline-block'` に変更
+- [x] **textarea onchange 属性修正**（2026-03-16）: sed による編集で閉じクォート欠落 → HTML パーサーがボタンを飲み込む問題を修正
 
 ---
 
@@ -215,4 +233,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-16（LLMプロバイダー切り替え機能 Phase 1 実装）
+- **最終更新**: 2026-03-16（LLMプロバイダー切り替え・画像添付・停止ボタン・textarea・各バグ修正）

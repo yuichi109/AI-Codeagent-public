@@ -777,6 +777,10 @@
             aiMsg.textContent = stripThink(finalAnswer);
           } else if (data.type === 'history_messages') {
             turnMessages = data.messages;
+          } else if (data.type === 'history_compressed') {
+            // ローリングサマリー: 古い履歴をサマリーで置換してlocalStorageを更新
+            history = data.messages;
+            saveHistory();
           } else if (data.type === 'answer_done') {
             // ストリーム完了 (何もしない)
           } else if (data.type === 'answer') {

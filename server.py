@@ -291,6 +291,52 @@ class ChatRequest(BaseModel):
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
 MAX_HISTORY_MESSAGES = 20
+# ローリングサマリーの設定
+SUMMARY_TRIGGER = 16   # 履歴がこの件数を超えたら圧縮
+SUMMARY_KEEP_RECENT = 4  # 圧縮後に詳細を残す直近のメッセージ数
+
+
+def _summarize_history(messages: list) -> str | None:
+    """
+    古い履歴メッセージをLLMで要約して文字列で返す。
+    失敗時は None を返す（呼び出し元でフォールバック）。
+    """
+    # tool/tool_calls メッセージはテキストに変換して要約に含める
+    lines = []
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content") or ""
+        if role == "user":
+            lines.append(f"ユーザー: {content}")
+        elif role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                names = ", ".join(
+                    tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
+                    for tc in tool_calls
+                )
+                lines.append(f"アシスタント: [ツール呼び出し: {names}] {content or ''}")
+            else:
+                lines.append(f"アシスタント: {content}")
+        elif role == "tool":
+            # ツール結果は先頭100文字だけ含める
+            lines.append(f"ツール結果: {str(content)[:100]}...")
+    conversation_text = "\n".join(lines)
+    try:
+        client = _make_client()
+        resp = client.chat.completions.create(
+            model=_provider_config["model"],
+            messages=[
+                {"role": "system", "content": "あなたは会話履歴を簡潔に要約するアシスタントです。"},
+                {"role": "user", "content":
+                    f"以下の会話履歴を、重要な決定事項・実装済みの内容・現在の状態を中心に"
+                    f"箇条書きで日本語200字以内にまとめてください。\n\n{conversation_text}"},
+            ],
+            stream=False,
+        )
+        return resp.choices[0].message.content
+    except Exception:
+        return None
 
 
 def agent_stream(user_message: str, history: list, images: list = None):
@@ -356,6 +402,19 @@ def _sanitize_history(history: list) -> list:
 def _agent_stream_inner(user_message: str, history: list, images: list = None):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
+
+    # ローリングサマリー: 古い部分を圧縮して文脈を維持
+    compressed_history = None
+    if len(trimmed) > SUMMARY_TRIGGER:
+        old_part = trimmed[:-SUMMARY_KEEP_RECENT]
+        recent_part = trimmed[-SUMMARY_KEEP_RECENT:]
+        summary = _summarize_history(old_part)
+        if summary:
+            compressed_history = [
+                {"role": "user", "content": f"[これまでの作業サマリー]\n{summary}"},
+                {"role": "assistant", "content": "了解しました。続けます。"},
+            ] + recent_part
+            trimmed = compressed_history
     # 画像がある場合は content をリスト形式（vision API）にする
     if images:
         user_content = [{"type": "text", "text": user_message}]
@@ -368,6 +427,10 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
         user_content = user_message
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
+
+    # サマリー圧縮が発生した場合はクライアントに通知（localStorage 更新のため）
+    if compressed_history is not None:
+        yield f"data: {json.dumps({'type': 'history_compressed', 'messages': compressed_history})}\n\n"
 
     is_local = _provider_config["type"] == "openai_compatible"
 

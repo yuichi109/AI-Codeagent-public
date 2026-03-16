@@ -352,13 +352,14 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
     while True:
         # ローカルモデルは role:tool を Jinja テンプレートで処理できない場合があるため変換
         send_messages = _convert_messages_for_local(messages) if is_local else messages
-        stream = _make_client().chat.completions.create(
-            model=_provider_config["model"],
-            messages=send_messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            stream=True,
-        )
+        # ローカルモデルは tools を渡さない
+        # 理由: Qwen3等が壊れた tool_calls を返して暴走するため
+        # Phase 2（ハイブリッドモード）で delegate_to_azure により構造的に解決予定
+        create_kwargs = dict(model=_provider_config["model"], messages=send_messages, stream=True)
+        if not is_local:
+            create_kwargs["tools"] = TOOLS
+            create_kwargs["tool_choice"] = "auto"
+        stream = _make_client().chat.completions.create(**create_kwargs)
 
         content_parts = []
         tool_calls_map = {}  # index -> {id, name, arguments}

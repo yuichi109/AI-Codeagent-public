@@ -18,3 +18,4 @@ workspace/
 # その他
 .DS_Store
 *.log
+.provider_config.json

@@ -24,7 +24,29 @@ _default_provider_config = {
     "api_version": AZURE_OPENAI_API_VERSION,
 }
 # 現在アクティブなプロバイダー設定（ブラウザから変更可能）
-_provider_config = dict(_default_provider_config)
+_PROVIDER_CONFIG_FILE = Path(__file__).parent / ".provider_config.json"
+
+def _load_provider_config():
+    """起動時にファイルから設定を読み込む（なければデフォルト）"""
+    if _PROVIDER_CONFIG_FILE.exists():
+        try:
+            saved = json.loads(_PROVIDER_CONFIG_FILE.read_text())
+            # 必須キーが揃っているか確認
+            if all(k in saved for k in ("type", "url", "api_key", "model", "api_version")):
+                print(f"[provider] loaded from file: {saved['type']} / {saved['model']}")
+                return saved
+        except Exception:
+            pass
+    return dict(_default_provider_config)
+
+def _save_provider_config(cfg: dict):
+    """設定をファイルに保存（reload後も維持）"""
+    try:
+        _PROVIDER_CONFIG_FILE.write_text(json.dumps(cfg))
+    except Exception as e:
+        print(f"[provider] failed to save config: {e}")
+
+_provider_config = _load_provider_config()
 
 
 def _make_client():
@@ -36,9 +58,11 @@ def _make_client():
             api_version=_provider_config["api_version"],
         )
     else:
+        import httpx
         return OpenAI(
             base_url=_provider_config["url"].rstrip("/") + "/v1",
             api_key=_provider_config["api_key"] or "dummy",
+            http_client=httpx.Client(proxies={}),  # 社内プロキシをバイパス
         )
 
 @asynccontextmanager
@@ -269,6 +293,17 @@ MAX_HISTORY_MESSAGES = 20
 
 
 def agent_stream(user_message: str, history: list):
+    try:
+        yield from _agent_stream_inner(user_message, history)
+    except Exception as e:
+        import traceback
+        err = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+        yield f"data: {json.dumps({'type': 'answer_chunk', 'content': f'エラー: {type(e).__name__}: {e}'})}\n\n"
+        yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+        print(err)  # uvicornログに出力
+
+
+def _agent_stream_inner(user_message: str, history: list):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_message}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
@@ -420,7 +455,7 @@ async def providers_models(url: str, api_key: str = ""):
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        resp = requests.get(models_url, headers=headers, timeout=5)
+        resp = requests.get(models_url, headers=headers, timeout=5, proxies={"http": None, "https": None})
         resp.raise_for_status()
         data = resp.json()
         # OpenAI互換の {"data": [{"id": "..."}, ...]} 形式
@@ -449,6 +484,7 @@ async def providers_config(req: ProviderConfigRequest):
             "model": req.model,
             "api_version": _default_provider_config["api_version"],  # Azure用（openai_compatibleでは未使用）
         }
+    _save_provider_config(_provider_config)
     return JSONResponse({"status": "ok", "provider": {
         "type": _provider_config["type"],
         "url": _provider_config["url"],

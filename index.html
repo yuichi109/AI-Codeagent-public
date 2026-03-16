@@ -622,7 +622,8 @@
           } else if (data.type === 'answer_chunk') {
             if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
             finalAnswer += data.content;
-            aiMsg.textContent = finalAnswer;
+            // <think>...</think> を非表示（Qwen CoT）
+            aiMsg.textContent = finalAnswer.replace(/<think>[\s\S]*?<\/think>\n*/g, '');
           } else if (data.type === 'history_messages') {
             turnMessages = data.messages;
           } else if (data.type === 'answer_done') {

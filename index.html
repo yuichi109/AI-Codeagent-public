@@ -161,7 +161,7 @@
   <div id="input-row">
     <textarea id="input" placeholder="指示を入力してください..." rows="1"></textarea>
     <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="画像を添付">📎</button>
-    <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)></textarea>
+    <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)">
     <button id="send" onclick="sendMessage()">送信</button>
     <button id="stop" onclick="stopGeneration()">■ 停止</button>
   </div>

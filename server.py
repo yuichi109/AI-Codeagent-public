@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT
 from prompts import SYSTEM_PROMPT
@@ -15,11 +15,31 @@ from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from pydantic import BaseModel
 
-client = AzureOpenAI(
-    azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    api_key=AZURE_OPENAI_API_KEY,
-    api_version=AZURE_OPENAI_API_VERSION,
-)
+# デフォルトのプロバイダー設定（.env のAzure設定）
+_default_provider_config = {
+    "type": "azure",
+    "url": AZURE_OPENAI_ENDPOINT,
+    "api_key": AZURE_OPENAI_API_KEY,
+    "model": AZURE_OPENAI_DEPLOYMENT,
+    "api_version": AZURE_OPENAI_API_VERSION,
+}
+# 現在アクティブなプロバイダー設定（ブラウザから変更可能）
+_provider_config = dict(_default_provider_config)
+
+
+def _make_client():
+    """現在の _provider_config に基づいてLLMクライアントを生成する"""
+    if _provider_config["type"] == "azure":
+        return AzureOpenAI(
+            azure_endpoint=_provider_config["url"],
+            api_key=_provider_config["api_key"],
+            api_version=_provider_config["api_version"],
+        )
+    else:
+        return OpenAI(
+            base_url=_provider_config["url"].rstrip("/") + "/v1",
+            api_key=_provider_config["api_key"] or "dummy",
+        )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -254,8 +274,8 @@ def agent_stream(user_message: str, history: list):
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 
     while True:
-        stream = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
+        stream = _make_client().chat.completions.create(
+            model=_provider_config["model"],
             messages=messages,
             tools=TOOLS,
             tool_choice="auto",
@@ -371,6 +391,69 @@ async def gitlab_projects():
         return JSONResponse(projects)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+class ProviderConfigRequest(BaseModel):
+    url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+
+@app.get("/providers/current")
+async def providers_current():
+    return JSONResponse({
+        "type": _provider_config["type"],
+        "url": _provider_config["url"],
+        "model": _provider_config["model"],
+    })
+
+
+@app.get("/providers/models")
+async def providers_models(url: str, api_key: str = ""):
+    """指定URLの /v1/models を叩いてモデル一覧を返す"""
+    try:
+        # URLを正規化: 末尾の /v1 を除去してから /v1/models を付ける
+        base = url.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        models_url = base + "/v1/models"
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        resp = requests.get(models_url, headers=headers, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        # OpenAI互換の {"data": [{"id": "..."}, ...]} 形式
+        if "data" in data:
+            models = [m["id"] for m in data["data"]]
+        else:
+            models = list(data.keys())
+        return JSONResponse({"models": models})
+    except Exception as e:
+        return JSONResponse({"error": f"接続失敗: {e}"}, status_code=400)
+
+
+@app.post("/providers/config")
+async def providers_config(req: ProviderConfigRequest):
+    """プロバイダー設定を更新する。urlが空の場合はAzureデフォルトに戻す"""
+    global _provider_config
+    if not req.url:
+        # Azureデフォルトにリセット
+        _provider_config = dict(_default_provider_config)
+    else:
+        provider_type = "azure" if ".openai.azure.com" in req.url else "openai_compatible"
+        _provider_config = {
+            "type": provider_type,
+            "url": req.url,
+            "api_key": req.api_key,
+            "model": req.model,
+            "api_version": _default_provider_config["api_version"],  # Azure用（openai_compatibleでは未使用）
+        }
+    return JSONResponse({"status": "ok", "provider": {
+        "type": _provider_config["type"],
+        "url": _provider_config["url"],
+        "model": _provider_config["model"],
+    }})
 
 
 @app.get("/")

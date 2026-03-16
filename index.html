@@ -61,6 +61,33 @@
   #input:focus { border-color: #89b4fa; }
   #send { padding: 10px 20px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* ---- プロバイダー設定 ---- */
+  #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
+  #provider-label { font-size: 11px; color: #89b4fa; font-weight: normal; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #provider-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
+  #provider-panel.open { transform: translateX(0); }
+  #provider-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  #provider-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
+  #provider-panel-close:hover { color: #cdd6f4; }
+  #provider-panel-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .pv-group { display: flex; flex-direction: column; gap: 4px; }
+  .pv-group label { font-size: 12px; color: #a6adc8; }
+  .pv-input { padding: 7px 10px; background: #313244; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 13px; outline: none; width: 100%; }
+  .pv-input:focus { border-color: #89b4fa; }
+  .pv-btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+  #pv-fetch-btn { background: #45475a; color: #cdd6f4; }
+  #pv-fetch-btn:hover { background: #585b70; }
+  #pv-apply-btn { background: #89b4fa; color: #1e1e2e; }
+  #pv-apply-btn:hover { background: #74c7ec; }
+  #pv-azure-btn { background: #45475a; color: #cdd6f4; }
+  #pv-azure-btn:hover { background: #f38ba8; color: #1e1e2e; }
+  .pv-actions { display: flex; gap: 8px; }
+  .pv-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a6adc8; cursor: pointer; }
+  #pv-current { font-size: 11px; color: #6c7086; border-top: 1px solid #313244; padding-top: 10px; }
+  #pv-status { font-size: 12px; min-height: 18px; }
+  .pv-ok  { color: #a6e3a1; }
+  .pv-err { color: #f38ba8; }
 </style>
 </head>
 <body>
@@ -68,8 +95,42 @@
   🤖 Azure Code Agent
   <div id="header-right">
     <span id="turn-count"></span>
+    <span id="provider-label"></span>
+    <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
     <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
+  </div>
+</div>
+
+<!-- LLMプロバイダー設定パネル -->
+<div id="provider-panel">
+  <div id="provider-panel-header">
+    ⚙️ LLMプロバイダー設定
+    <button id="provider-panel-close" onclick="toggleProviderPanel()">✕</button>
+  </div>
+  <div id="provider-panel-body">
+    <div class="pv-group">
+      <label>エンドポイントURL</label>
+      <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234" />
+    </div>
+    <div class="pv-group">
+      <label>APIキー（任意）</label>
+      <input id="pv-apikey" class="pv-input" type="password" placeholder="sk-... （LM Studioは不要）" />
+    </div>
+    <button id="pv-fetch-btn" class="pv-btn" onclick="fetchProviderModels()">モデル一覧を取得</button>
+    <div class="pv-group" id="pv-model-group" style="display:none">
+      <label>モデル</label>
+      <select id="pv-model" class="pv-input"></select>
+    </div>
+    <label class="pv-check">
+      <input type="checkbox" id="pv-reset-history"> 切り替え時に履歴をリセット
+    </label>
+    <div id="pv-status"></div>
+    <div class="pv-actions">
+      <button id="pv-apply-btn" class="pv-btn" onclick="applyProviderConfig()">適用</button>
+      <button id="pv-azure-btn" class="pv-btn" onclick="resetToAzure()">Azureに戻す</button>
+    </div>
+    <div id="pv-current"></div>
   </div>
 </div>
 
@@ -391,6 +452,123 @@
   // GitLab 設定チェック → ボタン表示
   fetch('/gitlab/projects').then(r => r.json()).then(data => {
     if (!data.error) document.getElementById('gitlab-btn').style.display = 'inline-block';
+  }).catch(() => {});
+
+  // ---- プロバイダー設定パネル ----
+  let pvPanelOpen = false;
+
+  async function toggleProviderPanel() {
+    pvPanelOpen = !pvPanelOpen;
+    document.getElementById('provider-panel').classList.toggle('open', pvPanelOpen);
+    if (pvPanelOpen) await loadCurrentProvider();
+  }
+
+  async function loadCurrentProvider() {
+    try {
+      const res = await fetch('/providers/current');
+      const data = await res.json();
+      if (data.type === 'azure') {
+        document.getElementById('pv-url').value = data.url || '';
+        document.getElementById('pv-apikey').value = '';
+      } else {
+        // openai_compatible: URLは /v1 を除いて表示
+        const base = (data.url || '').replace(/\/v1$/, '');
+        document.getElementById('pv-url').value = base;
+        document.getElementById('pv-apikey').value = '';
+      }
+      updatePvCurrent(data);
+    } catch(e) {}
+  }
+
+  function updatePvCurrent(data) {
+    document.getElementById('pv-current').textContent =
+      `現在: ${data.type === 'azure' ? 'Azure' : 'OpenAI互換'} / ${data.model || '(未設定)'}`;
+    document.getElementById('provider-label').textContent =
+      `${data.type === 'azure' ? '🔵' : '🟢'} ${shortModel(data.model)}`;
+  }
+
+  function shortModel(name) {
+    if (!name) return '';
+    return name.length > 20 ? name.slice(0, 20) + '…' : name;
+  }
+
+  async function fetchProviderModels() {
+    const url = document.getElementById('pv-url').value.trim();
+    const apikey = document.getElementById('pv-apikey').value.trim();
+    if (!url) { setPvStatus('URLを入力してください', false); return; }
+    setPvStatus('取得中...', null);
+    try {
+      const params = new URLSearchParams({ url });
+      if (apikey) params.set('api_key', apikey);
+      const res = await fetch('/providers/models?' + params);
+      const data = await res.json();
+      if (data.error) { setPvStatus('⚠️ ' + data.error, false); return; }
+      const sel = document.getElementById('pv-model');
+      sel.innerHTML = data.models.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
+      document.getElementById('pv-model-group').style.display = 'flex';
+      setPvStatus(`✓ ${data.models.length} モデルを取得`, true);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
+  async function applyProviderConfig() {
+    const url = document.getElementById('pv-url').value.trim();
+    const apikey = document.getElementById('pv-apikey').value.trim();
+    const modelSel = document.getElementById('pv-model');
+    const model = modelSel.value || modelSel.options[0]?.value || '';
+    if (!url) { setPvStatus('URLを入力してください', false); return; }
+    if (!model) { setPvStatus('モデルを選択してください', false); return; }
+    try {
+      const res = await fetch('/providers/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, api_key: apikey, model }),
+      });
+      const data = await res.json();
+      if (data.status !== 'ok') { setPvStatus('⚠️ 設定失敗', false); return; }
+      updatePvCurrent(data.provider);
+      setPvStatus('✓ 適用しました', true);
+      if (document.getElementById('pv-reset-history').checked) {
+        history = []; turns = []; localStorage.removeItem(STORAGE_KEY);
+        chat.innerHTML = ''; updateTurnCount();
+      }
+      setTimeout(() => toggleProviderPanel(), 800);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
+  async function resetToAzure() {
+    try {
+      const res = await fetch('/providers/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: '', api_key: '', model: '' }),
+      });
+      const data = await res.json();
+      updatePvCurrent(data.provider);
+      document.getElementById('pv-model-group').style.display = 'none';
+      await loadCurrentProvider();
+      setPvStatus('✓ Azureに戻しました', true);
+      if (document.getElementById('pv-reset-history').checked) {
+        history = []; turns = []; localStorage.removeItem(STORAGE_KEY);
+        chat.innerHTML = ''; updateTurnCount();
+      }
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
+  function setPvStatus(msg, ok) {
+    const el = document.getElementById('pv-status');
+    el.textContent = msg;
+    el.className = 'pv-status ' + (ok === true ? 'pv-ok' : ok === false ? 'pv-err' : '');
+  }
+
+  // 起動時にプロバイダーラベルを更新
+  fetch('/providers/current').then(r => r.json()).then(data => {
+    updatePvCurrent(data);
   }).catch(() => {});
 
   // ---- 送信 ----

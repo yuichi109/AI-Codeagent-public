@@ -304,6 +304,24 @@ def agent_stream(user_message: str, history: list, images: list = None):
         print(err)  # uvicornログに出力
 
 
+def _convert_messages_for_local(messages: list) -> list:
+    """
+    ローカルモデル（LM Studio等）向けに role:tool メッセージを role:user に変換する。
+    一部モデルの Jinja テンプレートが role:tool を処理できず
+    "No user query found in messages." エラーになるため。
+    """
+    result = []
+    for msg in messages:
+        if msg["role"] == "tool":
+            result.append({
+                "role": "user",
+                "content": f"[Tool Result: {msg.get('tool_call_id', '')}]\n{msg['content']}",
+            })
+        else:
+            result.append(msg)
+    return result
+
+
 def _agent_stream_inner(user_message: str, history: list, images: list = None):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     # 画像がある場合は content をリスト形式（vision API）にする
@@ -319,10 +337,14 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 
+    is_local = _provider_config["type"] == "openai_compatible"
+
     while True:
+        # ローカルモデルは role:tool を Jinja テンプレートで処理できない場合があるため変換
+        send_messages = _convert_messages_for_local(messages) if is_local else messages
         stream = _make_client().chat.completions.create(
             model=_provider_config["model"],
-            messages=messages,
+            messages=send_messages,
             tools=TOOLS,
             tool_choice="auto",
             stream=True,

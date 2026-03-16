@@ -332,8 +332,30 @@ def _convert_messages_for_local(messages: list) -> list:
     return result
 
 
+def _sanitize_history(history: list) -> list:
+    """
+    トリミング後に先頭に残った孤立 tool メッセージを除去する。
+    tool メッセージは直前に tool_calls を持つ assistant メッセージがないと
+    Azure OpenAI が 400 エラーを返すため。
+    """
+    # tool_call_id の集合を収集
+    valid_tool_call_ids = set()
+    for msg in history:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tid:
+                    valid_tool_call_ids.add(tid)
+    # 対応する tool_calls がない tool メッセージを除去
+    return [
+        msg for msg in history
+        if not (msg.get("role") == "tool" and msg.get("tool_call_id") not in valid_tool_call_ids)
+    ]
+
+
 def _agent_stream_inner(user_message: str, history: list, images: list = None):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
+    trimmed = _sanitize_history(trimmed)
     # 画像がある場合は content をリスト形式（vision API）にする
     if images:
         user_content = [{"type": "text", "text": user_message}]

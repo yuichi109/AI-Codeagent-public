@@ -408,6 +408,25 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
     if len(trimmed) > SUMMARY_TRIGGER:
         old_part = trimmed[:-SUMMARY_KEEP_RECENT]
         recent_part = trimmed[-SUMMARY_KEEP_RECENT:]
+        # recent_part の先頭が tool メッセージだと孤立する（直前の assistant+tool_calls が
+        # old_part に吸収されるため）。tool または assistant (tool_calls あり) が先頭に来る間は
+        # old_part から1件ずつ recent_part に移して境界を安全な位置に調整する。
+        def _recent_head_unsafe(msgs):
+            if not msgs:
+                return False
+            head = msgs[0]
+            # tool メッセージが先頭 → 直前の assistant+tool_calls が必要
+            if head.get("role") == "tool":
+                return True
+            # assistant+tool_calls が先頭 → その tool メッセージが直後に来るはずなので問題ないが
+            # tool_calls だけ残って tool メッセージが old_part 側に切れるケースを防ぐ
+            if head.get("role") == "assistant" and head.get("tool_calls"):
+                return True
+            return False
+
+        while _recent_head_unsafe(recent_part) and old_part:
+            recent_part = [old_part[-1]] + recent_part
+            old_part = old_part[:-1]
         summary = _summarize_history(old_part)
         if summary:
             compressed_history = [

@@ -131,6 +131,10 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **プロバイダー設定の永続化**（2026-03-16）: `.provider_config.json` へ保存し `--reload` 後も設定維持
 - [x] **停止ボタン表示バグ修正**（2026-03-16）: `style.display = ''` が CSS の `display:none` に戻る問題 → `'inline-block'` に変更
 - [x] **textarea onchange 属性修正**（2026-03-16）: sed による編集で閉じクォート欠落 → HTML パーサーがボタンを飲み込む問題を修正
+- [x] **ローリングサマリー実装**（2026-03-16）: 履歴16件超で古い部分をLLMが自動要約・圧縮
+  - `SUMMARY_TRIGGER=16`, `SUMMARY_KEEP_RECENT=4`
+  - `history_compressed` SSE でクライアントの localStorage も更新
+  - **既知の設計上の注意**: `recent_part` 先頭が `role:tool` / `assistant+tool_calls` になると孤立メッセージ問題が再発する。`_recent_head_unsafe()` で境界を安全な位置まで自動スライドして対策済み。将来 `SUMMARY_KEEP_RECENT` を変更する際はこの境界ロジックを壊さないよう注意。
 
 ---
 

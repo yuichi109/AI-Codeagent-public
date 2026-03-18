@@ -493,6 +493,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             })
     else:
         user_content = user_message
+    if bypass_approval and isinstance(user_content, str):
+        user_content = f"[承認バイパスON: 確認・提案なしで即実行すること]\n{user_content}"
     messages = [{"role": "system", "content": get_system_prompt(bypass_approval)}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 

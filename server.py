@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT
-from prompts import SYSTEM_PROMPT
+from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
@@ -335,6 +335,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list = []
     images: list = []  # base64 画像リスト [{data: "base64...", mime: "image/png"}, ...]
+    bypass_approval: bool = False
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
@@ -387,9 +388,9 @@ def _summarize_history(messages: list) -> str | None:
         return None
 
 
-async def agent_stream(user_message: str, history: list, images: list = None):
+async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False):
     try:
-        async for chunk in _agent_stream_inner(user_message, history, images or []):
+        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval):
             yield chunk
     except Exception as e:
         import traceback
@@ -448,7 +449,7 @@ def _sanitize_history(history: list) -> list:
     ]
 
 
-async def _agent_stream_inner(user_message: str, history: list, images: list = None):
+async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
 
@@ -493,7 +494,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             })
     else:
         user_content = user_message
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trimmed + [{"role": "user", "content": user_content}]
+    messages = [{"role": "system", "content": get_system_prompt(bypass_approval)}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 
     # サマリー圧縮が発生した場合はクライアントに通知（localStorage 更新のため）
@@ -613,7 +614,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     return StreamingResponse(
-        agent_stream(req.message, req.history, req.images),
+        agent_stream(req.message, req.history, req.images, req.bypass_approval),
         media_type="text/event-stream",
     )
 

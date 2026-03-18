@@ -72,6 +72,9 @@
   #mic-btn:hover { background: #585b70; }
   #mic-btn.recording { background: #f38ba8; color: #1e1e2e; animation: mic-pulse 1s ease-in-out infinite; }
   #mic-btn.unsupported { opacity: 0.4; cursor: not-allowed; }
+  #bypass-btn { padding: 10px 12px; background: #45475a; color: #a6adc8; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; line-height: 1; transition: background 0.2s, color 0.2s; white-space: nowrap; }
+  #bypass-btn:hover { background: #585b70; }
+  #bypass-btn.active { background: #a6e3a1; color: #1e1e2e; font-weight: bold; }
   @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(243,139,168,0.6); } 50% { box-shadow: 0 0 0 6px rgba(243,139,168,0); } }
   #send { padding: 10px 20px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -233,6 +236,7 @@
     <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="画像を添付">📎</button>
     <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)">
     <button id="mic-btn" onclick="toggleMic()" title="音声入力（日本語）">🎤</button>
+    <button id="bypass-btn" onclick="toggleBypass()" title="承認バイパス: ONにすると確認なしで即実行">🔒 承認</button>
     <button id="send" onclick="sendMessage()">送信</button>
     <button id="stop" onclick="stopGeneration()">■ 停止</button>
   </div>
@@ -350,6 +354,31 @@
     stopBtn.style.display = flag ? 'inline-block' : 'none';
     send.disabled = flag;
   }
+
+  // ---- 承認バイパストグル ----
+  function isBypassActive() {
+    return localStorage.getItem('bypassApproval') === 'true';
+  }
+  function toggleBypass() {
+    const next = !isBypassActive();
+    localStorage.setItem('bypassApproval', next);
+    updateBypassBtn();
+  }
+  function updateBypassBtn() {
+    const btn = document.getElementById('bypass-btn');
+    if (!btn) return;
+    if (isBypassActive()) {
+      btn.textContent = '🔓 承認';
+      btn.classList.add('active');
+      btn.title = '承認バイパス: ON（確認なしで即実行）';
+    } else {
+      btn.textContent = '🔒 承認';
+      btn.classList.remove('active');
+      btn.title = '承認バイパス: OFF（変更・実装前に確認あり）';
+    }
+  }
+  // 初期化
+  updateBypassBtn();
 
   function stopGeneration() {
     if (abortController) abortController.abort();
@@ -969,6 +998,7 @@
           message: text || '(添付画像について教えてください)',
           history: trimmedHistory,
           images: imagesToSend.map(i => ({ data: i.data, mime: i.mime })),
+          bypass_approval: isBypassActive(),
         }),
       });
 

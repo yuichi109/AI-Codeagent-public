@@ -19,3 +19,4 @@ workspace/
 .DS_Store
 *.log
 .provider_config.json
+.ruff_cache/

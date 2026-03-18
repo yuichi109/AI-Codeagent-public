@@ -59,6 +59,7 @@ def _make_client():
             azure_endpoint=_provider_config["url"],
             api_key=_provider_config["api_key"],
             api_version=_provider_config["api_version"],
+            http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
         )
     else:
         import httpx

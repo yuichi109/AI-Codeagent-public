@@ -31,9 +31,15 @@
   #gitlab-status { padding: 24px 16px; text-align: center; color: #6c7086; font-size: 13px; }
   #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 0; }
   .turn { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
-  .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 10px; line-height: 1.6; word-break: break-word; }
+  .msg.user { white-space: pre-wrap; }
+  .msg.ai { white-space: normal; }
   .user { align-self: flex-end; background: #89b4fa; color: #1e1e2e; }
   .ai { align-self: flex-start; background: #313244; }
+  /* ---- スピナー＋状態表示 (Claude Code スタイル) ---- */
+  .status-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; color: #6c7086; font-size: 13px; padding: 2px 4px; font-family: 'Consolas', monospace; }
+  .spinner { width: 12px; height: 12px; border: 2px solid #45475a; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .tool-block { align-self: flex-start; background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px; padding: 8px 12px; font-family: monospace; font-size: 13px; max-width: 80%; }
   .tool-block .label { color: #a6e3a1; font-size: 11px; margin-bottom: 2px; }
   .tool-block .tool-desc { color: #cba6f7; font-size: 12px; margin-bottom: 4px; font-style: italic; }
@@ -127,7 +133,26 @@
   .todo-item.in_progress .todo-text { color: #89b4fa; font-weight: bold; }
   #todo-clear-btn { margin: 0 12px 12px; padding: 6px; background: #313244; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
   #todo-clear-btn:hover { color: #f38ba8; }
+  /* ---- コードブロック (markdown レンダリング) ---- */
+  .ai pre { background: #181825; border: 1px solid #313244; border-radius: 8px; margin: 8px 0; overflow: hidden; }
+  .ai pre .code-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px; background: #11111b; border-bottom: 1px solid #313244; font-size: 11px; color: #6c7086; font-family: monospace; }
+  .ai pre code { display: block; padding: 12px 14px; overflow-x: auto; font-size: 13px; line-height: 1.6; font-family: 'Consolas', 'Courier New', monospace; background: transparent; }
+  .copy-btn { padding: 2px 8px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-size: 11px; }
+  .copy-btn:hover { background: #45475a; }
+  .copy-btn.copied { color: #a6e3a1; border-color: #a6e3a1; }
+  .ai p { margin: 4px 0; }
+  .ai ul, .ai ol { padding-left: 20px; margin: 4px 0; }
+  .ai code:not(pre code) { background: #181825; border: 1px solid #313244; border-radius: 4px; padding: 1px 5px; font-size: 12px; font-family: 'Consolas', 'Courier New', monospace; color: #f38ba8; }
+  .ai h1,.ai h2,.ai h3 { margin: 8px 0 4px; font-size: 1em; font-weight: bold; color: #89b4fa; }
+  .ai blockquote { border-left: 3px solid #45475a; margin: 4px 0; padding-left: 10px; color: #a6adc8; }
+  .ai table { border-collapse: collapse; margin: 6px 0; font-size: 13px; }
+  .ai th, .ai td { border: 1px solid #45475a; padding: 4px 8px; }
+  .ai th { background: #181825; }
+  .ai strong { color: #cba6f7; }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/catppuccin-mocha.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
 <div id="header">
@@ -214,6 +239,69 @@
 </div>
 
 <script>
+  // ---- marked + highlight.js 設定 ----
+  // marked v5+ では highlight オプション廃止 → hljs.highlightElement を手動適用
+  marked.setOptions({ breaks: true, gfm: true });
+
+  function renderMarkdown(text) {
+    const html = marked.parse(text);
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    // シンタックスハイライト適用
+    div.querySelectorAll('pre code').forEach(block => {
+      hljs.highlightElement(block);
+    });
+    // 各コードブロックにヘッダー＋コピーボタンを追加（onclick はイベント委譲で処理）
+    div.querySelectorAll('pre').forEach(pre => {
+      const code = pre.querySelector('code');
+      const lang = (code?.result?.language) || (code?.className.match(/language-(\w+)/) || [])[1] || '';
+      pre.insertAdjacentHTML('afterbegin',
+        `<div class="code-header"><span>${lang}</span><button class="copy-btn">コピー</button></div>`);
+    });
+    return div.innerHTML;
+  }
+
+  function setAiContent(el, text) {
+    el.innerHTML = renderMarkdown(text);
+  }
+
+  // ---- スピナー＋状態表示 ----
+  function createStatusLine(parent) {
+    const el = document.createElement('div');
+    el.className = 'status-line';
+    el.innerHTML = '<div class="spinner"></div><span class="status-text">Thinking...</span>';
+    parent.appendChild(el);
+    chat.scrollTop = chat.scrollHeight;
+    return el;
+  }
+
+  function updateStatusLine(el, text) {
+    if (!el || !el.isConnected) return;
+    el.querySelector('.status-text').textContent = text;
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function getToolStatusText(name, args) {
+    const path = args?.path || args?.filename || '';
+    const short = path.split('/').pop();
+    switch (name) {
+      case 'read_file':    return `Reading ${short || path}`;
+      case 'write_file':   return `Writing ${short || path}`;
+      case 'edit_file':    return `Editing ${short || path}`;
+      case 'list_files':   return `Listing ${path || 'files'}`;
+      case 'glob_files':   return `Searching files (${args?.pattern || ''})`;
+      case 'grep':         return `Searching "${args?.pattern || ''}"`;
+      case 'run_command':  return `Running: ${(args?.command || '').slice(0, 40)}`;
+      case 'web_search':   return `Searching "${(args?.query || '').slice(0, 40)}"`;
+      case 'web_fetch':    return `Fetching ${(args?.url || '').slice(0, 40)}`;
+      case 'web_research': return `Researching "${(args?.query || '').slice(0, 40)}"`;
+      case 'code_lint':    return `Linting ${short || path}`;
+      case 'todo_update':  return `Updating tasks`;
+      case 'todo_read':    return `Reading tasks`;
+      default:             return `Running ${name}`;
+    }
+  }
+
   // ---- 設定 ----
   const MAX_VISIBLE_TURNS = 5;   // これより古いターンは折りたたむ
   const MAX_API_MESSAGES  = 20;  // APIに送る最大メッセージ数 (= 10ターン分)
@@ -230,6 +318,32 @@
   const input = document.getElementById('input');
   const send  = document.getElementById('send');
   const stopBtn = document.getElementById('stop');
+
+  // コピーボタンのイベント委譲（innerHTML 再設定後もハンドラが生きる）
+  chat.addEventListener('click', e => {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    const code = btn.closest('pre')?.querySelector('code');
+    if (!code) return;
+    const text = code.innerText;
+    const done = () => {
+      btn.textContent = '✓ コピー済み';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'コピー'; btn.classList.remove('copied'); }, 2000);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    }
+  });
 
   function setGenerating(flag) {
     send.style.display    = flag ? 'none' : '';
@@ -378,7 +492,11 @@
   function appendMsg(parent, cls, text) {
     const d = document.createElement('div');
     d.className = `msg ${cls}`;
-    d.textContent = text;
+    if (cls === 'ai' && text) {
+      d.innerHTML = renderMarkdown(text);
+    } else {
+      d.textContent = text;
+    }
     parent.appendChild(d);
     chat.scrollTop = chat.scrollHeight;
     return d;
@@ -825,12 +943,11 @@
       imgEl.className = 'msg-img';
       userMsgEl.appendChild(imgEl);
     });
-    // 「考え中...」は一時表示用。ツールが来たら消え、回答は末尾に追加（Claude Code スタイル）
-    const thinkingEl = appendMsg(turnEl, 'ai', '考え中...');
+    // スピナー＋状態表示（Claude Code スタイル）
+    const statusEl = createStatusLine(turnEl);
     let aiMsg = null;
     function getOrCreateAiMsg() {
       if (!aiMsg) {
-        thinkingEl.remove();
         aiMsg = appendMsg(turnEl, 'ai', '');
       }
       return aiMsg;
@@ -870,8 +987,9 @@
               try {
                 const data = JSON.parse(line.slice(6));
                 if (data.type === 'answer_chunk') {
+                  updateStatusLine(statusEl, 'Responding...');
                   finalAnswer += data.content;
-                  getOrCreateAiMsg().textContent = stripThink(finalAnswer);
+                  setAiContent(getOrCreateAiMsg(), stripThink(finalAnswer));
                 } else if (data.type === 'history_messages') {
                   turnMessages = data.messages;
                 }
@@ -889,17 +1007,17 @@
           let data;
           try { data = JSON.parse(line.slice(6)); } catch { continue; }
           if (data.type === 'tool_start') {
-            // ツールが来たら「考え中...」を消去して tool_block をインラインに追加
-            thinkingEl.remove();
+            updateStatusLine(statusEl, getToolStatusText(data.name, data.args));
             finalAnswer = '';
             currentToolName = data.name;
             currentResultEl = addToolBlock(turnEl, data.name, data.args);
           } else if (data.type === 'tool_result') {
             if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
           } else if (data.type === 'answer_chunk') {
+            updateStatusLine(statusEl, 'Responding...');
             finalAnswer += data.content;
             // <think>...</think> を非表示（Qwen CoT）
-            getOrCreateAiMsg().textContent = stripThink(finalAnswer);
+            setAiContent(getOrCreateAiMsg(), stripThink(finalAnswer));
           } else if (data.type === 'history_messages') {
             turnMessages = data.messages;
           } else if (data.type === 'history_compressed') {
@@ -918,17 +1036,18 @@
           } else if (data.type === 'answer') {
             // フォールバック (後方互換)
             finalAnswer = data.content;
-            getOrCreateAiMsg().textContent = data.content;
+            setAiContent(getOrCreateAiMsg(), data.content);
           }
         }
       }
     } catch(e) {
       if (e.name === 'AbortError') {
-        getOrCreateAiMsg().textContent = (finalAnswer ? stripThink(finalAnswer) : '') + ' [停止]';
+        setAiContent(getOrCreateAiMsg(), (finalAnswer ? stripThink(finalAnswer) : '') + ' [停止]');
       } else {
         getOrCreateAiMsg().textContent = `エラー: ${e.message}`;
       }
     } finally {
+      statusEl.remove();
       abortController = null;
       setGenerating(false);
       input.focus();

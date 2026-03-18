@@ -77,7 +77,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 
 ### セキュリティ
 - [x] API キーを `.env` で管理（ハードコード排除）
-- [x] `shell=False` + コマンドホワイトリスト（`run_command`）
+- [x] `shell=False` + コマンドブラックリスト（`run_command`）: mkfs/fdisk/dd/shutdown等のみ拒否
 - [x] パストラバーサル防止（`_resolve_safe_path` / `Path.resolve()`）
 - [x] **bubblewrap サンドボックス**（`bash script.sh` 実行時）
   - FS 全体読み取り専用、workspace のみ書き込み可
@@ -90,7 +90,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **`edit_file`**（old_str → new_str 部分置換、件数不一致エラー検出）
 - [x] **`glob_files`**（再帰 glob パターン検索）
 - [x] **`grep`**（正規表現・行番号付き横断検索、case_sensitive / max_results オプション）
-- [x] `run_command`（ホワイトリスト + work_dir をworkspace相対で解決）
+- [x] `run_command`（ブラックリスト方式 + work_dir をworkspace相対で解決）
 - [x] `bash script.sh`（bubblewrap サンドボックス経由）
 - [x] `web_search`（SearXNG優先 → DuckDuckGo API → Wikipedia API フォールバック）
 - [x] `web_fetch`（BeautifulSoup テキスト抽出、SSRF 対策）
@@ -136,7 +136,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
   - 入力内容に応じて高さ自動リサイズ（最大200px）
 
 ### その他の実装済み機能（2026-03-16 追加分）
-- [x] **sudo / docker / apt / apt-get をrun_commandホワイトリストに追加**（`tools/command_tools.py`）
+- [x] **run_command をホワイトリスト → ブラックリスト方式に変更**（`tools/command_tools.py`）: 任意コマンド実行可、mkfs/dd/shutdown等のみ拒否（2026-03-18）
 - [x] **systemd サービスファイル**（`ai-codeagent.service`）: WSL2 systemd 自動起動対応
 - [x] **URLオートコンプリート**（index.html）: LLM設定パネルのエンドポイントURL入力欄に `<datalist>` で最大5件の履歴補完
 - [x] **ローカルモデルへの tools 渡しを無効化**（server.py）: Qwen3等のJinjaテンプレートが壊れたtool_callsを生成して暴走するため。Phase 2（delegate_to_azure）で解決予定。**元に戻してはいけない**
@@ -176,6 +176,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
   - ※ `gpt-5.1-codex-mini` は Responses API 専用のため Chat Completions ベースの現構成では使用不可
 - [x] **自律エージェント用システムプロンプト刷新**（★★★）: 行動原則・完了定義・先読み指示（2026-03-13）
 - [x] **ツール結果折りたたみ表示**（★★）: `<details>` 形式でチャット画面をすっきり保つ（2026-03-13）
+- [x] **Bash 完全アクセス**（★★★）: ホワイトリスト廃止 → ブラックリスト方式（mkfs/dd/shutdown等のみ拒否）、任意コマンド実行可（2026-03-18）
 
 ### LLMプロバイダー切り替え機能
 - [x] **Phase 1: 手動切り替え**（★★）（2026-03-16）
@@ -222,7 +223,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 
 ### セキュリティ確認
 - [ ] `read_file("../../etc/passwd")` → エラーで拒否される
-- [ ] `run_command("rm -rf /")` → ホワイトリスト拒否
+- [ ] `run_command("dd if=/dev/zero of=/dev/sda")` → ブラックリスト拒否
 - [ ] `bash -c "rm -rf /"` → 形式エラーで拒否
 - [ ] bash スクリプト内の `curl` → bubblewrap でネットワーク遮断
 
@@ -264,4 +265,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-16（ローリングサマリー・孤立toolメッセージ対策・sudo/docker/apt ホワイトリスト追加・systemd自動起動・URL履歴オートコンプリート・SSE done:true バッファ修正・Azure 400対策）
+- **最終更新**: 2026-03-18（run_command ホワイトリスト → ブラックリスト方式に変更、任意コマンド実行対応）

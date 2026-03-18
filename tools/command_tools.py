@@ -5,18 +5,15 @@ import subprocess
 from pathlib import Path
 from config import ALLOWED_WORK_DIR, COMMAND_TIMEOUT_SECONDS
 
-ALLOWED_COMMANDS = {
-    "python", "python3", "pip", "pip3",
-    "node", "npm", "npx",
-    "ls", "cat", "head", "tail", "grep", "find", "echo", "pwd",
-    "mkdir", "touch", "cp", "mv",
-    "git",
-    "docker",
-    "sudo", "apt", "apt-get",
-    "curl", "wget",
-    "ruff", "black", "flake8", "mypy",
-    "go", "cargo", "rustc",
+# 危険コマンドのブラックリスト（ホワイトリスト廃止 → ブラックリスト方式に移行）
+# rm -rf / や dd if=/dev/zero 等のシステム破壊コマンドのみ拒否
+BLOCKED_COMMANDS = {
+    "mkfs", "fdisk", "parted", "dd",
+    "shutdown", "reboot", "halt", "poweroff",
+    "init",
 }
+
+LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew"}
 
 
 def _run_bash_sandboxed(args: list) -> dict:
@@ -106,9 +103,9 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
     if base_cmd == "bash":
         return _run_bash_sandboxed(args)
 
-    if base_cmd not in ALLOWED_COMMANDS:
+    if base_cmd in BLOCKED_COMMANDS:
         return {
-            "error": f"'{base_cmd}' は許可されていません。許可コマンド: {sorted(ALLOWED_COMMANDS)}",
+            "error": f"'{base_cmd}' はシステム破壊の恐れがあるため実行できません。",
             "stdout": "", "stderr": "", "returncode": -1,
         }
 
@@ -122,8 +119,7 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
     if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
         return {"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1}
 
-    # docker pull / docker compose / apt 等は長時間かかるので専用タイムアウトを使う
-    LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn"}
+    # docker / apt 等は長時間かかるので専用タイムアウトを使う
     effective_timeout = 300 if base_cmd in LONG_RUNNING_CMDS else COMMAND_TIMEOUT_SECONDS
 
     try:

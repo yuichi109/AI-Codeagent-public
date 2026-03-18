@@ -167,7 +167,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "ホワイトリストに含まれる安全なコマンドを実行します",
+            "description": "任意のコマンドを実行します（mkfs/fdisk/dd/shutdown/reboot等のシステム破壊コマンドのみ禁止）",
             "parameters": {
                 "type": "object",
                 "properties": {

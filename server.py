@@ -62,7 +62,6 @@ def _make_client():
             http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
         )
     else:
-        import httpx
         return OpenAI(
             base_url=_provider_config["url"].rstrip("/") + "/v1",
             api_key=_provider_config["api_key"] or "dummy",

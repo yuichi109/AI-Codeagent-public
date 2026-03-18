@@ -483,15 +483,27 @@
       const data = JSON.parse(raw);
       if (!Array.isArray(data.history) || data.history.length === 0) return;
       history = data.history;
-      // UI再構築: user/assistant ペアで簡略表示
-      for (let i = 0; i + 1 < history.length; i += 2) {
-        const u = history[i], a = history[i + 1];
-        if (u?.role === 'user' && a?.role === 'assistant') {
-          const turnEl = createTurnEl();
-          appendMsg(turnEl, 'user', u.content);
-          appendMsg(turnEl, 'ai', stripThink(a.content));
-          turns.push({ el: turnEl, userText: u.content, aiText: a.content });
+      // UI再構築: user を起点に、次の user までの間で最後の assistant(content付き) を探す
+      // ツール呼び出しがあると [user, assistant(tool_calls), tool, ..., assistant(最終)] になるため
+      // i += 2 のペア方式では最終回答が取れない
+      let i = 0;
+      while (i < history.length) {
+        const u = history[i];
+        if (u?.role !== 'user') { i++; continue; }
+        // 次の user が来るまでスキャンして最後の assistant content を取得
+        let aiText = '';
+        let j = i + 1;
+        while (j < history.length && history[j]?.role !== 'user') {
+          if (history[j]?.role === 'assistant' && history[j]?.content) {
+            aiText = history[j].content;
+          }
+          j++;
         }
+        const turnEl = createTurnEl();
+        appendMsg(turnEl, 'user', u.content);
+        if (aiText) appendMsg(turnEl, 'ai', stripThink(aiText));
+        turns.push({ el: turnEl, userText: u.content, aiText });
+        i = j;
       }
       foldOldTurns();
       updateTurnCount();

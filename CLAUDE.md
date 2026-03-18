@@ -164,6 +164,9 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
   - `SUMMARY_TRIGGER=16`, `SUMMARY_KEEP_RECENT=4`
   - `history_compressed` SSE でクライアントの localStorage も更新
   - **既知の設計上の注意**: `recent_part` 先頭が `role:tool` / `assistant+tool_calls` になると孤立メッセージ問題が再発する。`_recent_head_unsafe()` で境界を安全な位置まで自動スライドして対策済み。将来 `SUMMARY_KEEP_RECENT` を変更する際はこの境界ロジックを壊さないよう注意。
+- [x] **履歴復元バグ修正**（2026-03-19）: WSL再起動後にツール呼び出しありのターンでAI回答が消える問題を修正（index.html `loadHistory()`）
+  - 原因: `i+=2` の固定ペア方式が `[user, assistant(tool_calls), tool, ..., assistant(最終)]` 構造に対応できていなかった
+  - 修正: user起点で次userまで走査し最後の assistant content を取得する方式に変更
 
 ---
 

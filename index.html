@@ -825,7 +825,16 @@
       imgEl.className = 'msg-img';
       userMsgEl.appendChild(imgEl);
     });
-    const aiMsg = appendMsg(turnEl, 'ai', '考え中...');
+    // 「考え中...」は一時表示用。ツールが来たら消え、回答は末尾に追加（Claude Code スタイル）
+    const thinkingEl = appendMsg(turnEl, 'ai', '考え中...');
+    let aiMsg = null;
+    function getOrCreateAiMsg() {
+      if (!aiMsg) {
+        thinkingEl.remove();
+        aiMsg = appendMsg(turnEl, 'ai', '');
+      }
+      return aiMsg;
+    }
     let currentResultEl = null;
     let currentToolName = null;
     let finalAnswer = '';
@@ -861,9 +870,8 @@
               try {
                 const data = JSON.parse(line.slice(6));
                 if (data.type === 'answer_chunk') {
-                  if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
                   finalAnswer += data.content;
-                  aiMsg.textContent = stripThink(finalAnswer);
+                  getOrCreateAiMsg().textContent = stripThink(finalAnswer);
                 } else if (data.type === 'history_messages') {
                   turnMessages = data.messages;
                 }
@@ -881,17 +889,17 @@
           let data;
           try { data = JSON.parse(line.slice(6)); } catch { continue; }
           if (data.type === 'tool_start') {
-            aiMsg.textContent = '';
+            // ツールが来たら「考え中...」を消去して tool_block をインラインに追加
+            thinkingEl.remove();
             finalAnswer = '';
             currentToolName = data.name;
             currentResultEl = addToolBlock(turnEl, data.name, data.args);
           } else if (data.type === 'tool_result') {
             if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
           } else if (data.type === 'answer_chunk') {
-            if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
             finalAnswer += data.content;
             // <think>...</think> を非表示（Qwen CoT）
-            aiMsg.textContent = stripThink(finalAnswer);
+            getOrCreateAiMsg().textContent = stripThink(finalAnswer);
           } else if (data.type === 'history_messages') {
             turnMessages = data.messages;
           } else if (data.type === 'history_compressed') {
@@ -910,16 +918,15 @@
           } else if (data.type === 'answer') {
             // フォールバック (後方互換)
             finalAnswer = data.content;
-            aiMsg.textContent = data.content;
+            getOrCreateAiMsg().textContent = data.content;
           }
         }
       }
     } catch(e) {
       if (e.name === 'AbortError') {
-        if (aiMsg.textContent === '考え中...') aiMsg.textContent = '';
-        aiMsg.textContent += ' [停止]';
+        getOrCreateAiMsg().textContent = (finalAnswer ? stripThink(finalAnswer) : '') + ' [停止]';
       } else {
-        aiMsg.textContent = `エラー: ${e.message}`;
+        getOrCreateAiMsg().textContent = `エラー: ${e.message}`;
       }
     } finally {
       abortController = null;

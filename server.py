@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 import requests
@@ -324,6 +325,11 @@ def execute_tool(name: str, arguments: dict) -> str:
         return json.dumps({"error": f"ツール実行エラー: {type(e).__name__}: {e}"}, ensure_ascii=False)
 
 
+async def execute_tool_async(name: str, arguments: dict) -> str:
+    """execute_tool をスレッドプールで非同期実行するラッパー"""
+    return await asyncio.to_thread(execute_tool, name, arguments)
+
+
 class ChatRequest(BaseModel):
     message: str
     history: list = []
@@ -380,9 +386,10 @@ def _summarize_history(messages: list) -> str | None:
         return None
 
 
-def agent_stream(user_message: str, history: list, images: list = None):
+async def agent_stream(user_message: str, history: list, images: list = None):
     try:
-        yield from _agent_stream_inner(user_message, history, images or [])
+        async for chunk in _agent_stream_inner(user_message, history, images or []):
+            yield chunk
     except Exception as e:
         import traceback
         err = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
@@ -440,7 +447,7 @@ def _sanitize_history(history: list) -> list:
     ]
 
 
-def _agent_stream_inner(user_message: str, history: list, images: list = None):
+async def _agent_stream_inner(user_message: str, history: list, images: list = None):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
 
@@ -565,14 +572,23 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
         messages.append(assistant_msg)
         turn_messages.append(assistant_msg)
 
-        for tc in tool_calls_list:
-            name = tc["function"]["name"]
-            args = json.loads(tc["function"]["arguments"])
+        # tool_calls を解析
+        parsed_calls = [
+            (tc["function"]["name"], json.loads(tc["function"]["arguments"]), tc["id"])
+            for tc in tool_calls_list
+        ]
 
+        # tool_start イベントを全件先に送信
+        for name, args, _ in parsed_calls:
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
-            result = execute_tool(name, args)
+        # 複数ツールを並列実行（単一でもオーバーヘッドは無視できる）
+        results = await asyncio.gather(*[
+            execute_tool_async(name, args) for name, args, _ in parsed_calls
+        ])
 
+        # 結果を順番に処理してメッセージ履歴に追加
+        for (name, args, tc_id), result in zip(parsed_calls, results):
             yield f"data: {json.dumps({'type': 'tool_result', 'result': result})}\n\n"
 
             # todo_update の場合はUIにタスクリストを即時反映
@@ -586,7 +602,7 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
 
             tool_msg = {
                 "role": "tool",
-                "tool_call_id": tc["id"],
+                "tool_call_id": tc_id,
                 "content": result,
             }
             messages.append(tool_msg)

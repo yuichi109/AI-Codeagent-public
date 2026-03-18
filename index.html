@@ -62,6 +62,11 @@
   #input:focus { border-color: #89b4fa; }
   #attach-btn { padding: 10px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1; }
   #attach-btn:hover { background: #585b70; }
+  #mic-btn { padding: 10px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1; transition: background 0.2s; }
+  #mic-btn:hover { background: #585b70; }
+  #mic-btn.recording { background: #f38ba8; color: #1e1e2e; animation: mic-pulse 1s ease-in-out infinite; }
+  #mic-btn.unsupported { opacity: 0.4; cursor: not-allowed; }
+  @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(243,139,168,0.6); } 50% { box-shadow: 0 0 0 6px rgba(243,139,168,0); } }
   #send { padding: 10px 20px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
   #stop { padding: 10px 20px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: none; }
@@ -74,6 +79,10 @@
   #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
   #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
   #provider-label { font-size: 11px; color: #89b4fa; font-weight: normal; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #token-info { font-size: 11px; color: #a6adc8; white-space: nowrap; cursor: default; }
+  #token-info span.tok-in  { color: #89dceb; }
+  #token-info span.tok-out { color: #a6e3a1; }
+  #token-info span.tok-total { color: #f9e2af; }
   #provider-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
   #provider-panel.open { transform: translateX(0); }
   #provider-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
@@ -97,6 +106,27 @@
   #pv-status { font-size: 12px; min-height: 18px; }
   .pv-ok  { color: #a6e3a1; }
   .pv-err { color: #f38ba8; }
+  /* ---- タスクパネル ---- */
+  #todo-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; position: relative; }
+  #todo-btn:hover { background: #a6e3a1; color: #1e1e2e; }
+  #todo-badge { position: absolute; top: -4px; right: -4px; background: #fab387; color: #1e1e2e; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; font-weight: bold; display: none; align-items: center; justify-content: center; }
+  #todo-panel { position: fixed; top: 44px; right: 0; width: 300px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
+  #todo-panel.open { transform: translateX(0); }
+  #todo-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  #todo-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
+  #todo-panel-close:hover { color: #cdd6f4; }
+  #todo-list { padding: 12px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; }
+  #todo-empty { color: #6c7086; font-size: 13px; text-align: center; margin-top: 24px; }
+  .todo-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4; background: #1e1e2e; border: 1px solid #313244; }
+  .todo-item.pending { opacity: 0.6; }
+  .todo-item.in_progress { border-color: #89b4fa; background: #1a1a2e; }
+  .todo-item.completed { opacity: 0.45; }
+  .todo-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+  .todo-text { flex: 1; }
+  .todo-item.completed .todo-text { text-decoration: line-through; color: #6c7086; }
+  .todo-item.in_progress .todo-text { color: #89b4fa; font-weight: bold; }
+  #todo-clear-btn { margin: 0 12px 12px; padding: 6px; background: #313244; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #todo-clear-btn:hover { color: #f38ba8; }
 </style>
 </head>
 <body>
@@ -104,9 +134,11 @@
   🤖 Azure Code Agent
   <div id="header-right">
     <span id="turn-count"></span>
+    <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
     <span id="provider-label"></span>
     <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
+    <button id="todo-btn" onclick="toggleTodoPanel()">📋 タスク<span id="todo-badge"></span></button>
     <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
   </div>
 </div>
@@ -150,10 +182,22 @@
     🦊 GitLab プロジェクト
     <button id="gitlab-panel-close" onclick="toggleGitLabPanel()">✕</button>
   </div>
-  <input id="gitlab-search" type="text" placeholder="プロジェクトを絞り込み..." oninput="filterProjects(this.value)></textarea>
+  <input id="gitlab-search" type="text" placeholder="プロジェクトを絞り込み..." oninput="filterProjects(this.value)">
   <div id="gitlab-list">
     <div id="gitlab-status">読み込み中...</div>
   </div>
+</div>
+
+<!-- タスクパネル -->
+<div id="todo-panel">
+  <div id="todo-panel-header">
+    📋 タスクリスト
+    <button id="todo-panel-close" onclick="toggleTodoPanel()">✕</button>
+  </div>
+  <div id="todo-list">
+    <div id="todo-empty">タスクなし<br><small style="color:#45475a">AIが複数ステップの作業を<br>始めると自動で表示されます</small></div>
+  </div>
+  <button id="todo-clear-btn" onclick="clearTodos()">リストをクリア</button>
 </div>
 
 <div id="chat"></div>
@@ -163,6 +207,7 @@
     <textarea id="input" placeholder="指示を入力してください..." rows="1"></textarea>
     <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="画像を添付">📎</button>
     <input id="file-input" type="file" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)">
+    <button id="mic-btn" onclick="toggleMic()" title="音声入力（日本語）">🎤</button>
     <button id="send" onclick="sendMessage()">送信</button>
     <button id="stop" onclick="stopGeneration()">■ 停止</button>
   </div>
@@ -177,6 +222,7 @@
   // ---- 状態 ----
   let history = [];   // API送信用 [{role, content}, ...]
   let turns   = [];   // 表示ターン管理 [{el, userText, aiText}, ...]
+  let tokenSession = { prompt: 0, completion: 0, total: 0 };  // セッション累計トークン
   let pendingImages = [];  // 送信待ち画像 [{data, mime, url}, ...]
   let abortController = null;  // 生成中断用
 
@@ -301,9 +347,24 @@
     if (!confirm('会話履歴をすべて削除しますか？')) return;
     history = [];
     turns   = [];
+    tokenSession = { prompt: 0, completion: 0, total: 0 };
     localStorage.removeItem(STORAGE_KEY);
     chat.innerHTML = '';
     updateTurnCount();
+    updateTokenInfo(0, 0);
+  }
+
+  function updateTokenInfo(lastPrompt, lastCompletion) {
+    const el = document.getElementById('token-info');
+    if (!el) return;
+    if (tokenSession.total === 0) { el.textContent = ''; el.title = ''; return; }
+    const fmt = n => n.toLocaleString();
+    el.innerHTML =
+      `📊 <span class="tok-in">↑${fmt(lastPrompt)}</span> <span class="tok-out">↓${fmt(lastCompletion)}</span>` +
+      ` <span class="tok-total">(累計 ${fmt(tokenSession.total)})</span>`;
+    el.title =
+      `今回: 入力 ${fmt(lastPrompt)} / 出力 ${fmt(lastCompletion)}\n` +
+      `セッション累計: 入力 ${fmt(tokenSession.prompt)} / 出力 ${fmt(tokenSession.completion)} / 合計 ${fmt(tokenSession.total)}`;
   }
 
   // ---- DOM ヘルパー ----
@@ -454,6 +515,55 @@
     el.textContent = turns.length > 0 ? `${turns.length} ターン` : '';
   }
 
+  // ---- タスクパネル ----
+  let todoPanelOpen = false;
+  let currentTodos = [];
+
+  function toggleTodoPanel() {
+    const panel = document.getElementById('todo-panel');
+    todoPanelOpen = !todoPanelOpen;
+    panel.classList.toggle('open', todoPanelOpen);
+  }
+
+  function renderTodos(todos) {
+    currentTodos = todos;
+    const listEl = document.getElementById('todo-list');
+    const emptyEl = document.getElementById('todo-empty');
+    if (!todos || todos.length === 0) {
+      emptyEl.style.display = '';
+      listEl.querySelectorAll('.todo-item').forEach(el => el.remove());
+      updateTodoBadge(0);
+      return;
+    }
+    emptyEl.style.display = 'none';
+    listEl.querySelectorAll('.todo-item').forEach(el => el.remove());
+    const icons = { pending: '⬜', in_progress: '🔄', completed: '✅' };
+    for (const t of todos) {
+      const el = document.createElement('div');
+      el.className = `todo-item ${t.status}`;
+      el.innerHTML = `<span class="todo-icon">${icons[t.status] || '⬜'}</span><span class="todo-text">${escHtml(t.content)}</span>`;
+      listEl.appendChild(el);
+    }
+    const inProgress = todos.filter(t => t.status === 'in_progress').length;
+    const pending = todos.filter(t => t.status === 'pending').length;
+    updateTodoBadge(inProgress + pending);
+  }
+
+  function updateTodoBadge(count) {
+    const badge = document.getElementById('todo-badge');
+    if (count > 0) {
+      badge.textContent = count;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  function clearTodos() {
+    currentTodos = [];
+    renderTodos([]);
+  }
+
   // ---- GitLab パネル ----
   let glProjects = [];
   let glPanelOpen = false;
@@ -462,8 +572,12 @@
     const panel = document.getElementById('gitlab-panel');
     glPanelOpen = !glPanelOpen;
     panel.classList.toggle('open', glPanelOpen);
-    if (glPanelOpen && glProjects.length === 0) {
-      await loadGitLabProjects();
+    if (glPanelOpen) {
+      if (glProjects.length > 0) {
+        renderProjects(glProjects);  // 先読み済みデータを即表示
+      } else {
+        await loadGitLabProjects();  // 未取得の場合のみfetch
+      }
     }
   }
 
@@ -540,9 +654,12 @@
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  // GitLab 設定チェック → ボタン表示
+  // GitLab 設定チェック → ボタン表示 & データ先読み
   fetch('/gitlab/projects').then(r => r.json()).then(data => {
-    if (!data.error) document.getElementById('gitlab-btn').style.display = 'inline-block';
+    if (!data.error && Array.isArray(data)) {
+      document.getElementById('gitlab-btn').style.display = 'inline-block';
+      glProjects = data;  // 先読みして保存（パネルを開いた時に即表示）
+    }
   }).catch(() => {});
 
   // ---- プロバイダー設定パネル ----
@@ -781,6 +898,13 @@
             // ローリングサマリー: 古い履歴をサマリーで置換してlocalStorageを更新
             history = data.messages;
             saveHistory();
+          } else if (data.type === 'todo_update') {
+            renderTodos(data.todos);
+          } else if (data.type === 'token_usage') {
+            tokenSession.prompt     += data.prompt;
+            tokenSession.completion += data.completion;
+            tokenSession.total      += data.total;
+            updateTokenInfo(data.prompt, data.completion);
           } else if (data.type === 'answer_done') {
             // ストリーム完了 (何もしない)
           } else if (data.type === 'answer') {
@@ -819,6 +943,96 @@
 
   // ---- 起動時復元 ----
   loadHistory();
+
+  // ---- 音声入力 (Web Speech API) ----
+  (function() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const micBtn = document.getElementById('mic-btn');
+    let recognition = null;
+    let isRecording = false;
+    let baseText = '';      // 確定済みテキスト
+    let interimText = '';   // 認識途中のテキスト
+
+    if (!SpeechRecognition) {
+      micBtn.classList.add('unsupported');
+      micBtn.title = '音声入力はこのブラウザでは未対応です（Chrome/Edgeをお使いください）';
+      micBtn.onclick = () => alert('音声入力は Chrome または Edge でのみ利用できます。');
+      return;
+    }
+
+    function buildRecognition() {
+      const r = new SpeechRecognition();
+      r.lang = 'ja-JP';
+      r.interimResults = true;   // 認識途中も表示
+      r.continuous = true;       // 手動停止まで継続認識
+
+      r.onstart = () => {
+        isRecording = true;
+        micBtn.classList.add('recording');
+        micBtn.title = 'クリックで停止';
+        const inp = document.getElementById('input');
+        baseText = inp.value;    // 既存テキストを保持
+      };
+
+      r.onresult = (e) => {
+        let interim = '';
+        let finalPart = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalPart += t;
+          else interim += t;
+        }
+        if (finalPart) {
+          baseText = (baseText ? baseText + (baseText.endsWith('\n') ? '' : '') : '') + finalPart;
+          interimText = '';
+        } else {
+          interimText = interim;
+        }
+        const inp = document.getElementById('input');
+        inp.value = baseText + interimText;
+        // textarea 高さを自動リサイズ
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 200) + 'px';
+      };
+
+      r.onerror = (e) => {
+        const msg = { 'not-allowed': 'マイクへのアクセスが拒否されました。ブラウザの設定を確認してください。',
+                      'no-speech': '音声が検出されませんでした。', 'network': 'ネットワークエラーが発生しました。' };
+        if (e.error !== 'aborted') alert(msg[e.error] || `音声認識エラー: ${e.error}`);
+        stopMic();
+      };
+
+      r.onend = () => {
+        // continuous=trueでも接続切れで終わる場合があるので、録音中なら再起動
+        if (isRecording) {
+          try { recognition.start(); } catch(_) { stopMic(); }
+        }
+      };
+      return r;
+    }
+
+    function stopMic() {
+      isRecording = false;
+      micBtn.classList.remove('recording');
+      micBtn.title = '音声入力（日本語）';
+      interimText = '';
+      if (recognition) { try { recognition.stop(); } catch(_) {} }
+      // 入力欄の末尾にフォーカス
+      const inp = document.getElementById('input');
+      inp.focus();
+      inp.setSelectionRange(inp.value.length, inp.value.length);
+    }
+
+    window.toggleMic = function() {
+      if (isRecording) {
+        stopMic();
+      } else {
+        recognition = buildRecognition();
+        try { recognition.start(); }
+        catch(e) { alert('マイクを起動できませんでした: ' + e.message); }
+      }
+    };
+  })();
 </script>
 </body>
 </html>

@@ -122,12 +122,16 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
     if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
         return {"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1}
 
+    # docker pull / docker compose / apt 等は長時間かかるので専用タイムアウトを使う
+    LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn"}
+    effective_timeout = 300 if base_cmd in LONG_RUNNING_CMDS else COMMAND_TIMEOUT_SECONDS
+
     try:
         result = subprocess.run(
             args,
             capture_output=True,
             text=True,
-            timeout=COMMAND_TIMEOUT_SECONDS,
+            timeout=effective_timeout,
             cwd=str(resolved_work_dir),
             shell=False,
         )
@@ -138,7 +142,7 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
             "error": None,
         }
     except subprocess.TimeoutExpired:
-        return {"error": f"{COMMAND_TIMEOUT_SECONDS}秒のタイムアウトを超えました", "stdout": "", "stderr": "", "returncode": -1}
+        return {"error": f"{effective_timeout}秒のタイムアウトを超えました（コマンド: {base_cmd}）。処理がまだ進行中の可能性があります。`docker ps` 等で状態を確認してください。", "stdout": "", "stderr": "", "returncode": -1}
     except FileNotFoundError:
         return {"error": f"コマンド '{args[0]}' が見つかりません", "stdout": "", "stderr": "", "returncode": -1}
     except Exception as e:

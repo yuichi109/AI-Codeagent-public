@@ -23,6 +23,23 @@ uvicorn server:app --reload
 3. GitLab PAT が有効か (`.env` の `GITLAB_PAT`)
 4. Docker が起動しているか (`docker info`)
 
+### 初回インストール・設定変更は `setup.sh` を使う
+
+```bash
+cd ~/AI-Codeagent
+
+# 初回セットアップ（venv作成・.env設定・systemd登録 等）
+./setup.sh install       # または ./setup.sh でメニュー表示
+
+# プロキシ切り替え（社内 ⇔ 社外）
+sudo ./setup.sh proxy
+
+# サービス操作
+./setup.sh service
+```
+
+> ※ 旧 `setup-proxy.sh` は `setup.sh` に統合済み（削除済み）
+
 ---
 
 ## 重要なパス

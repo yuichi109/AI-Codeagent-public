@@ -1,6 +1,7 @@
 import json
 import subprocess
 import requests
+import httpx
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -13,6 +14,7 @@ from tools.file_tools import read_file, write_file, edit_file, list_files, glob_
 from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
+from tools.todo_tools import todo_update, todo_read
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -92,6 +94,8 @@ TOOL_REGISTRY = {
     "web_fetch": web_fetch,
     "web_research": web_research,
     "code_lint": code_lint,
+    "todo_update": todo_update,
+    "todo_read": todo_read,
 }
 
 TOOLS = [
@@ -266,6 +270,43 @@ TOOLS = [
                     "code": {"type": "string", "description": "直接コードを渡す場合 (file_pathと排他)"},
                     "language": {"type": "string", "enum": ["python", "javascript", "typescript"]},
                 },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "todo_update",
+            "description": "作業タスクリストを作成・更新します。複数ステップの作業開始時にリストを作り、各ステップ完了時に status を更新してください。UIにリアルタイム表示されます。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "タスクの配列",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string", "description": "タスクの説明（命令形）例: 'server.py を編集する'"},
+                                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"], "description": "タスクの状態"},
+                            },
+                            "required": ["content", "status"],
+                        },
+                    },
+                },
+                "required": ["todos"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "todo_read",
+            "description": "現在のタスクリストを読み取ります。作業の続きを再開する際や、残タスクを確認する際に使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
                 "required": [],
             },
         },
@@ -463,12 +504,16 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
         if not is_local:
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
+            create_kwargs["stream_options"] = {"include_usage": True}  # ローカルLLMは未対応のため除外
         stream = _make_client().chat.completions.create(**create_kwargs)
 
         content_parts = []
         tool_calls_map = {}  # index -> {id, name, arguments}
 
         for chunk in stream:
+            # トークン使用量（最終chunk）
+            if chunk.usage:
+                yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens})}\n\n"
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -530,6 +575,15 @@ def _agent_stream_inner(user_message: str, history: list, images: list = None):
 
             yield f"data: {json.dumps({'type': 'tool_result', 'result': result})}\n\n"
 
+            # todo_update の場合はUIにタスクリストを即時反映
+            if name == "todo_update":
+                try:
+                    result_data = json.loads(result)
+                    if "todos" in result_data:
+                        yield f"data: {json.dumps({'type': 'todo_update', 'todos': result_data['todos']})}\n\n"
+                except Exception:
+                    pass
+
             tool_msg = {
                 "role": "tool",
                 "tool_call_id": tc["id"],
@@ -552,12 +606,12 @@ async def gitlab_projects():
     if not GITLAB_PAT:
         return JSONResponse({"error": "GITLAB_PAT が設定されていません"}, status_code=400)
     try:
-        resp = requests.get(
-            "https://gitlab.com/api/v4/projects",
-            headers={"PRIVATE-TOKEN": GITLAB_PAT},
-            params={"membership": "true", "order_by": "last_activity_at", "per_page": 50},
-            timeout=10,
-        )
+        async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+            resp = await client.get(
+                "https://gitlab.com/api/v4/projects",
+                headers={"PRIVATE-TOKEN": GITLAB_PAT},
+                params={"membership": "true", "order_by": "last_activity_at", "per_page": 50},
+            )
         resp.raise_for_status()
         projects = [
             {

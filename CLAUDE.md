@@ -153,6 +153,8 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **SearXNG 自動起動**（`SEARXNG_ENABLED=true` 時、uvicorn 起動と同時に `docker compose up -d`）
 - [x] **今日の日付をシステムプロンプトに動的付与**（時事情報の検索クエリに正確な日付を使用）
 - [x] **httpx プロキシバイパス**（2026-03-16）: `trust_env=False` で社内プロキシを迂回（httpx 0.28+ で `proxies={}` 廃止 → `trust_env=False` に変更）
+- [x] **AzureOpenAI に trust_env=False 追加**（2026-03-18）: `_make_client()` の Azure ブランチにも `http_client=httpx.Client(trust_env=False)` を追加（407修正）
+- [x] **承認バイパストグル**（2026-03-18）: 🔒/🔓ボタンで即実行モード切替。`bypass_approval` フラグを ChatRequest → agent_stream → システムプロンプト + ユーザーメッセージ先頭注入で安定化
 - [x] **SSE JSON parse エラー修正**（2026-03-16）: `reader.read()` チャンク境界対策としてバッファリング実装
 - [x] **`<think>` タグ非表示**（2026-03-16）: Qwen の Chain-of-Thought を UI に表示しないよう 2段階 regex で除去（完結 + 未完結ブロック）
 - [x] **プロバイダー設定の永続化**（2026-03-16）: `.provider_config.json` へ保存し `--reload` 後も設定維持
@@ -176,7 +178,8 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
   - ※ `gpt-5.1-codex-mini` は Responses API 専用のため Chat Completions ベースの現構成では使用不可
 - [x] **自律エージェント用システムプロンプト刷新**（★★★）: 行動原則・完了定義・先読み指示（2026-03-13）
 - [x] **ツール結果折りたたみ表示**（★★）: `<details>` 形式でチャット画面をすっきり保つ（2026-03-13）
-- [x] **Bash 完全アクセス**（★★★）: ホワイトリスト廃止 → ブラックリスト方式（mkfs/dd/shutdown等のみ拒否）、任意コマンド実行可（2026-03-18）
+- [x] **Bash 完全アクセス**（★★★）: ホワイトリスト廃止 → ブラックリスト方式（mkfs/dd/shutdown等のみ拒否）、任意コマンド実行可（2026-03-18）✅ GitLab #13 クローズ済み
+- [x] **承認バイパスボタン**（★★★）: Claude Code の「許可をバイパス」相当。🔒/🔓トグル、localStorage 永続化、システムプロンプト + メッセージ注入で安定動作（2026-03-18）
 
 ### LLMプロバイダー切り替え機能
 - [x] **Phase 1: 手動切り替え**（★★）（2026-03-16）
@@ -265,4 +268,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-18（run_command ホワイトリスト → ブラックリスト方式に変更、任意コマンド実行対応）
+- **最終更新**: 2026-03-18（#13 Bash完全アクセス・407修正・承認バイパストグル・バイパス安定化）

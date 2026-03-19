@@ -5,7 +5,7 @@ from config import ALLOWED_WORK_DIR
 PROTECTED_LIST_FILE = ALLOWED_WORK_DIR / ".protected.json"
 
 # 常に保護するエントリ（ユーザーが保護リストに書かなくても削除されない）
-ALWAYS_PROTECTED = {".protected.json", ".git"}
+ALWAYS_PROTECTED = {".protected.json", ".git", ".agent_todos.json"}
 
 
 def protected_list_read() -> dict:

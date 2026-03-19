@@ -101,6 +101,9 @@
   #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
   #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
   #provider-label { font-size: 11px; color: #89b4fa; font-weight: normal; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #model-select { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; max-width: 140px; }
+  #model-select:hover { border-color: #89b4fa; }
+  #model-select:focus { outline: none; border-color: #89b4fa; }
   #token-info { font-size: 11px; color: #a6adc8; white-space: nowrap; cursor: default; }
   #token-info span.tok-in  { color: #89dceb; }
   #token-info span.tok-out { color: #a6e3a1; }
@@ -201,6 +204,7 @@
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
     <span id="provider-label"></span>
+    <select id="model-select" title="Azureデプロイを切り替え" onchange="switchDeployment(this.value)" style="display:none"></select>
     <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
     <button id="todo-btn" onclick="toggleTodoPanel()">📋 タスク<span id="todo-badge"></span></button>
@@ -1024,6 +1028,43 @@
       `現在: ${data.type === 'azure' ? 'Azure' : 'OpenAI互換'} / ${data.model || '(未設定)'}`;
     document.getElementById('provider-label').textContent =
       `${data.type === 'azure' ? '🔵' : '🟢'} ${shortModel(data.model)}`;
+    // Azure のときだけモデル選択ドロップダウンを更新
+    const sel = document.getElementById('model-select');
+    if (data.type === 'azure' && sel.options.length > 1) {
+      sel.value = data.model;
+    }
+  }
+
+  async function loadDeployments() {
+    try {
+      const res = await fetch('/providers/deployments');
+      const data = await res.json();
+      const sel = document.getElementById('model-select');
+      sel.innerHTML = '';
+      data.deployments.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        if (d === data.current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      // 複数デプロイがある場合のみ表示
+      sel.style.display = data.deployments.length > 1 ? '' : 'none';
+    } catch(e) { /* 無視 */ }
+  }
+
+  async function switchDeployment(model) {
+    try {
+      const res = await fetch('/providers/deployment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        document.getElementById('provider-label').textContent = `🔵 ${shortModel(model)}`;
+      }
+    } catch(e) { /* 無視 */ }
   }
 
   function shortModel(name) {
@@ -1111,6 +1152,7 @@
   fetch('/providers/current').then(r => r.json()).then(data => {
     updatePvCurrent(data);
   }).catch(() => {});
+  loadDeployments();
 
   // ---- 送信 ----
   async function sendMessage() {

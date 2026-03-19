@@ -10,6 +10,13 @@ AZURE_OPENAI_ENDPOINT: str = os.environ["AZURE_OPENAI_ENDPOINT"]
 
 # オプション: デフォルト値あり
 AZURE_OPENAI_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
+# カンマ区切りで複数デプロイ名を指定可（例: gpt-5-mini,gpt-4.1）
+# 未設定時は AZURE_OPENAI_DEPLOYMENT のみ
+_deployments_raw = os.getenv("AZURE_OPENAI_DEPLOYMENTS", "")
+AZURE_OPENAI_DEPLOYMENTS: list[str] = (
+    [d.strip() for d in _deployments_raw.split(",") if d.strip()]
+    if _deployments_raw else [AZURE_OPENAI_DEPLOYMENT]
+)
 AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
 
 # 作業ディレクトリ (絶対パスに正規化)

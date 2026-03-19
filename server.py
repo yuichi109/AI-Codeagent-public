@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT, ALLOWED_WORK_DIR
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, ALLOWED_WORK_DIR
 from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
@@ -701,6 +701,30 @@ class ProviderConfigRequest(BaseModel):
     url: str = ""
     api_key: str = ""
     model: str = ""
+
+
+@app.get("/providers/deployments")
+async def providers_deployments():
+    """Azure デプロイ一覧と現在のモデルを返す"""
+    return JSONResponse({
+        "deployments": AZURE_OPENAI_DEPLOYMENTS,
+        "current": _provider_config["model"],
+    })
+
+
+class DeploymentRequest(BaseModel):
+    model: str
+
+
+@app.post("/providers/deployment")
+async def providers_set_deployment(req: DeploymentRequest):
+    """Azure デプロイ（モデル）だけを切り替える"""
+    global _provider_config
+    if req.model not in AZURE_OPENAI_DEPLOYMENTS:
+        return JSONResponse({"error": f"未登録のデプロイ: {req.model}"}, status_code=400)
+    _provider_config = {**_provider_config, "model": req.model}
+    _save_provider_config(_provider_config)
+    return JSONResponse({"status": "ok", "model": req.model})
 
 
 @app.get("/providers/current")

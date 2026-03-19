@@ -18,6 +18,7 @@ from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, workspace_cleanup_preview
+from tools.manim_tools import render_manim
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -102,6 +103,7 @@ TOOL_REGISTRY = {
     "protected_list_read": protected_list_read,
     "protected_list_update": protected_list_update,
     "workspace_cleanup_preview": workspace_cleanup_preview,
+    "render_manim": render_manim,
 }
 
 TOOLS = [
@@ -349,6 +351,23 @@ TOOLS = [
             "name": "workspace_cleanup_preview",
             "description": "ワークスペースを掃除する前の確認リストを生成します。保護リストにないファイル・ディレクトリを一覧します。実際の削除はユーザーがUIで確認した後に行われます。「ワークスペースを掃除して」と言われたらこのツールを呼んでください。",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_manim",
+            "description": "Manim コードをレンダリングして最終フレームの PNG 画像を返します。生成した画像はUIに自動表示され、LLMが視覚的にフィードバックを得て改善できます。Manim アニメーションを作成・修正する際は必ずこのツールで確認してください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Manim Python コード（直接渡す場合）"},
+                    "file_path": {"type": "string", "description": "workspace 内の .py ファイルパス（code と排他）"},
+                    "scene_name": {"type": "string", "description": "レンダリングするシーン名（省略時は自動検出）"},
+                    "quality": {"type": "string", "enum": ["l", "m", "h"], "description": "画質: l=低/高速(デフォルト), m=中, h=高"},
+                },
+                "required": [],
+            },
         },
     },
 ]
@@ -630,8 +649,9 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         ])
 
         # 結果を順番に処理してメッセージ履歴に追加
+        pending_vision_images = []  # render_manim の画像をまとめてvision messageに注入するためのキュー
         for (name, args, tc_id), result in zip(parsed_calls, results):
-            yield f"data: {json.dumps({'type': 'tool_result', 'result': result})}\n\n"
+            tool_result_for_msg = result  # LLM に渡す tool メッセージの内容
 
             # todo_update の場合はUIにタスクリストを即時反映
             if name == "todo_update":
@@ -651,13 +671,54 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 except Exception:
                     pass
 
+            # render_manim: 画像をUIに送信 + vision message 注入のためにキュー
+            if name == "render_manim":
+                try:
+                    result_data = json.loads(result)
+                    if result_data.get("rendered") and result_data.get("image_base64"):
+                        # UIに画像を表示（base64をそのまま送信）
+                        yield f"data: {json.dumps({'type': 'manim_render', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'scene': result_data.get('scene_name', '')})}\n\n"
+                        # vision message 注入用にキュー
+                        pending_vision_images.append({
+                            "base64": result_data["image_base64"],
+                            "mime": result_data.get("mime", "image/png"),
+                        })
+                        # tool message から base64 を除去（巨大なデータをLLM履歴に入れない）
+                        tool_result_for_msg = json.dumps({
+                            "rendered": True,
+                            "scene_name": result_data.get("scene_name"),
+                            "message": result_data.get("message"),
+                            "stdout": result_data.get("stdout", ""),
+                            "stderr": result_data.get("stderr", ""),
+                            "note": "レンダリング画像は次のユーザーメッセージ（vision）で提供されます",
+                        }, ensure_ascii=False)
+                except Exception:
+                    pass
+
+            yield f"data: {json.dumps({'type': 'tool_result', 'result': tool_result_for_msg})}\n\n"
+
             tool_msg = {
                 "role": "tool",
                 "tool_call_id": tc_id,
-                "content": result,
+                "content": tool_result_for_msg,
             }
             messages.append(tool_msg)
             turn_messages.append(tool_msg)
+
+        # render_manim で画像があれば vision user message を注入
+        # LLM が次のターンで画像を見て自己評価・修正できるようにする
+        if pending_vision_images:
+            vision_content = [
+                {"type": "text", "text": "以下がレンダリング結果の画像です。見た目を確認し、問題があれば改善してください。"}
+            ]
+            for img in pending_vision_images:
+                vision_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img['mime']};base64,{img['base64']}"},
+                })
+            vision_msg = {"role": "user", "content": vision_content}
+            messages.append(vision_msg)
+            turn_messages.append(vision_msg)
 
 
 @app.post("/chat")

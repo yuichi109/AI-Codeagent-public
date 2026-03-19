@@ -210,6 +210,7 @@ name: playbook
 - `bash script.sh`: bubblewrap サンドボックスでシェルスクリプトを実行
 - `todo_update`: タスクリストを作成・更新する（UIにリアルタイム表示される）
 - `todo_read`: 現在のタスクリストを確認する（作業再開時・残タスク確認時）
+- `render_manim`: **Manim アニメーション作成・修正時に必ず使う**。レンダリング結果の PNG をLLMが視覚的に確認して自己修正できる。`run_command` で manim を直接実行してはいけない。
 
 ## タスク管理ルール（複数ステップの作業時は必須）
 

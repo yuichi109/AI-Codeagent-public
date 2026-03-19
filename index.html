@@ -1253,7 +1253,7 @@
             if (!currentToolGroupEl) {
               currentToolGroupEl = document.createElement('details');
               currentToolGroupEl.className = 'tool-group';
-              currentToolGroupEl.open = true;
+              currentToolGroupEl.open = false;
               const s = document.createElement('summary');
               currentToolGroupEl.appendChild(s);
               const inner = document.createElement('div');
@@ -1264,8 +1264,11 @@
               turnEl.appendChild(currentToolGroupEl);
             }
             currentToolGroupNames.push(data.name);
-            currentToolGroupEl.querySelector('summary').textContent =
-              `🔧 ${currentToolGroupNames.length}個のツールを実行 · ${currentToolGroupNames.join(', ')}`;
+            // 同名ツールを集計して "run_command ×8" 形式で表示
+            { const c = {}; for (const n of currentToolGroupNames) c[n] = (c[n]||0)+1;
+              const parts = Object.entries(c).map(([n,v]) => v>1?`${n} ×${v}`:n).join(', ');
+              currentToolGroupEl.querySelector('summary').textContent =
+                `⚙️ ${currentToolGroupNames.length}個のツールを実行中… · ${parts}`; }
             currentResultEl = addToolBlock(currentToolGroupInnerEl, data.name, data.args);
           } else if (data.type === 'tool_result') {
             if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
@@ -1284,14 +1287,36 @@
             renderTodos(data.todos);
           } else if (data.type === 'cleanup_preview') {
             showCleanupModal(data.data);
+          } else if (data.type === 'manim_render') {
+            // Manimレンダリング結果をツールグループ内にインライン表示
+            const imgWrap = document.createElement('div');
+            imgWrap.style.cssText = 'margin: 8px 0 4px 0;';
+            const label = document.createElement('div');
+            label.style.cssText = 'font-size: 11px; color: var(--subtext0); margin-bottom: 4px;';
+            label.textContent = `🎬 ${data.scene || 'Manim'} レンダリング結果`;
+            const img = document.createElement('img');
+            img.src = `data:${data.mime};base64,${data.image}`;
+            img.alt = data.scene || 'Manim render';
+            img.style.cssText = 'max-width: 100%; max-height: 480px; border-radius: 8px; border: 1px solid var(--surface1); display: block;';
+            imgWrap.appendChild(label);
+            imgWrap.appendChild(img);
+            if (currentToolGroupInnerEl) {
+              currentToolGroupInnerEl.appendChild(imgWrap);
+            } else {
+              turnEl.appendChild(imgWrap);
+            }
           } else if (data.type === 'token_usage') {
             tokenSession.prompt     += data.prompt;
             tokenSession.completion += data.completion;
             tokenSession.total      += data.total;
             updateTokenInfo(data.prompt, data.completion);
           } else if (data.type === 'answer_done') {
-            // ツールグループを閉じる（実行完了後は折りたたむ）
+            // ツールグループを折りたたみ、サマリーを完了表示に更新
             if (currentToolGroupEl) {
+              const c = {}; for (const n of currentToolGroupNames) c[n] = (c[n]||0)+1;
+              const parts = Object.entries(c).map(([n,v]) => v>1?`${n} ×${v}`:n).join(', ');
+              currentToolGroupEl.querySelector('summary').textContent =
+                `🔧 ${currentToolGroupNames.length}個のツールを実行 · ${parts}`;
               currentToolGroupEl.open = false;
               currentToolGroupEl = null;
               currentToolGroupInnerEl = null;

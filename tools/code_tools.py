@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from config import ALLOWED_WORK_DIR
@@ -31,9 +32,25 @@ def code_lint(file_path: str = None, code: str = None, language: str = None) -> 
         return {"error": f"非対応の言語: {language}"}
 
 
+def _find_ruff() -> list:
+    """ruff コマンドを探して返す。PATH にない場合は venv / user local を試みる。"""
+    # 1. PATH 上の ruff
+    if shutil.which("ruff"):
+        return ["ruff"]
+    # 2. 現在の Python と同じ venv の bin/ruff
+    venv_ruff = Path(sys.executable).parent / "ruff"
+    if venv_ruff.exists():
+        return [str(venv_ruff)]
+    # 3. ~/.local/bin/ruff（user install）
+    local_ruff = Path.home() / ".local" / "bin" / "ruff"
+    if local_ruff.exists():
+        return [str(local_ruff)]
+    # 4. python -m ruff（インストール済みなら動く）
+    return [sys.executable, "-m", "ruff"]
+
+
 def _lint_python(file_path: str = None, code: str = None) -> dict:
-    if not shutil.which("ruff"):
-        return {"error": "ruff がインストールされていません。`pip install ruff` を実行してください"}
+    ruff_cmd = _find_ruff()
 
     tmp_path = None
     try:
@@ -49,7 +66,7 @@ def _lint_python(file_path: str = None, code: str = None) -> dict:
             target_path = str(_resolve_safe_path(file_path))
 
         result = subprocess.run(
-            ["ruff", "check", target_path, "--output-format=json"],
+            ruff_cmd + ["check", target_path, "--output-format=json"],
             capture_output=True, text=True, timeout=30, shell=False,
         )
 

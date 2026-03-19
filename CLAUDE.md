@@ -96,6 +96,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] `web_fetch`（BeautifulSoup テキスト抽出、SSRF 対策）
 - [x] `web_research`（検索→複数ページ自動取得→まとめて返す高レベルツール）
 - [x] `code_lint`（Python: ruff、JS/TS: eslint）
+- [x] **`render_manim`**（Manim コードをレンダリングして最終フレーム PNG を返す。LLM が視覚的に確認して自己修正できる）（2026-03-19）
 
 ### GitLab 連携
 - [x] `.env` に `GITLAB_PAT` / `GITLAB_USER` を設定
@@ -122,6 +123,8 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **ストリーミング回答**（`answer_chunk` SSE イベントで delta を逐次表示）
 - [x] **tool メッセージ履歴保持**（`history_messages` SSE イベントでターン間引き継ぎ）
 - [x] **ツール結果折りたたみ表示**（`<details>/<summary>` 形式、デフォルト非表示）
+- [x] **ツールグループ折りたたみ UI**（ターン内の全ツールを1行にまとめて折りたたむ。「N個のツールを実行 · run_command ×3」形式）（2026-03-19）
+- [x] **render_manim 画像インライン表示**（ツールグループ内に PNG をインライン表示）（2026-03-19）
 - [x] **LLMプロバイダー切り替えパネル**（⚙️ボタン → スライドインパネル）（2026-03-16）
   - URL入力 → `GET /providers/models` でモデル一覧取得 → ドロップダウン
   - 適用 / Azureに戻す / 切り替え時履歴リセットオプション

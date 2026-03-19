@@ -134,7 +134,10 @@ AI-Codeagent/
 │   ├── file_tools.py     # read_file / write_file / list_files
 │   ├── command_tools.py  # run_command (shell=False + ホワイトリスト)
 │   ├── web_tools.py      # web_search / web_fetch
-│   └── code_tools.py     # code_lint (ruff)
+│   ├── code_tools.py     # code_lint (ruff)
+│   ├── workspace_tools.py # protected_list / workspace_cleanup_preview
+│   ├── todo_tools.py     # todo_update / todo_read
+│   └── manim_tools.py    # render_manim（Manim アニメーション生成）
 ├── index.html         # チャット UI
 ├── workspace/         # エージェントの作業ディレクトリ (自動作成)
 ├── .env               # 環境変数 ※各自作成 (Git 管理外)
@@ -169,6 +172,34 @@ HTTPS_PROXY=http://proxy.your-company.com:8080
 ```
 
 `.env.example` にも同じ設定がテンプレートとして含まれているので参照すること。
+
+---
+
+## Manim アニメーション生成（オプション）
+
+エージェントに「アニメーションを作って」と頼むと `render_manim` ツールを使ってレンダリング結果を視覚確認しながら改善します。
+
+### 前提システムパッケージ
+
+```bash
+sudo apt install -y libcairo2-dev libpango1.0-dev ffmpeg
+```
+
+### manim のインストール
+
+```bash
+pip install manim
+```
+
+> `requirements.txt` には含まれていないため、別途インストールが必要です。
+> インストールしない場合でも他の機能は正常に動作します。
+
+### 動作確認
+
+```bash
+manim --version
+# Manim Community v0.x.x
+```
 
 ---
 
@@ -313,3 +344,4 @@ docker volume prune       # 未使用ボリュームを削除
 - [ ] (任意) `bubblewrap` をインストールした (`sudo apt install bubblewrap`)
 - [ ] (任意) systemd サービスを登録して自動起動を設定した
 - [ ] (任意) Docker をインストールして Portainer 等のコンテナ管理 UI を起動した
+- [ ] (任意) Manim をインストールした (`sudo apt install libcairo2-dev libpango1.0-dev ffmpeg && pip install manim`)

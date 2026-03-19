@@ -140,6 +140,23 @@ cmd_setup() {
         fi
     fi
 
+    # Manim チェック
+    section "Manim（アニメーション生成・オプション）"
+    if command -v manim &>/dev/null; then
+        ok "manim はインストール済みです: $(manim --version 2>&1 | head -1)"
+    else
+        warn "manim が見つかりません（render_manim ツールが動作しません）"
+        echo "  → 必要なシステムパッケージ: libcairo2-dev libpango1.0-dev ffmpeg"
+        read -rp "  今すぐインストールしますか？ [y/N]: " INSTALL_MANIM
+        if [[ "$INSTALL_MANIM" =~ ^[Yy]$ ]]; then
+            sudo apt-get install -y libcairo2-dev libpango1.0-dev ffmpeg
+            pip install manim
+            ok "manim をインストールしました"
+        else
+            info "スキップ（後で: sudo apt install libcairo2-dev libpango1.0-dev ffmpeg && pip install manim）"
+        fi
+    fi
+
     # Docker チェック
     section "Docker"
     if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then

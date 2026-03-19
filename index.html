@@ -47,7 +47,13 @@
   .status-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; color: #6c7086; font-size: 13px; padding: 2px 4px; font-family: 'Consolas', monospace; }
   .spinner { width: 12px; height: 12px; border: 2px solid #45475a; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .tool-block { align-self: flex-start; background: #181825; border: 1px solid #313244; border-left: 3px solid #a6e3a1; border-radius: 0 8px 8px 0; padding: 8px 14px; font-family: monospace; font-size: 13px; width: 100%; max-width: 100%; margin: 4px 0; }
+  .tool-group { background: #181825; border: 1px solid #313244; border-left: 3px solid #a6e3a1; border-radius: 0 8px 8px 0; margin: 4px 0; width: 100%; }
+  .tool-group > summary { padding: 7px 14px; cursor: pointer; color: #a6e3a1; font-family: monospace; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; list-style: none; user-select: none; }
+  .tool-group > summary::-webkit-details-marker { display: none; }
+  .tool-group[open] > summary::after { content: ' ▲'; font-size: 10px; }
+  .tool-group:not([open]) > summary::after { content: ' ▼'; font-size: 10px; }
+  .tool-group-inner { padding: 0 8px 8px 8px; }
+  .tool-block { align-self: flex-start; background: #1e1e2e; border: 1px solid #313244; border-radius: 6px; padding: 6px 12px; font-family: monospace; font-size: 13px; width: 100%; max-width: 100%; margin: 3px 0; }
   .tool-block .label { color: #a6e3a1; font-size: 11px; font-weight: 600; margin-bottom: 2px; letter-spacing: 0.04em; }
   .tool-block .tool-desc { color: #cba6f7; font-size: 12px; margin-bottom: 4px; font-style: italic; }
   .tool-block .args { color: #fab387; }
@@ -143,6 +149,25 @@
   .todo-item.in_progress .todo-text { color: #89b4fa; font-weight: bold; }
   #todo-clear-btn { margin: 0 12px 12px; padding: 6px; background: #313244; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
   #todo-clear-btn:hover { color: #f38ba8; }
+  /* ---- ワークスペース掃除モーダル ---- */
+  #cleanup-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; align-items: center; justify-content: center; }
+  #cleanup-overlay.open { display: flex; }
+  #cleanup-modal { background: #1e1e2e; border: 1px solid #313244; border-radius: 12px; width: 480px; max-width: 94vw; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  #cleanup-modal-header { padding: 16px 20px 12px; border-bottom: 1px solid #313244; font-size: 15px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+  #cleanup-modal-body { padding: 12px 20px; overflow-y: auto; flex: 1; }
+  #cleanup-modal-body .cleanup-summary { font-size: 13px; color: #6c7086; margin-bottom: 10px; }
+  .cleanup-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #181825; font-size: 13px; font-family: monospace; }
+  .cleanup-item input[type=checkbox] { accent-color: #f38ba8; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
+  .cleanup-item .ci-icon { font-size: 14px; }
+  .cleanup-item .ci-name { flex: 1; color: #cdd6f4; }
+  .cleanup-item .ci-size { color: #6c7086; font-size: 11px; white-space: nowrap; }
+  #cleanup-modal-footer { padding: 12px 20px; border-top: 1px solid #313244; display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+  #cleanup-cancel-btn { padding: 7px 16px; background: #313244; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #cleanup-cancel-btn:hover { background: #45475a; }
+  #cleanup-exec-btn { padding: 7px 16px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+  #cleanup-exec-btn:hover { background: #eb6f8e; }
+  #cleanup-exec-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
+  #cleanup-confirm-msg { font-size: 12px; color: #f38ba8; display: none; }
   /* ---- コードブロック (markdown レンダリング) ---- */
   .ai pre { background: #181825; border: 1px solid #313244; border-radius: 8px; margin: 8px 0; overflow: hidden; }
   .ai pre .code-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px; background: #11111b; border-bottom: 1px solid #313244; font-size: 11px; color: #6c7086; font-family: monospace; }
@@ -238,6 +263,22 @@
     <div id="todo-empty">タスクなし<br><small style="color:#45475a">AIが複数ステップの作業を<br>始めると自動で表示されます</small></div>
   </div>
   <button id="todo-clear-btn" onclick="clearTodos()">リストをクリア</button>
+</div>
+
+<!-- ワークスペース掃除 確認モーダル -->
+<div id="cleanup-overlay">
+  <div id="cleanup-modal">
+    <div id="cleanup-modal-header">🧹 ワークスペース掃除 — 削除確認</div>
+    <div id="cleanup-modal-body">
+      <div class="cleanup-summary" id="cleanup-summary-text"></div>
+      <div id="cleanup-item-list"></div>
+    </div>
+    <div id="cleanup-modal-footer">
+      <span id="cleanup-confirm-msg">⚠️ 元に戻せません。本当に削除しますか？</span>
+      <button id="cleanup-cancel-btn" onclick="closeCleanupModal()">キャンセル</button>
+      <button id="cleanup-exec-btn" onclick="handleCleanupExec()">削除実行 →</button>
+    </div>
+  </div>
 </div>
 
 <div id="chat"></div>
@@ -742,6 +783,98 @@
     renderTodos([]);
   }
 
+  // ---- ワークスペース掃除モーダル ----
+  let cleanupConfirmStep = 0;  // 0=初回, 1=二次確認待ち
+
+  function showCleanupModal(data) {
+    const overlay = document.getElementById('cleanup-overlay');
+    const summaryEl = document.getElementById('cleanup-summary-text');
+    const listEl = document.getElementById('cleanup-item-list');
+    const execBtn = document.getElementById('cleanup-exec-btn');
+    const confirmMsg = document.getElementById('cleanup-confirm-msg');
+
+    cleanupConfirmStep = 0;
+    execBtn.textContent = '削除実行 →';
+    execBtn.disabled = data.to_delete.length === 0;
+    confirmMsg.style.display = 'none';
+
+    const items = data.to_delete || [];
+    const protectedItems = data.protected || [];
+    summaryEl.textContent =
+      `削除対象: ${items.length}個 ／ 保護済み: ${protectedItems.length}個（.git 含む）`;
+
+    listEl.innerHTML = '';
+    if (items.length === 0) {
+      listEl.innerHTML = '<div style="color:#a6e3a1;padding:16px 0;text-align:center">削除対象はありません ✓</div>';
+    } else {
+      items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'cleanup-item';
+        const icon = item.type === 'dir' ? '📁' : '📄';
+        row.innerHTML =
+          `<input type="checkbox" class="cleanup-check" value="${item.name}" checked>`
+          + `<span class="ci-icon">${icon}</span>`
+          + `<span class="ci-name">${item.name}${item.type === 'dir' ? '/' : ''}</span>`
+          + `<span class="ci-size">${item.size_str}</span>`;
+        listEl.appendChild(row);
+      });
+    }
+
+    overlay.classList.add('open');
+  }
+
+  function closeCleanupModal() {
+    document.getElementById('cleanup-overlay').classList.remove('open');
+    cleanupConfirmStep = 0;
+  }
+
+  async function handleCleanupExec() {
+    const execBtn = document.getElementById('cleanup-exec-btn');
+    const confirmMsg = document.getElementById('cleanup-confirm-msg');
+
+    if (cleanupConfirmStep === 0) {
+      // 一次確認: ボタンを「本当に削除する」に変えて警告表示
+      cleanupConfirmStep = 1;
+      execBtn.textContent = '本当に削除する';
+      execBtn.style.background = '#d20f39';
+      confirmMsg.style.display = 'inline';
+      return;
+    }
+
+    // 二次確認: 実際に削除
+    const checked = [...document.querySelectorAll('.cleanup-check:checked')].map(el => el.value);
+    if (checked.length === 0) { closeCleanupModal(); return; }
+
+    execBtn.disabled = true;
+    execBtn.textContent = '削除中...';
+    try {
+      const res = await fetch('/workspace/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: checked }),
+      });
+      const result = await res.json();
+      closeCleanupModal();
+      const msg = `🧹 削除完了: ${result.deleted.length}個`
+        + (result.errors.length > 0 ? ` (エラー: ${result.errors.length}個)` : '');
+      // チャットに完了メッセージを表示
+      const el = document.createElement('div');
+      el.style.cssText = 'color:#a6e3a1;font-size:13px;padding:6px 12px;margin:4px 0;';
+      el.textContent = msg;
+      document.getElementById('chat').appendChild(el);
+      document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+    } catch(e) {
+      execBtn.disabled = false;
+      execBtn.textContent = '本当に削除する';
+      alert('削除エラー: ' + e.message);
+    }
+  }
+
+  // Esc キーでモーダルを閉じる
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeCleanupModal();
+  });
+
   // ---- GitLab パネル ----
   let glProjects = [];
   let glPanelOpen = false;
@@ -1014,6 +1147,9 @@
     }
     let currentResultEl = null;
     let currentToolName = null;
+    let currentToolGroupEl = null;      // ターン内のツールをまとめる <details>
+    let currentToolGroupInnerEl = null; // ツールブロックを入れる内側 div
+    let currentToolGroupNames = [];     // グループ内のツール名リスト
     let finalAnswer = '';
     let turnMessages = [];  // tool含む完全なメッセージリスト
 
@@ -1071,7 +1207,24 @@
             updateStatusLine(statusEl, getToolStatusText(data.name, data.args));
             finalAnswer = '';
             currentToolName = data.name;
-            currentResultEl = addToolBlock(turnEl, data.name, data.args);
+            // ツールグループを作成（ターン内の初回のみ）
+            if (!currentToolGroupEl) {
+              currentToolGroupEl = document.createElement('details');
+              currentToolGroupEl.className = 'tool-group';
+              currentToolGroupEl.open = true;
+              const s = document.createElement('summary');
+              currentToolGroupEl.appendChild(s);
+              const inner = document.createElement('div');
+              inner.className = 'tool-group-inner';
+              currentToolGroupEl.appendChild(inner);
+              currentToolGroupInnerEl = inner;
+              currentToolGroupNames = [];
+              turnEl.appendChild(currentToolGroupEl);
+            }
+            currentToolGroupNames.push(data.name);
+            currentToolGroupEl.querySelector('summary').textContent =
+              `🔧 ${currentToolGroupNames.length}個のツールを実行 · ${currentToolGroupNames.join(', ')}`;
+            currentResultEl = addToolBlock(currentToolGroupInnerEl, data.name, data.args);
           } else if (data.type === 'tool_result') {
             if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
           } else if (data.type === 'answer_chunk') {
@@ -1087,13 +1240,21 @@
             saveHistory();
           } else if (data.type === 'todo_update') {
             renderTodos(data.todos);
+          } else if (data.type === 'cleanup_preview') {
+            showCleanupModal(data.data);
           } else if (data.type === 'token_usage') {
             tokenSession.prompt     += data.prompt;
             tokenSession.completion += data.completion;
             tokenSession.total      += data.total;
             updateTokenInfo(data.prompt, data.completion);
           } else if (data.type === 'answer_done') {
-            // ストリーム完了 (何もしない)
+            // ツールグループを閉じる（実行完了後は折りたたむ）
+            if (currentToolGroupEl) {
+              currentToolGroupEl.open = false;
+              currentToolGroupEl = null;
+              currentToolGroupInnerEl = null;
+              currentToolGroupNames = [];
+            }
           } else if (data.type === 'answer') {
             // フォールバック (後方互換)
             finalAnswer = data.content;

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 import subprocess
 import requests
 import httpx
@@ -9,13 +10,14 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, SEARXNG_ENABLED, GITLAB_PAT, ALLOWED_WORK_DIR
 from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
+from tools.workspace_tools import protected_list_read, protected_list_update, workspace_cleanup_preview
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -97,6 +99,9 @@ TOOL_REGISTRY = {
     "code_lint": code_lint,
     "todo_update": todo_update,
     "todo_read": todo_read,
+    "protected_list_read": protected_list_read,
+    "protected_list_update": protected_list_update,
+    "workspace_cleanup_preview": workspace_cleanup_preview,
 }
 
 TOOLS = [
@@ -310,6 +315,40 @@ TOOLS = [
                 "properties": {},
                 "required": [],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "protected_list_read",
+            "description": "ワークスペースの保護リストを読み取ります。削除から保護するファイル・ディレクトリの一覧を返します。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "protected_list_update",
+            "description": "ワークスペースの保護リストを更新します。リストにあるファイル・ディレクトリはワークスペース掃除で削除されません。既存リストは上書きされます。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "保護するパスのリスト（workspace直下の名前。例: ['myproject/', 'important.txt', 'data/']）",
+                    },
+                },
+                "required": ["paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_cleanup_preview",
+            "description": "ワークスペースを掃除する前の確認リストを生成します。保護リストにないファイル・ディレクトリを一覧します。実際の削除はユーザーがUIで確認した後に行われます。「ワークスペースを掃除して」と言われたらこのツールを呼んでください。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
 ]
@@ -603,6 +642,15 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 except Exception:
                     pass
 
+            # workspace_cleanup_preview の場合はUIに削除確認モーダルを表示
+            if name == "workspace_cleanup_preview":
+                try:
+                    result_data = json.loads(result)
+                    if "to_delete" in result_data:
+                        yield f"data: {json.dumps({'type': 'cleanup_preview', 'data': result_data})}\n\n"
+                except Exception:
+                    pass
+
             tool_msg = {
                 "role": "tool",
                 "tool_call_id": tc_id,
@@ -711,6 +759,35 @@ async def providers_config(req: ProviderConfigRequest):
         "url": _provider_config["url"],
         "model": _provider_config["model"],
     }})
+
+
+class CleanupRequest(BaseModel):
+    paths: list
+
+
+@app.post("/workspace/cleanup")
+async def workspace_cleanup(req: CleanupRequest):
+    """保護リストにないファイル・ディレクトリを削除する"""
+    deleted = []
+    errors = []
+    for name in req.paths:
+        # パストラバーサル防止
+        target = (ALLOWED_WORK_DIR / name).resolve()
+        if not str(target).startswith(str(ALLOWED_WORK_DIR)):
+            errors.append({"name": name, "error": "パストラバーサル検出"})
+            continue
+        if not target.exists():
+            errors.append({"name": name, "error": "存在しない"})
+            continue
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            deleted.append(name)
+        except Exception as e:
+            errors.append({"name": name, "error": str(e)})
+    return JSONResponse({"deleted": deleted, "errors": errors})
 
 
 @app.get("/")

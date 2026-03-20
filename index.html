@@ -234,6 +234,9 @@
       <select id="pv-model" class="pv-input"></select>
     </div>
     <label class="pv-check">
+      <input type="checkbox" id="pv-tools-enabled"> ツールを渡す（Function Calling）
+    </label>
+    <label class="pv-check">
       <input type="checkbox" id="pv-reset-history"> 切り替え時に履歴をリセット
     </label>
     <div id="pv-status"></div>
@@ -1019,6 +1022,8 @@
         // 現在設定済みのURLを履歴に自動追加（過去の適用分も補完に出るようにする）
         if (base) { pvUrlHistorySave(base); pvUrlHistoryRender(); }
       }
+      // ツールトグルを現在の設定に同期
+      document.getElementById('pv-tools-enabled').checked = data.tools_enabled !== false;
       updatePvCurrent(data);
     } catch(e) {}
   }
@@ -1086,6 +1091,9 @@
       const sel = document.getElementById('pv-model');
       sel.innerHTML = data.models.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
       document.getElementById('pv-model-group').style.display = 'flex';
+      // ローカルモデル取得時はツールをデフォルトOFF（Azure URLでなければローカル扱い）
+      const isAzureUrl = url.includes('.openai.azure.com');
+      if (!isAzureUrl) document.getElementById('pv-tools-enabled').checked = false;
       setPvStatus(`✓ ${data.models.length} モデルを取得`, true);
     } catch(e) {
       setPvStatus('⚠️ ' + e.message, false);
@@ -1097,13 +1105,14 @@
     const apikey = document.getElementById('pv-apikey').value.trim();
     const modelSel = document.getElementById('pv-model');
     const model = modelSel.value || modelSel.options[0]?.value || '';
+    const tools_enabled = document.getElementById('pv-tools-enabled').checked;
     if (!url) { setPvStatus('URLを入力してください', false); return; }
     if (!model) { setPvStatus('モデルを選択してください', false); return; }
     try {
       const res = await fetch('/providers/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, api_key: apikey, model }),
+        body: JSON.stringify({ url, api_key: apikey, model, tools_enabled }),
       });
       const data = await res.json();
       if (data.status !== 'ok') { setPvStatus('⚠️ 設定失敗', false); return; }

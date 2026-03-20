@@ -28,6 +28,7 @@ _default_provider_config = {
     "api_key": AZURE_OPENAI_API_KEY,
     "model": AZURE_OPENAI_DEPLOYMENT,
     "api_version": AZURE_OPENAI_API_VERSION,
+    "tools_enabled": True,
 }
 # 現在アクティブなプロバイダー設定（ブラウザから変更可能）
 _PROVIDER_CONFIG_FILE = Path(__file__).parent / ".provider_config.json"
@@ -39,7 +40,10 @@ def _load_provider_config():
             saved = json.loads(_PROVIDER_CONFIG_FILE.read_text())
             # 必須キーが揃っているか確認
             if all(k in saved for k in ("type", "url", "api_key", "model", "api_version")):
-                print(f"[provider] loaded from file: {saved['type']} / {saved['model']}")
+                # tools_enabled は旧ファイルにない場合でも補完（後方互換）
+                if "tools_enabled" not in saved:
+                    saved["tools_enabled"] = saved["type"] == "azure"
+                print(f"[provider] loaded from file: {saved['type']} / {saved['model']} / tools={saved['tools_enabled']}")
                 return saved
         except Exception:
             pass
@@ -561,17 +565,19 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         yield f"data: {json.dumps({'type': 'history_compressed', 'messages': compressed_history})}\n\n"
 
     is_local = _provider_config["type"] == "openai_compatible"
+    tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
     while True:
         # ローカルモデルは role:tool を Jinja テンプレートで処理できない場合があるため変換
-        send_messages = _convert_messages_for_local(messages) if is_local else messages
-        # ローカルモデルは tools を渡さない
-        # 理由: Qwen3等が壊れた tool_calls を返して暴走するため
-        # Phase 2（ハイブリッドモード）で delegate_to_azure により構造的に解決予定
+        send_messages = _convert_messages_for_local(messages) if (is_local and not tools_enabled) else messages
+        # tools_enabled=False 時はツールを渡さない（ローカルモデルのデフォルト）
+        # tools_enabled=True に手動設定した場合はローカルモデルでもツールを渡す
+        # ⚠️ ローカルモデルへのtools渡しは慎重に: Qwen3等はJinjaテンプレート問題で暴走する場合がある
         create_kwargs = dict(model=_provider_config["model"], messages=send_messages, stream=True)
-        if not is_local:
+        if tools_enabled:
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
+        if not is_local:
             create_kwargs["stream_options"] = {"include_usage": True}  # ローカルLLMは未対応のため除外
         stream = _make_client().chat.completions.create(**create_kwargs)
 
@@ -762,6 +768,7 @@ class ProviderConfigRequest(BaseModel):
     url: str = ""
     api_key: str = ""
     model: str = ""
+    tools_enabled: bool | None = None  # None=自動判定（Azure→True, ローカル→False）
 
 
 @app.get("/providers/deployments")
@@ -794,6 +801,7 @@ async def providers_current():
         "type": _provider_config["type"],
         "url": _provider_config["url"],
         "model": _provider_config["model"],
+        "tools_enabled": _provider_config.get("tools_enabled", True),
     })
 
 
@@ -831,18 +839,22 @@ async def providers_config(req: ProviderConfigRequest):
         _provider_config = dict(_default_provider_config)
     else:
         provider_type = "azure" if ".openai.azure.com" in req.url else "openai_compatible"
+        # tools_enabled: 明示指定があればそれを使う。なければ Azure→True, ローカル→False
+        tools_enabled = req.tools_enabled if req.tools_enabled is not None else (provider_type == "azure")
         _provider_config = {
             "type": provider_type,
             "url": req.url,
             "api_key": req.api_key,
             "model": req.model,
             "api_version": _default_provider_config["api_version"],  # Azure用（openai_compatibleでは未使用）
+            "tools_enabled": tools_enabled,
         }
     _save_provider_config(_provider_config)
     return JSONResponse({"status": "ok", "provider": {
         "type": _provider_config["type"],
         "url": _provider_config["url"],
         "model": _provider_config["model"],
+        "tools_enabled": _provider_config.get("tools_enabled", True),
     }})
 
 

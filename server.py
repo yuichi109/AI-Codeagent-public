@@ -449,6 +449,66 @@ def _summarize_history(messages: list) -> str | None:
         return None
 
 
+def _gather_auto_context() -> str:
+    """workspace内のgit状態を自動収集する（Claude Code方式）"""
+    parts = []
+
+    # ワークスペース直下のgitリポジトリを探して状態を収集
+    git_infos = []
+    try:
+        for p in sorted(ALLOWED_WORK_DIR.iterdir()):
+            if not p.is_dir() or p.name.startswith('.'):
+                continue
+            git_dir = p / ".git"
+            if not git_dir.exists():
+                continue
+            info_lines = [f"[{p.name}]"]
+            # ブランチ名
+            r = subprocess.run(["git", "branch", "--show-current"],
+                capture_output=True, text=True, timeout=5, cwd=str(p))
+            if r.returncode == 0 and r.stdout.strip():
+                info_lines.append(f"branch: {r.stdout.strip()}")
+            # git status --short
+            r = subprocess.run(["git", "status", "--short"],
+                capture_output=True, text=True, timeout=5, cwd=str(p))
+            if r.returncode == 0 and r.stdout.strip():
+                info_lines.append("status:\n" + r.stdout.strip()[:400])
+            # git diff --stat
+            r = subprocess.run(["git", "diff", "--stat"],
+                capture_output=True, text=True, timeout=5, cwd=str(p))
+            if r.returncode == 0 and r.stdout.strip():
+                info_lines.append("diff --stat:\n" + r.stdout.strip()[:400])
+            # git log --oneline -5
+            r = subprocess.run(["git", "log", "--oneline", "-5"],
+                capture_output=True, text=True, timeout=5, cwd=str(p))
+            if r.returncode == 0 and r.stdout.strip():
+                info_lines.append("recent commits:\n" + r.stdout.strip())
+            if len(info_lines) > 1:
+                git_infos.append("\n".join(info_lines))
+    except Exception:
+        pass
+
+    if git_infos:
+        parts.append("## Git Status\n" + "\n\n".join(git_infos[:5]))
+
+    # workspaceの1階層目ファイル一覧（gitなしのプロジェクトも含む）
+    try:
+        entries = sorted(ALLOWED_WORK_DIR.iterdir())
+        names = []
+        for e in entries:
+            if e.name.startswith('.'):
+                continue
+            names.append(e.name + ("/" if e.is_dir() else ""))
+        if names:
+            parts.append("## Workspace\n" + "  ".join(names))
+    except Exception:
+        pass
+
+    if not parts:
+        return ""
+    return "<auto_context>\n" + "\n\n".join(parts) + "\n</auto_context>"
+
+
 async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False):
     try:
         async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval):
@@ -557,6 +617,13 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         user_content = user_message
     if bypass_approval and isinstance(user_content, str):
         user_content = f"[承認バイパスON: 確認・提案なしで即実行すること]\n{user_content}"
+    # 自動コンテキスト収集（Claude Code方式: git status/diff/log をユーザーメッセージ先頭に注入）
+    auto_ctx = _gather_auto_context()
+    if auto_ctx:
+        if isinstance(user_content, list):
+            user_content = [{"type": "text", "text": auto_ctx}] + user_content
+        else:
+            user_content = f"{auto_ctx}\n\n{user_content}"
     messages = [{"role": "system", "content": get_system_prompt(bypass_approval)}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 

@@ -13,18 +13,18 @@ def todo_update(todos: list) -> dict:
 
     todos の各要素:
       - content: タスクの説明（命令形）例: "server.py を編集する"
-      - status: "pending" | "in_progress" | "completed"
+      - status: "pending" | "in_progress" | "completed" | "failed"
     """
     try:
         # バリデーション
-        valid_statuses = {"pending", "in_progress", "completed"}
+        valid_statuses = {"pending", "in_progress", "completed", "failed"}
         for i, t in enumerate(todos):
             if not isinstance(t, dict):
                 return {"error": f"todos[{i}] はオブジェクトである必要があります"}
             if "content" not in t:
                 return {"error": f"todos[{i}] に content が必要です"}
             if t.get("status", "pending") not in valid_statuses:
-                return {"error": f"todos[{i}].status は pending/in_progress/completed のいずれかである必要があります"}
+                return {"error": f"todos[{i}].status は pending/in_progress/completed/failed のいずれかである必要があります"}
 
         # status のデフォルト補完
         normalized = [
@@ -42,6 +42,7 @@ def todo_update(todos: list) -> dict:
             "pending": counts["pending"],
             "in_progress": counts["in_progress"],
             "completed": counts["completed"],
+            "failed": counts["failed"],
             "todos": normalized,
         }
     except Exception as e:
@@ -54,7 +55,7 @@ def todo_read() -> dict:
         if not _TODO_FILE.exists():
             return {"todos": [], "message": "タスクリストはまだ作成されていません"}
         data = json.loads(_TODO_FILE.read_text(encoding="utf-8"))
-        counts = {"pending": 0, "in_progress": 0, "completed": 0}
+        counts = {"pending": 0, "in_progress": 0, "completed": 0, "failed": 0}
         for t in data:
             s = t.get("status", "pending")
             if s in counts:

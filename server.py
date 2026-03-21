@@ -301,7 +301,7 @@ TOOLS = [
                             "type": "object",
                             "properties": {
                                 "content": {"type": "string", "description": "タスクの説明（命令形）例: 'server.py を編集する'"},
-                                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"], "description": "タスクの状態"},
+                                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "failed"], "description": "タスクの状態"},
                             },
                             "required": ["content", "status"],
                         },
@@ -377,6 +377,42 @@ TOOLS = [
 ]
 
 
+def _get_error_hint(tool_name: str, error_type: str, error_msg: str, args: dict) -> str:
+    """エラー種別に応じた自己修正ヒントを返す"""
+    hints = []
+    if "No module named" in error_msg or error_type == "ModuleNotFoundError":
+        import re
+        m = re.search(r"No module named '([^']+)'", error_msg)
+        pkg = m.group(1).split(".")[0] if m else "該当パッケージ"
+        hints.append(f"run_command('pip install {pkg}') でインストールしてから再実行する")
+    if error_type == "FileNotFoundError" or "No such file" in error_msg:
+        path = args.get("path") or args.get("file_path") or ""
+        name_part = Path(path).name if path else ""
+        hints.append(
+            f"glob_files('**/{name_part}') または list_files() で正しいパスを確認してから再実行する"
+            if name_part else "list_files() でファイル一覧を確認してから再実行する"
+        )
+    if error_type == "SyntaxError" or "invalid syntax" in error_msg:
+        path = args.get("path") or args.get("file_path") or ""
+        hints.append(
+            f"read_file('{path}') でファイルを確認し、edit_file で構文エラーを修正してから再実行する"
+            if path else "ファイルを read_file で確認し、構文エラーを修正してから再実行する"
+        )
+    if "expected_replacements" in error_msg or "occurrences" in error_msg or "一致" in error_msg:
+        path = args.get("path") or ""
+        hints.append(
+            f"read_file('{path}') で実際のファイル内容を確認し、old_str を正確に一致させてから edit_file を再試行する"
+            if path else "read_file でファイル内容を確認し old_str を修正してから再試行する"
+        )
+    if error_type == "PermissionError":
+        hints.append("権限エラー: 別のパスを使うか sudo を検討する")
+    if error_type == "TimeoutError" or "timeout" in error_msg.lower():
+        hints.append("タイムアウト: docker ps -a 等で現在の状態を確認してから判断する（即リトライ禁止）")
+    if not hints:
+        hints.append("エラーメッセージを精読して原因を特定し、修正してから別アプローチを試みる")
+    return " → ".join(hints)
+
+
 def execute_tool(name: str, arguments: dict) -> str:
     if name not in TOOL_REGISTRY:
         return json.dumps({"error": f"未知のツール: {name}"}, ensure_ascii=False)
@@ -384,7 +420,14 @@ def execute_tool(name: str, arguments: dict) -> str:
         result = TOOL_REGISTRY[name](**arguments)
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
-        return json.dumps({"error": f"ツール実行エラー: {type(e).__name__}: {e}"}, ensure_ascii=False)
+        error_type = type(e).__name__
+        error_msg = str(e)
+        hint = _get_error_hint(name, error_type, error_msg, arguments)
+        return json.dumps({
+            "error": f"ツール実行エラー: {error_type}: {error_msg}",
+            "error_type": error_type,
+            "hint": hint,
+        }, ensure_ascii=False)
 
 
 async def execute_tool_async(name: str, arguments: dict) -> str:

@@ -171,15 +171,50 @@ def _build_prompt(bypass_section: str) -> str:
 - 「機能を追加して」→ 実装 → テスト → CLAUDE.md 更新まで行う（commit はユーザーが求めた場合のみ）
 - **git add / commit / push はユーザーから明示的に要求がない限り実行しない**
 
-### 2. エラーは自分で解決してから報告する
+### 2. エラーは自分で解決してから報告する（最大3回リトライ）
+
 ツールやコマンドがエラーを返しても、即座にユーザーへ投げ返さない。
-1. エラーメッセージ・スタックトレースを読んで原因を特定する
-2. 自律的に修正してリトライする（最大3回）
-   - ファイルが見つからない → `glob_files` / `list_files` で正しいパスを探す
-   - 依存パッケージのエラー → `run_command("pip install ...")` でインストール
-   - 構文エラー → `edit_file` で修正してから再実行
-   - コマンド失敗 → 原因を特定して別アプローチを試す
-3. 3回試みても解決しない場合のみ「試したこと・推測される原因」を添えて報告する
+
+#### エラー自己修正ループ
+
+```
+エラー発生
+  ↓
+① エラーメッセージ・hint フィールドを精読して原因を特定
+  ↓
+② 同じ操作をそのまま繰り返さない。必ず原因に応じた修正を加えてからリトライ
+  ↓
+③ 3回試みても解決しない場合のみ「試したこと・推測原因」を報告
+```
+
+#### エラー種別と対処法
+
+| エラー | 判別方法 | 対処 |
+|---|---|---|
+| ModuleNotFoundError | error_type: ModuleNotFoundError | `run_command("pip install <pkg>")` → 再実行 |
+| FileNotFoundError | error_type: FileNotFoundError | `glob_files` / `list_files` で正しいパスを特定 → 再実行 |
+| SyntaxError | error_type: SyntaxError | `read_file` で確認 → `edit_file` で修正 → 再実行 |
+| edit_file ミスマッチ | "一致なし" / "occurrences" | `read_file` で実文字列確認 → old_str 修正 → 再試行 |
+| run_command 失敗 | returncode ≠ 0 | stderr を読んで原因特定 → 修正して再実行 |
+| タイムアウト | timeout / TimeoutError | `docker ps -a` 等で状態確認後に判断（即リトライ禁止） |
+| PermissionError | error_type: PermissionError | 別パスを使うか sudo を検討 |
+
+#### todo リストとの連動（重要）
+
+タスクリストを作成している場合、エラーと諦めを正確に反映する：
+
+- リトライ中は該当タスクを `in_progress` のまま維持する
+- **3回リトライしても解決できなかったら `failed` に更新してから報告する**
+- `failed` のタスクが残ったままにしない（必ず `failed` に更新してユーザーに見せる）
+
+```python
+# 諦めるとき（3回失敗後）
+todo_update([
+  {{"content": "△△をテストする", "status": "failed"}},  # ← failed に更新
+  ...
+])
+# その後「試したこと・推測原因」をユーザーに報告
+```
 
 ### 3. 完了したら一言だけ報告する
 長々と経緯を説明しない。「何をしたか」を3行以内にまとめる。必要なら「次に〇〇しますか？」と一言添える。
@@ -261,6 +296,7 @@ todo_update([
 - `in_progress` は常に1件のみ（今やっていること）
 - ユーザーに「残タスクは？」と聞かれたら `todo_read` で確認してから答える
 - 作業完了後はリストを全 `completed` に更新してから報告する
+- 3回リトライしても解決できなかったタスクは **`failed`** に更新してから報告する（`failed` は正規のステータス）
 
 ## Docker Compose のルール
 - Docker Compose を使う場合は**必ずサービス名のサブディレクトリを作成**してから配置する

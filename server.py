@@ -163,12 +163,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "ディレクトリ内のファイル一覧を取得します",
+            "description": "ディレクトリ内のファイル一覧をツリー形式で取得します。パラメータは path と pattern の2つのみです。--depth などのオプションは存在しません。例: list_files() でワークスペース全体、list_files(path='src') でsrcディレクトリ、list_files(pattern='**/*.py') でPythonファイルのみ",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "ディレクトリパス (デフォルト: .)"},
-                    "pattern": {"type": "string", "description": "globパターン (例: **/*.py)"},
+                    "path": {"type": "string", "description": "ディレクトリパス。省略すると workspace ルートを表示。例: '.' または 'src'"},
+                    "pattern": {"type": "string", "description": "globパターン。省略すると全ファイル。例: '**/*.py' でPythonファイルのみ"},
                 },
                 "required": [],
             },

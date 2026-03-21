@@ -153,12 +153,22 @@ def list_files(path: str = ".", pattern: str = "*") -> dict:
                     "path": str(p.relative_to(ALLOWED_WORK_DIR)),
                     "type": "directory" if p.is_dir() else "file",
                     "size": stat.st_size if p.is_file() else None,
-                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 })
             except OSError:
                 continue
 
-        return {"files": items, "total": len(items), "root": str(target)}
+        lines = [str(target)]
+        for i, item in enumerate(items):
+            is_last = (i == len(items) - 1)
+            prefix = "└── " if is_last else "├── "
+            name = item["path"].split("/")[-1]
+            if item["type"] == "directory":
+                lines.append(f"{prefix}{name}/")
+            else:
+                size = f" ({item['size']:,}B)" if item['size'] is not None else ""
+                lines.append(f"{prefix}{name}{size}")
+
+        return "\n".join(lines)
     except PermissionError as e:
         return {"error": str(e)}
     except Exception as e:

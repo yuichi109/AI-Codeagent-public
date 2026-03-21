@@ -616,7 +616,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             final_answer = "".join(content_parts)
             turn_messages.append({"role": "assistant", "content": final_answer})
             yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
-            yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
             break
 
         # ツール呼び出しあり → アシスタントメッセージを履歴に追加してツール実行

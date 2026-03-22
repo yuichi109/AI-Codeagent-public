@@ -751,7 +751,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
         # tool_calls を解析
         parsed_calls = [
-            (tc["function"]["name"], json.loads(tc["function"]["arguments"]), tc["id"])
+            (tc["function"]["name"], json.loads(tc["function"]["arguments"] or "{}"), tc["id"])
             for tc in tool_calls_list
         ]
 
@@ -975,9 +975,24 @@ class CleanupRequest(BaseModel):
 @app.post("/workspace/cleanup")
 async def workspace_cleanup(req: CleanupRequest):
     """保護リストにないファイル・ディレクトリを削除する"""
+    from tools.workspace_tools import PROTECTED_LIST_FILE, ALWAYS_PROTECTED
+    # 保護リストをサーバー側で再ロード（フロントエンドから渡されたリストは信頼しない）
+    try:
+        if PROTECTED_LIST_FILE.exists():
+            user_protected = set(json.loads(PROTECTED_LIST_FILE.read_text(encoding="utf-8")).get("paths", []))
+        else:
+            user_protected = set()
+    except Exception:
+        user_protected = set()
+    protected_names = ALWAYS_PROTECTED | user_protected
+
     deleted = []
     errors = []
     for name in req.paths:
+        # 保護リストチェック（末尾スラッシュあり・なし両方）
+        if name in protected_names or (name + "/") in protected_names:
+            errors.append({"name": name, "error": "保護リストに含まれているため削除不可"})
+            continue
         # パストラバーサル防止
         target = (ALLOWED_WORK_DIR / name).resolve()
         if not str(target).startswith(str(ALLOWED_WORK_DIR)):
@@ -992,8 +1007,14 @@ async def workspace_cleanup(req: CleanupRequest):
             else:
                 target.unlink()
             deleted.append(name)
+            print(f"[cleanup] deleted: {name}", flush=True)
         except Exception as e:
             errors.append({"name": name, "error": str(e)})
+            print(f"[cleanup] error deleting {name}: {e}", flush=True)
+    if errors:
+        blocked = [e for e in errors if "保護リスト" in e.get("error", "")]
+        if blocked:
+            print(f"[cleanup] blocked (protected): {[e['name'] for e in blocked]}", flush=True)
     return JSONResponse({"deleted": deleted, "errors": errors})
 
 

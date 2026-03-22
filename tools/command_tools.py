@@ -97,6 +97,9 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
     if not args:
         return {"error": "コマンドが空です", "stdout": "", "stderr": "", "returncode": -1}
 
+    # shell=False のためチルダ展開をここで行う
+    args = [os.path.expanduser(a) for a in args]
+
     base_cmd = os.path.basename(args[0])
 
     # bash は bubblewrap サンドボックスで特別処理（ホワイトリストとは独立）

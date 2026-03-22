@@ -96,7 +96,7 @@
   #send { padding: 6px 16px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
   #stop { padding: 6px 16px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; display: none; }
-  #gen-status { display: none; font-size: 11px; color: #6c7086; font-family: monospace; }
+  #gen-status { display: none; font-size: 13px; color: #cdd6f4; font-family: monospace; }
   .img-preview { position: relative; }
   .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
   .img-preview-del { position: absolute; top: -4px; right: -4px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; line-height: 16px; text-align: center; padding: 0; }
@@ -230,7 +230,10 @@
   <div id="provider-panel-body">
     <div class="pv-group">
       <label>エンドポイントURL</label>
-      <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234" list="pv-url-history">
+      <div style="display:flex;gap:4px;">
+        <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234" list="pv-url-history" style="flex:1;">
+        <button onclick="const el=document.getElementById('pv-url');el.value='';el.focus();" title="URL履歴を表示" style="padding:4px 8px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;cursor:pointer;font-size:12px;">履歴</button>
+      </div>
       <datalist id="pv-url-history"></datalist>
     </div>
     <div class="pv-group">
@@ -396,7 +399,7 @@
   let tokenSession = { prompt: 0, completion: 0, total: 0 };  // セッション累計トークン
   let pendingImages = [];  // 送信待ち画像 [{data, mime, url}, ...]
   let abortController = null;  // 生成中断用
-  let genStartTime = 0, genTimer = null, genTokenChars = 0, genPhase = 'thinking';
+  let genStartTime = 0, genTimer = null, genTokenChars = 0, genPhase = 'thinking', genHasActualUsage = false;
 
   const chat  = document.getElementById('chat');
   const input = document.getElementById('input');
@@ -434,7 +437,7 @@
     if (!el) return;
     const secs = Math.floor((Date.now() - genStartTime) / 1000);
     const tokens = Math.ceil(genTokenChars / 3);
-    el.textContent = `${secs}s · ↓ ${tokens} tokens · ${genPhase}`;
+    el.textContent = `${secs}s · ↓ ${tokens} tokens`;
   }
 
   function setGenerating(flag) {
@@ -443,13 +446,18 @@
     send.disabled = flag;
     const el = document.getElementById('gen-status');
     if (flag) {
-      genStartTime = Date.now(); genTokenChars = 0; genPhase = 'thinking';
+      genStartTime = Date.now(); genTokenChars = 0; genPhase = 'thinking'; genHasActualUsage = false;
       el.style.display = 'block';
       updateGenStatus();
       genTimer = setInterval(updateGenStatus, 500);
     } else {
       clearInterval(genTimer); genTimer = null;
-      el.style.display = 'none';
+      // token_usage で実際の値が更新済みならそちらを優先
+      if (!genHasActualUsage) {
+        const secs = Math.floor((Date.now() - genStartTime) / 1000);
+        const tokens = Math.ceil(genTokenChars / 3);
+        el.textContent = `${secs}s · ↓ ${tokens} tokens`;
+      }
     }
   }
 
@@ -1056,6 +1064,17 @@
     dl.innerHTML = pvUrlHistoryLoad().map(u => `<option value="${escHtml(u)}">`).join('');
   }
 
+  // チェックボックス状態の永続化
+  function pvCheckboxLoad() {
+    const resetHistory = localStorage.getItem('pv_reset_history') === 'true';
+    document.getElementById('pv-reset-history').checked = resetHistory;
+  }
+  function pvCheckboxSave() {
+    localStorage.setItem('pv_reset_history', document.getElementById('pv-reset-history').checked);
+  }
+  document.getElementById('pv-reset-history').addEventListener('change', pvCheckboxSave);
+  pvCheckboxLoad();
+
   async function toggleProviderPanel() {
     pvPanelOpen = !pvPanelOpen;
     document.getElementById('provider-panel').classList.toggle('open', pvPanelOpen);
@@ -1088,15 +1107,19 @@
       `現在: ${data.type === 'azure' ? 'Azure' : 'OpenAI互換'} / ${data.model || '(未設定)'}`;
     document.getElementById('provider-label').textContent =
       `${data.type === 'azure' ? '🔵' : '🟢'} ${shortModel(data.model)}`;
-    // Azure のときだけモデル選択ドロップダウンを更新
+    // Azure以外ではデプロイ選択ドロップダウンを隠す
     const sel = document.getElementById('model-select');
-    if (data.type === 'azure' && sel.options.length > 1) {
-      sel.value = data.model;
+    if (data.type === 'azure') {
+      if (sel.options.length > 1) sel.value = data.model;
+    } else {
+      sel.style.display = 'none';
     }
   }
 
   async function loadDeployments() {
     try {
+      const pv = await fetch('/providers/current').then(r => r.json());
+      if (pv.type !== 'azure') return; // Azure以外はデプロイ選択不要
       const res = await fetch('/providers/deployments');
       const data = await res.json();
       const sel = document.getElementById('model-select');
@@ -1196,6 +1219,7 @@
       updatePvCurrent(data.provider);
       document.getElementById('pv-model-group').style.display = 'none';
       await loadCurrentProvider();
+      await loadDeployments();
       setPvStatus('✓ Azureに戻しました', true);
       if (document.getElementById('pv-reset-history').checked) {
         history = []; turns = []; localStorage.removeItem(STORAGE_KEY);
@@ -1295,6 +1319,17 @@
                   updateStatusLine(statusEl, 'Responding...');
                   finalAnswer += data.content;
                   setAiContent(getOrCreateAiMsg(), stripThink(finalAnswer));
+                } else if (data.type === 'token_usage') {
+                  tokenSession.prompt     += data.prompt;
+                  tokenSession.completion += data.completion;
+                  tokenSession.total      += data.total;
+                  updateTokenInfo(data.prompt, data.completion);
+                  genHasActualUsage = true;
+                  const gsEl = document.getElementById('gen-status');
+                  if (gsEl) {
+                    const secs = Math.floor((Date.now() - genStartTime) / 1000);
+                    gsEl.textContent = `${secs}s · ↑ ${data.prompt} ↓ ${data.completion} tokens`;
+                  }
                 } else if (data.type === 'history_messages') {
                   turnMessages = data.messages;
                 }
@@ -1378,6 +1413,13 @@
             tokenSession.completion += data.completion;
             tokenSession.total      += data.total;
             updateTokenInfo(data.prompt, data.completion);
+            // gen-status を実際のトークン数で更新
+            genHasActualUsage = true;
+            const gsEl = document.getElementById('gen-status');
+            if (gsEl) {
+              const secs = Math.floor((Date.now() - genStartTime) / 1000);
+              gsEl.textContent = `${secs}s · ↑ ${data.prompt} ↓ ${data.completion} tokens`;
+            }
           } else if (data.type === 'answer_done') {
             // モデル名をラベルに表示
             if (data.model) {

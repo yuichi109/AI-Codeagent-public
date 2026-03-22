@@ -715,8 +715,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         if tools_enabled:
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
-        if not is_local:
-            create_kwargs["stream_options"] = {"include_usage": True}  # ローカルLLMは未対応のため除外
+        create_kwargs["stream_options"] = {"include_usage": True}
         stream = _make_client().chat.completions.create(**create_kwargs)
 
         content_parts = []

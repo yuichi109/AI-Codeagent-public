@@ -17,7 +17,7 @@ from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
-from tools.workspace_tools import protected_list_read, protected_list_update, workspace_cleanup_preview
+from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview
 from tools.manim_tools import render_manim
 from pydantic import BaseModel
 
@@ -106,6 +106,7 @@ TOOL_REGISTRY = {
     "todo_read": todo_read,
     "protected_list_read": protected_list_read,
     "protected_list_update": protected_list_update,
+    "protected_list_replace": protected_list_replace,
     "workspace_cleanup_preview": workspace_cleanup_preview,
     "render_manim": render_manim,
 }
@@ -335,7 +336,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "protected_list_update",
-            "description": "ワークスペースの保護リストを更新します。リストにあるファイル・ディレクトリはワークスペース掃除で削除されません。既存リストは上書きされます。",
+            "description": "ワークスペースの保護リストにパスを追加します（既存エントリは保持）。「〇〇を保護リストに追加して」と言われたらこちらを使ってください。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -343,6 +344,24 @@ TOOLS = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "保護するパスのリスト（workspace直下の名前。例: ['myproject/', 'important.txt', 'data/']）",
+                    },
+                },
+                "required": ["paths"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "protected_list_replace",
+            "description": "ワークスペースの保護リストを完全に置き換えます。既存エントリをすべて削除して新しいリストで上書きします。「保護リストをこれだけにして」と明示的に言われた場合のみ使ってください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "新しい保護リスト（workspace直下の名前。例: ['myproject/', 'important.txt']）",
                     },
                 },
                 "required": ["paths"],

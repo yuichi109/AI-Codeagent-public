@@ -22,12 +22,40 @@ def protected_list_read() -> dict:
 
 def protected_list_update(paths: list) -> dict:
     """
-    ワークスペースの保護リストを更新する（上書き）。
+    ワークスペースの保護リストに paths を追加する（既存エントリは保持）。
     paths には workspace 直下のファイル名 / ディレクトリ名を指定する。
     例: ["myproject/", "important.txt", "data/"]
+    完全に置き換えたい場合は protected_list_replace を使う。
     """
     try:
-        # 重複除去・順序保持
+        # 既存リストを読み込んでマージ
+        existing = []
+        if PROTECTED_LIST_FILE.exists():
+            try:
+                existing = json.loads(PROTECTED_LIST_FILE.read_text(encoding="utf-8")).get("paths", [])
+            except Exception:
+                existing = []
+        # 重複除去・順序保持（既存 → 新規の順）
+        merged = list(dict.fromkeys(existing + [str(p) for p in paths]))
+        PROTECTED_LIST_FILE.write_text(
+            json.dumps({"paths": merged}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return {
+            "paths": merged,
+            "count": len(merged),
+            "message": f"保護リストを更新しました（{len(merged)}件）",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def protected_list_replace(paths: list) -> dict:
+    """
+    ワークスペースの保護リストを完全に置き換える。
+    既存エントリをすべて削除して paths で上書きしたい場合のみ使う。
+    """
+    try:
         clean_paths = list(dict.fromkeys(str(p) for p in paths))
         PROTECTED_LIST_FILE.write_text(
             json.dumps({"paths": clean_paths}, ensure_ascii=False, indent=2),
@@ -36,7 +64,7 @@ def protected_list_update(paths: list) -> dict:
         return {
             "paths": clean_paths,
             "count": len(clean_paths),
-            "message": f"保護リストを更新しました（{len(clean_paths)}件）",
+            "message": f"保護リストを置き換えました（{len(clean_paths)}件）",
         }
     except Exception as e:
         return {"error": str(e)}

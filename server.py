@@ -17,7 +17,7 @@ from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
-from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview
+from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup
 from tools.manim_tools import render_manim
 from pydantic import BaseModel
 
@@ -105,6 +105,7 @@ TOOL_REGISTRY = {
     "todo_update": todo_update,
     "todo_read": todo_read,
     "protected_list_read": protected_list_read,
+    "workspace_backup": workspace_backup,
     "protected_list_update": protected_list_update,
     "protected_list_replace": protected_list_replace,
     "workspace_cleanup_preview": workspace_cleanup_preview,
@@ -322,6 +323,14 @@ TOOLS = [
                 "properties": {},
                 "required": [],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "workspace_backup",
+            "description": "ワークスペースの内容を ~/Backups/YYYYMMDD.tar.gz にバックアップします。「バックアップして」と言われたらこのツールを使ってください。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {

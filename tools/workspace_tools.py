@@ -1,6 +1,11 @@
 import json
+import subprocess
+import tarfile
+from datetime import datetime
 from pathlib import Path
 from config import ALLOWED_WORK_DIR
+
+BACKUP_DIR = Path.home() / "Backups"
 
 PROTECTED_LIST_FILE = ALLOWED_WORK_DIR / ".protected.json"
 
@@ -116,6 +121,34 @@ def workspace_cleanup_preview() -> dict:
                 f"{len(to_delete)}個のアイテムが削除対象です"
                 f"（保護済み: {len(protected_found)}個）"
             ),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def workspace_backup() -> dict:
+    """
+    ワークスペースの内容を ~/Backups/YYYYMMDD.tar.gz にバックアップする。
+    同日に複数回実行した場合は YYYYMMDD_1.tar.gz のように連番を付ける。
+    """
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        date_str = datetime.now().strftime("%Y%m%d")
+        # 同日の連番処理
+        dest = BACKUP_DIR / f"{date_str}.tar.gz"
+        counter = 1
+        while dest.exists():
+            dest = BACKUP_DIR / f"{date_str}_{counter}.tar.gz"
+            counter += 1
+
+        with tarfile.open(dest, "w:gz") as tar:
+            tar.add(ALLOWED_WORK_DIR, arcname="workspace")
+
+        size = dest.stat().st_size
+        return {
+            "path": str(dest),
+            "size_str": _fmt_size(size),
+            "message": f"バックアップを作成しました: {dest.name} ({_fmt_size(size)})",
         }
     except Exception as e:
         return {"error": str(e)}

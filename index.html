@@ -748,17 +748,24 @@
   }
 
   function setResult(el, toolName, resultText) {
-    // run_command / git diff 系は stdout を取り出して diff 判定
+    const showPre = text => {
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-all;';
+      pre.textContent = text;
+      el.appendChild(pre);
+    };
     try {
       const parsed = JSON.parse(resultText);
+      // プレーン文字列（list_files 等）
+      if (typeof parsed === 'string') { showPre(parsed); return; }
+      // オブジェクト形式
       const stdout = parsed.stdout || '';
-      if (isDiff(stdout)) {
-        renderDiff(el, stdout);
-        return;
-      }
+      if (isDiff(stdout)) { renderDiff(el, stdout); return; }
+      const text = parsed.result ?? parsed.output ?? parsed.content ?? stdout;
+      if (typeof text === 'string') { showPre(text); return; }
     } catch(_) {}
-    // 通常テキスト
-    el.textContent = resultText;
+    // JSON でない通常テキスト
+    showPre(resultText);
   }
 
   function addToolBlock(parent, name, args) {

@@ -734,6 +734,11 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 continue
             delta = chunk.choices[0].delta
 
+            # reasoning_content（思考トークン）はスキップ
+            reasoning = getattr(delta, 'reasoning_content', None)
+            if reasoning:
+                continue
+
             # テキストチャンクをリアルタイム送信
             if delta.content:
                 content_parts.append(delta.content)

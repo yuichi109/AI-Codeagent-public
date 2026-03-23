@@ -26,6 +26,17 @@ ALLOWED_WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
 
+# Azure AI Foundry (省略可)
+FOUNDRY_ENDPOINT: str = os.getenv("FOUNDRY_ENDPOINT", "")
+FOUNDRY_API_KEY: str  = os.getenv("FOUNDRY_API_KEY", "")
+FOUNDRY_MODEL: str    = os.getenv("FOUNDRY_MODEL", "")
+# カンマ区切りで複数モデルを指定可（例: gpt-5.4-mini,gpt-5.4）未設定時は FOUNDRY_MODEL のみ
+_foundry_models_raw = os.getenv("FOUNDRY_MODELS", "")
+FOUNDRY_MODELS: list[str] = (
+    [m.strip() for m in _foundry_models_raw.split(",") if m.strip()]
+    if _foundry_models_raw else ([FOUNDRY_MODEL] if FOUNDRY_MODEL else [])
+)
+
 # GitLab 連携 (省略可)
 GITLAB_USER: str = os.getenv("GITLAB_USER", "")
 GITLAB_PAT: str  = os.getenv("GITLAB_PAT", "")

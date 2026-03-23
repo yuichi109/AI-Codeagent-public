@@ -229,6 +229,14 @@
   </div>
   <div id="provider-panel-body">
     <div class="pv-group">
+      <label>プロバイダー種別</label>
+      <select id="pv-preset" class="pv-input" onchange="onPresetChange()">
+        <option value="azure">🔵 Azure OpenAI</option>
+        <option value="foundry">🟣 Azure AI Foundry</option>
+        <option value="local">🟢 ローカルLLM（カスタム）</option>
+      </select>
+    </div>
+    <div id="pv-url-group" class="pv-group">
       <label>エンドポイントURL</label>
       <div style="display:flex;gap:4px;">
         <input id="pv-url" class="pv-input" type="text" placeholder="http://192.168.x.x:1234" list="pv-url-history" style="flex:1;">
@@ -236,7 +244,7 @@
       </div>
       <datalist id="pv-url-history"></datalist>
     </div>
-    <div class="pv-group">
+    <div id="pv-apikey-group" class="pv-group">
       <label>APIキー（任意）</label>
       <input id="pv-apikey" class="pv-input" type="password" placeholder="sk-... （LM Studioは不要）">
     </div>
@@ -1108,16 +1116,17 @@
     try {
       const res = await fetch('/providers/current');
       const data = await res.json();
-      if (data.type === 'azure') {
-        document.getElementById('pv-url').value = data.url || '';
+      if (data.type === 'azure' || data.type === 'foundry') {
+        document.getElementById('pv-url').value = '';
         document.getElementById('pv-apikey').value = '';
+        syncPresetUI(data.type);
       } else {
         // openai_compatible: URLは /v1 を除いて表示
         const base = (data.url || '').replace(/\/v1$/, '');
         document.getElementById('pv-url').value = base;
         document.getElementById('pv-apikey').value = '';
-        // 現在設定済みのURLを履歴に自動追加（過去の適用分も補完に出るようにする）
         if (base) { pvUrlHistorySave(base); pvUrlHistoryRender(); }
+        syncPresetUI('local');
       }
       // ツールトグルを現在の設定に同期
       document.getElementById('pv-tools-enabled').checked = data.tools_enabled !== false;
@@ -1125,11 +1134,84 @@
     } catch(e) {}
   }
 
+  function syncPresetUI(preset) {
+    document.getElementById('pv-preset').value = preset;
+    const urlGroup = document.getElementById('pv-url-group');
+    const apikeyGroup = document.getElementById('pv-apikey-group');
+    const fetchBtn = document.getElementById('pv-fetch-btn');
+    const applyBtn = document.getElementById('pv-apply-btn');
+    const azureBtn = document.getElementById('pv-azure-btn');
+    const urlInput = document.getElementById('pv-url');
+    if (preset === 'azure' || preset === 'foundry') {
+      // .env 設定を使うプリセット — URL/キー欄は不要
+      urlGroup.style.display = 'none';
+      apikeyGroup.style.display = 'none';
+      fetchBtn.style.display = 'none';
+      document.getElementById('pv-model-group').style.display = 'none';
+      applyBtn.style.display = 'none';
+      azureBtn.style.display = preset === 'azure' ? '' : 'none';
+    } else {
+      urlGroup.style.display = '';
+      apikeyGroup.style.display = '';
+      fetchBtn.style.display = '';
+      applyBtn.style.display = '';
+      azureBtn.style.display = 'none';
+      urlInput.placeholder = 'http://192.168.x.x:1234';
+    }
+  }
+
+  async function onPresetChange() {
+    const preset = document.getElementById('pv-preset').value;
+    localStorage.setItem('pv_preset', preset);
+    if (preset === 'azure') {
+      await resetToAzure();
+    } else if (preset === 'foundry') {
+      await switchToFoundryPreset();
+    } else {
+      syncPresetUI(preset);
+      document.getElementById('pv-url').value = '';
+      document.getElementById('pv-model-group').style.display = 'none';
+      setPvStatus('', null);
+    }
+  }
+
+  async function switchToFoundryPreset() {
+    syncPresetUI('foundry');
+    setPvStatus('切り替え中...', null);
+    try {
+      // まず .env に設定があるか確認
+      const presets = await fetch('/providers/presets').then(r => r.json());
+      if (!presets.foundry) {
+        setPvStatus('⚠️ .env に FOUNDRY_ENDPOINT / FOUNDRY_MODEL が未設定です', false);
+        return;
+      }
+      const res = await fetch('/providers/preset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: 'foundry' }),
+      });
+      const data = await res.json();
+      if (data.error) { setPvStatus('⚠️ ' + data.error, false); return; }
+      updatePvCurrent(data.provider);
+      await loadDeployments();
+      setPvStatus(`✓ Azure AI Foundry に切り替えました (${data.provider.model})`, true);
+      if (document.getElementById('pv-reset-history').checked) {
+        history = []; turns = []; localStorage.removeItem(STORAGE_KEY);
+        chat.innerHTML = ''; updateTurnCount();
+      }
+      setTimeout(() => toggleProviderPanel(), 800);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
   function updatePvCurrent(data) {
-    document.getElementById('pv-current').textContent =
-      `現在: ${data.type === 'azure' ? 'Azure' : 'OpenAI互換'} / ${data.model || '(未設定)'}`;
-    document.getElementById('provider-label').textContent =
-      `${data.type === 'azure' ? '🔵' : '🟢'} ${shortModel(data.model)}`;
+    const labelMap = { azure: 'Azure OpenAI', foundry: 'Azure AI Foundry', openai_compatible: 'OpenAI互換' };
+    const iconMap  = { azure: '🔵', foundry: '🟣', openai_compatible: '🟢' };
+    const label = labelMap[data.type] || 'OpenAI互換';
+    const icon  = iconMap[data.type]  || '🟢';
+    document.getElementById('pv-current').textContent = `現在: ${label} / ${data.model || '(未設定)'}`;
+    document.getElementById('provider-label').textContent = `${icon} ${shortModel(data.model)}`;
     // Azure以外ではデプロイ選択ドロップダウンを隠す
     const sel = document.getElementById('model-select');
     if (data.type === 'azure') {
@@ -1142,7 +1224,7 @@
   async function loadDeployments() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure') return; // Azure以外はデプロイ選択不要
+      if (pv.type !== 'azure' && pv.type !== 'foundry') return; // ローカルはデプロイ選択不要
       const res = await fetch('/providers/deployments');
       const data = await res.json();
       const sel = document.getElementById('model-select');
@@ -1192,9 +1274,6 @@
       const sel = document.getElementById('pv-model');
       sel.innerHTML = data.models.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
       document.getElementById('pv-model-group').style.display = 'flex';
-      // ローカルモデル取得時はツールをデフォルトOFF（Azure URLでなければローカル扱い）
-      const isAzureUrl = url.includes('.openai.azure.com');
-      if (!isAzureUrl) document.getElementById('pv-tools-enabled').checked = false;
       setPvStatus(`✓ ${data.models.length} モデルを取得`, true);
     } catch(e) {
       setPvStatus('⚠️ ' + e.message, false);
@@ -1219,6 +1298,7 @@
       if (data.status !== 'ok') { setPvStatus('⚠️ 設定失敗', false); return; }
       pvUrlHistorySave(url);
       pvUrlHistoryRender();
+      localStorage.setItem('pv_preset', document.getElementById('pv-preset').value);
       updatePvCurrent(data.provider);
       setPvStatus('✓ 適用しました', true);
       if (document.getElementById('pv-reset-history').checked) {
@@ -1239,8 +1319,10 @@
         body: JSON.stringify({ url: '', api_key: '', model: '' }),
       });
       const data = await res.json();
+      localStorage.setItem('pv_preset', 'azure');
       updatePvCurrent(data.provider);
       document.getElementById('pv-model-group').style.display = 'none';
+      syncPresetUI('azure');
       await loadCurrentProvider();
       await loadDeployments();
       setPvStatus('✓ Azureに戻しました', true);
@@ -1261,6 +1343,9 @@
 
   // 起動時にプロバイダーラベルを更新
   fetch('/providers/current').then(r => r.json()).then(data => {
+    // プリセット選択を復元してからラベル更新
+    const savedPreset = localStorage.getItem('pv_preset');
+    if (savedPreset) syncPresetUI(savedPreset);
     updatePvCurrent(data);
   }).catch(() => {});
   loadDeployments();

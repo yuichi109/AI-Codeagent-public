@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, ALLOWED_WORK_DIR
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS
 from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
@@ -69,6 +69,7 @@ def _make_client():
             http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
         )
     else:
+        # "foundry" も "openai_compatible" も OpenAI互換クライアントで統一
         return OpenAI(
             base_url=_provider_config["url"].rstrip("/") + "/v1",
             api_key=_provider_config["api_key"] or "dummy",
@@ -705,7 +706,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     if compressed_history is not None:
         yield f"data: {json.dumps({'type': 'history_compressed', 'messages': compressed_history})}\n\n"
 
-    is_local = _provider_config["type"] == "openai_compatible"
+    is_local = _provider_config["type"] not in ("azure", "foundry")
     tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
     while True:
@@ -913,9 +914,13 @@ class ProviderConfigRequest(BaseModel):
 
 @app.get("/providers/deployments")
 async def providers_deployments():
-    """Azure デプロイ一覧と現在のモデルを返す"""
+    """現在のプロバイダーのモデル一覧と現在のモデルを返す"""
+    if _provider_config["type"] == "foundry":
+        deployments = FOUNDRY_MODELS
+    else:
+        deployments = AZURE_OPENAI_DEPLOYMENTS
     return JSONResponse({
-        "deployments": AZURE_OPENAI_DEPLOYMENTS,
+        "deployments": deployments,
         "current": _provider_config["model"],
     })
 
@@ -926,10 +931,11 @@ class DeploymentRequest(BaseModel):
 
 @app.post("/providers/deployment")
 async def providers_set_deployment(req: DeploymentRequest):
-    """Azure デプロイ（モデル）だけを切り替える"""
+    """現在のプロバイダーのモデルだけを切り替える"""
     global _provider_config
-    if req.model not in AZURE_OPENAI_DEPLOYMENTS:
-        return JSONResponse({"error": f"未登録のデプロイ: {req.model}"}, status_code=400)
+    allowed = FOUNDRY_MODELS if _provider_config["type"] == "foundry" else AZURE_OPENAI_DEPLOYMENTS
+    if req.model not in allowed:
+        return JSONResponse({"error": f"未登録のモデル: {req.model}"}, status_code=400)
     _provider_config = {**_provider_config, "model": req.model}
     _save_provider_config(_provider_config)
     return JSONResponse({"status": "ok", "model": req.model})
@@ -968,6 +974,48 @@ async def providers_models(url: str, api_key: str = ""):
         return JSONResponse({"models": models})
     except Exception as e:
         return JSONResponse({"error": f"接続失敗: {e}"}, status_code=400)
+
+
+class PresetRequest(BaseModel):
+    preset: str  # "azure" | "foundry"
+
+
+@app.get("/providers/presets")
+async def providers_presets():
+    """どのプリセットが .env に設定済みかを返す"""
+    return JSONResponse({
+        "azure": bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY),
+        "foundry": bool(FOUNDRY_ENDPOINT and FOUNDRY_MODEL),
+        "foundry_model": FOUNDRY_MODEL,
+    })
+
+
+@app.post("/providers/preset")
+async def providers_set_preset(req: PresetRequest):
+    """.env のプリセット設定に切り替える"""
+    global _provider_config
+    if req.preset == "azure":
+        _provider_config = dict(_default_provider_config)
+    elif req.preset == "foundry":
+        if not FOUNDRY_ENDPOINT or not FOUNDRY_MODEL:
+            return JSONResponse({"error": "FOUNDRY_ENDPOINT / FOUNDRY_MODEL が .env に未設定です"}, status_code=400)
+        _provider_config = {
+            "type": "foundry",
+            "url": FOUNDRY_ENDPOINT,
+            "api_key": FOUNDRY_API_KEY,
+            "model": FOUNDRY_MODEL,
+            "api_version": "",
+            "tools_enabled": True,
+        }
+    else:
+        return JSONResponse({"error": f"不明なプリセット: {req.preset}"}, status_code=400)
+    _save_provider_config(_provider_config)
+    return JSONResponse({"status": "ok", "provider": {
+        "type": _provider_config["type"],
+        "url": _provider_config["url"],
+        "model": _provider_config["model"],
+        "tools_enabled": _provider_config.get("tools_enabled", True),
+    }})
 
 
 @app.post("/providers/config")

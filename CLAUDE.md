@@ -170,6 +170,11 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **履歴復元バグ修正**（2026-03-19）: WSL再起動後にツール呼び出しありのターンでAI回答が消える問題を修正（index.html `loadHistory()`）
   - 原因: `i+=2` の固定ペア方式が `[user, assistant(tool_calls), tool, ..., assistant(最終)]` 構造に対応できていなかった
   - 修正: user起点で次userまで走査し最後の assistant content を取得する方式に変更
+- [x] **`/no_think` オプション追加**（2026-03-23）: ⚙️パネルに「/no_think をプロンプトに付加」チェックボックス追加
+  - ON にするとユーザーメッセージ先頭に `/no_think\n` を自動挿入（Qwen3 Thinking抑制用）
+  - localStorage 永続化。`ChatRequest.no_think` → server.py で挿入
+  - LM Studio の "Enable Thinking" ON でもプロンプトレベルで有効（モデルが reasoning ≈ 空で応答）
+- [x] **ツール結果の `\n` 文字化け修正**（2026-03-23）: ツール結果表示で `\n` がそのまま表示される問題を修正（index.html）
 
 ---
 

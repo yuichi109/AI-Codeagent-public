@@ -249,6 +249,9 @@
       <input type="checkbox" id="pv-tools-enabled"> ツールを渡す（Function Calling）
     </label>
     <label class="pv-check">
+      <input type="checkbox" id="pv-no-think" onchange="saveNoThink()"> /no_think をプロンプトに付加
+    </label>
+    <label class="pv-check">
       <input type="checkbox" id="pv-reset-history"> 切り替え時に履歴をリセット
     </label>
     <div id="pv-status"></div>
@@ -461,6 +464,18 @@
     }
   }
 
+  // ---- /no_think トグル ----
+  function isNoThinkActive() {
+    return localStorage.getItem('noThink') === 'true';
+  }
+  function saveNoThink() {
+    const checked = document.getElementById('pv-no-think').checked;
+    localStorage.setItem('noThink', checked);
+  }
+  function loadNoThink() {
+    document.getElementById('pv-no-think').checked = isNoThinkActive();
+  }
+
   // ---- 承認バイパストグル ----
   function isBypassActive() {
     return localStorage.getItem('bypassApproval') === 'true';
@@ -485,6 +500,7 @@
   }
   // 初期化
   updateBypassBtn();
+  loadNoThink();
 
   function stopGeneration() {
     if (abortController) abortController.abort();
@@ -1297,6 +1313,7 @@
           history: trimmedHistory,
           images: imagesToSend.map(i => ({ data: i.data, mime: i.mime })),
           bypass_approval: isBypassActive(),
+          no_think: isNoThinkActive(),
         }),
       });
 

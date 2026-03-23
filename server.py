@@ -468,6 +468,7 @@ class ChatRequest(BaseModel):
     history: list = []
     images: list = []  # base64 画像リスト [{data: "base64...", mime: "image/png"}, ...]
     bypass_approval: bool = False
+    no_think: bool = False
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
@@ -580,9 +581,9 @@ def _gather_auto_context() -> str:
     return "<auto_context>\n" + "\n\n".join(parts) + "\n</auto_context>"
 
 
-async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False):
+async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False):
     try:
-        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval):
+        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think):
             yield chunk
     except Exception as e:
         import traceback
@@ -641,7 +642,7 @@ def _sanitize_history(history: list) -> list:
     ]
 
 
-async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False):
+async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
 
@@ -686,6 +687,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             })
     else:
         user_content = user_message
+    if no_think and isinstance(user_content, str):
+        user_content = f"/no_think\n{user_content}"
     if bypass_approval and isinstance(user_content, str):
         user_content = f"[承認バイパスON: 確認・提案なしで即実行すること]\n{user_content}"
     # 自動コンテキスト収集（Claude Code方式: git status/diff/log をユーザーメッセージ先頭に注入）
@@ -867,7 +870,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     return StreamingResponse(
-        agent_stream(req.message, req.history, req.images, req.bypass_approval),
+        agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think),
         media_type="text/event-stream",
     )
 

@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import requests
+from datetime import datetime
 import httpx
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -1094,6 +1095,105 @@ async def workspace_cleanup(req: CleanupRequest):
         if blocked:
             print(f"[cleanup] blocked (protected): {[e['name'] for e in blocked]}", flush=True)
     return JSONResponse({"deleted": deleted, "errors": errors})
+
+
+# ---- セッション履歴管理 ----
+SESSIONS_DIR = Path(__file__).parent / "sessions"
+SESSIONS_DIR.mkdir(exist_ok=True)
+
+
+class SessionSaveRequest(BaseModel):
+    session_id: str
+    history: list
+    turn_models: list = []
+
+
+@app.get("/sessions")
+async def list_sessions():
+    """セッション一覧を取得（最新順、最大100件）"""
+    sessions = []
+    for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:100]:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            turn_count = len([m for m in data.get("history", []) if m.get("role") == "user"])
+            sessions.append({
+                "session_id": data.get("session_id"),
+                "title": data.get("title", "無題"),
+                "created_at": data.get("created_at"),
+                "updated_at": data.get("updated_at"),
+                "turn_count": turn_count,
+            })
+        except Exception:
+            pass
+    return JSONResponse(sessions)
+
+
+@app.post("/sessions/save")
+async def save_session(req: SessionSaveRequest):
+    """セッションを保存/更新"""
+    # パストラバーサル防止
+    if "/" in req.session_id or "\\" in req.session_id or ".." in req.session_id:
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+    session_file = SESSIONS_DIR / f"{req.session_id}.json"
+    now = datetime.now().isoformat()
+    # タイトル = 最初のユーザーメッセージの先頭50文字
+    title = "無題"
+    for msg in req.history:
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        content = item.get("text", "")
+                        break
+            if isinstance(content, str) and content.strip():
+                title = content.strip()[:50]
+                if len(content.strip()) > 50:
+                    title += "..."
+            break
+    created_at = now
+    if session_file.exists():
+        try:
+            existing = json.loads(session_file.read_text(encoding="utf-8"))
+            created_at = existing.get("created_at", now)
+        except Exception:
+            pass
+    data = {
+        "session_id": req.session_id,
+        "title": title,
+        "created_at": created_at,
+        "updated_at": now,
+        "history": req.history,
+        "turn_models": req.turn_models,
+    }
+    session_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return JSONResponse({"ok": True})
+
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    """セッション内容を取得"""
+    if "/" in session_id or "\\" in session_id or ".." in session_id:
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+    session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not session_file.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        data = json.loads(session_file.read_text(encoding="utf-8"))
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """セッションを削除"""
+    if "/" in session_id or "\\" in session_id or ".." in session_id:
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+    session_file = SESSIONS_DIR / f"{session_id}.json"
+    if session_file.exists():
+        session_file.unlink()
+    return JSONResponse({"ok": True})
 
 
 @app.get("/")

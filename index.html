@@ -2,7 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Azure Code Agent</title>
+<title>AI Code Agent</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚛️</text></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
@@ -211,7 +212,7 @@
   /* ---- コードブロック (markdown レンダリング) ---- */
   .ai pre { background: #181825; border: 1px solid #313244; border-radius: 8px; margin: 8px 0; overflow: hidden; }
   .ai pre .code-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px; background: #11111b; border-bottom: 1px solid #313244; font-size: 11px; color: #6c7086; font-family: monospace; }
-  .ai pre code { display: block; padding: 12px 14px; overflow-x: auto; font-size: 13px; line-height: 1.6; font-family: 'Consolas', 'Courier New', monospace; background: transparent; }
+  .ai pre code { display: block; padding: 12px 14px; overflow-x: hidden; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6; font-family: 'Consolas', 'Courier New', monospace; background: transparent; }
   .copy-btn { padding: 2px 8px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-size: 11px; }
   .copy-btn:hover { background: #45475a; }
   .copy-btn.copied { color: #a6e3a1; border-color: #a6e3a1; }
@@ -230,13 +231,13 @@
   .ai th { background: #181825; }
   .ai strong { color: #fab387; }
 </style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/catppuccin-mocha.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
 <div id="header">
-  🤖 Azure Code Agent
+  ⚛️ AI Code Agent
   <div id="header-right">
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>

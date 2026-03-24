@@ -76,8 +76,8 @@ def _run_bash_sandboxed(args: list) -> dict:
             timeout=COMMAND_TIMEOUT_SECONDS,
         )
         return {
-            "stdout": result.stdout[:4096],
-            "stderr": result.stderr[:2048],
+            "stdout": result.stdout[:8192],
+            "stderr": result.stderr[:4096],
             "returncode": result.returncode,
             "error": None,
             "sandbox": "bubblewrap",
@@ -135,8 +135,8 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
             shell=False,
         )
         return {
-            "stdout": result.stdout[:4096],
-            "stderr": result.stderr[:2048],
+            "stdout": result.stdout[:8192],
+            "stderr": result.stderr[:4096],
             "returncode": result.returncode,
             "error": None,
         }

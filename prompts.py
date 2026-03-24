@@ -39,6 +39,20 @@ _gitlab_section = f"""
    ```
    - **work_dir は workspace 相対パスで指定** (例: "MYPROJ", "proj/sub")
    - workspace ルートで `git init` してはいけない（他プロジェクトと混在するため）
+
+### イシュー一覧の取得
+- **必ず専用エンドポイントを使う**。curl で GitLab API を直接叩くと per_page 省略で件数が不足する。
+  ```
+  # オープンなイシュー一覧（デフォルト: AI-Codeagent）
+  curl -s http://localhost:8000/gitlab/issues
+  # クローズ済み
+  curl -s "http://localhost:8000/gitlab/issues?state=closed"
+  # 別リポジトリ指定
+  curl -s "http://localhost:8000/gitlab/issues?project=yuichi.matsuo%2Fother-repo"
+  ```
+  レスポンス: iid / state / title / description / web_url / labels の配列（iid 昇順、最大100件）
+- **イシュー一覧を表示する際は取得した全件をMarkdown表形式で番号順に列挙すること。省略・要約・「他にもあります」は禁止。**
+- **Markdown表はコードブロック（```）で囲まずにそのまま出力すること。囲むとレンダリングされない。**
 """ if GITLAB_USER and GITLAB_PAT else ""
 
 def get_system_prompt(bypass_approval: bool = False) -> str:

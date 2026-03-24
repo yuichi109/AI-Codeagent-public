@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS
 from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
@@ -880,6 +880,36 @@ async def chat(req: ChatRequest):
         agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think),
         media_type="text/event-stream",
     )
+
+
+@app.get("/gitlab/issues")
+async def gitlab_issues(project: str = "", state: str = "opened"):
+    """GitLab イシュー一覧を取得する。project は 'namespace/repo' 形式。省略時は GITLAB_USER のデフォルトリポジトリ。"""
+    if not GITLAB_PAT:
+        return JSONResponse({"error": "GITLAB_PAT が設定されていません"}, status_code=400)
+    ns = project or f"{GITLAB_USER}/AI-Codeagent"
+    encoded = ns.replace("/", "%2F")
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+            resp = await client.get(
+                f"https://gitlab.com/api/v4/projects/{encoded}/issues",
+                headers={"PRIVATE-TOKEN": GITLAB_PAT},
+                params={"per_page": 100, "state": state},
+            )
+        resp.raise_for_status()
+        issues = [
+            {
+                "iid": i["iid"],
+                "state": i["state"],
+                "title": i["title"],
+                "web_url": i["web_url"],
+            }
+            for i in resp.json()
+        ]
+        issues.sort(key=lambda x: x["iid"])
+        return JSONResponse(issues)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/gitlab/projects")

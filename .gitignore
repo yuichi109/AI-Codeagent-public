@@ -20,3 +20,6 @@ workspace/
 *.log
 .provider_config.json
 .ruff_cache/
+
+# セッション履歴（ローカルのみ）
+sessions/

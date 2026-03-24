@@ -231,12 +231,31 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [ ] **CLAUDE.md 自動読み込み**（#23）: 作業ディレクトリの `CLAUDE.md` を自動検出してシステムプロンプトに注入。プロジェクトごとに指示を切り替え可能に
 - [x] **ツール失敗時の自己修正強化**（#24）: エラー発生時に原因分析→修正→再実行のループを明示的にサポート。`execute_tool` にエラー種別ヒント追加、todo に `failed` ステータス追加、プロンプトにエラー種別対処表を追記（2026-03-21）
 - [x] **過去セッション履歴パネル**（#29）: 左ペインに過去セッション一覧を表示（Claude Code スタイル）。セッションはサーバー側 JSON ファイルに保存（localStorage の容量制限回避）。過去セッション閲覧は現在の API 履歴に影響しない（トークン消費ゼロ）（2026-03-24）
+- [x] **GitLabイシュー専用エンドポイント**（#16部分対応）: `GET /gitlab/issues` を追加。state パラメータで opened/closed/all を切り替え可能。per_page=100 で全件取得（2026-03-24）
+- [x] **シンタックスハイライト**（index.html）: highlight.js (atom-one-dark テーマ) を CDN で追加。コードブロックを自動ハイライト（2026-03-24）
+- [x] **コードブロック折り返し**（index.html）: `white-space: pre-wrap` + `word-break: break-word` で横スクロールを廃止（2026-03-24）
+- [x] **タイトル・アイコン変更**（index.html）: 「Azure Code Agent」→「AI Code Agent」、アイコンを ⚛️ に変更、SVG ファビコン追加（2026-03-24）
+- [x] **セッションファイルをGit管理外に**（.gitignore）: `sessions/` ディレクトリを .gitignore に追加（2026-03-24）
+- [x] **prompts.py イシュー表示指示改善**（2026-03-24）: イシュー一覧を全件・Markdown表形式で出力、コードブロックで囲まない指示を追加
 
 ### 品質・テスト
 - [ ] 各ツールの単体テスト（pytest）を書く
 - [ ] bubblewrap サンドボックスの脱出テスト
 - [ ] 長いプロンプトでのトークン上限テスト
 - [ ] 別 PC（社内プロキシあり）での動作確認
+
+### スキルシステム（#30）
+- [ ] **スキルファイル基盤**（★★★）: `skills/スキル名/SKILL.md` を定義・自動読み込みする仕組み
+- [ ] **`/` オートコンプリートUI**（#22と連携）: 入力欄で `/` を打つとスキル候補をポップアップ表示
+- [ ] **エージェントによるスキル自己管理**: 会話からスキルを生成・編集・削除できる
+- [ ] **初期スキルセット**: `/commit` `/review` `/explain` `/test` `/todo`
+
+### 配布・チーム展開（#15）
+- [ ] **Ansibleプレイブック**（`setup.yml`）: Docker・Ansible導入済みUbuntuイメージへの一撃セットアップ
+  - 配布Ubuntuイメージ前提: Docker・Ansible インストール済み
+  - 不足パッケージ補完（python3-venv, bubblewrap, git）
+  - venv作成・pip install・.env設定・systemdサービス登録まで自動化
+- [ ] **Docker化オプション**（WSL2なし環境向け）: bubblewrapをオプション化し `SANDBOX=none` で無効化可能に
 
 ### ドキュメント
 - [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記
@@ -305,4 +324,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-18（#13 Bash完全アクセス・407修正・承認バイパストグル・バイパス安定化）
+- **最終更新**: 2026-03-24（UI改善・GitLabイシューエンドポイント・スキルシステム #30 新規追加）

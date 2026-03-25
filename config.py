@@ -26,16 +26,57 @@ ALLOWED_WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
 
-# Azure AI Foundry (省略可)
-FOUNDRY_ENDPOINT: str = os.getenv("FOUNDRY_ENDPOINT", "")
-FOUNDRY_API_KEY: str  = os.getenv("FOUNDRY_API_KEY", "")
-FOUNDRY_MODEL: str    = os.getenv("FOUNDRY_MODEL", "")
-# カンマ区切りで複数モデルを指定可（例: gpt-5.4-mini,gpt-5.4）未設定時は FOUNDRY_MODEL のみ
+# Azure AI Foundry (省略可) — 後方互換用（= FOUNDRY_INSTANCES[0]）
+FOUNDRY_ENDPOINT: str    = os.getenv("FOUNDRY_ENDPOINT", "")
+FOUNDRY_API_KEY: str     = os.getenv("FOUNDRY_API_KEY", "")
+FOUNDRY_MODEL: str       = os.getenv("FOUNDRY_MODEL", "")
+FOUNDRY_API_VERSION: str = os.getenv("FOUNDRY_API_VERSION", "2024-12-01-preview")
 _foundry_models_raw = os.getenv("FOUNDRY_MODELS", "")
 FOUNDRY_MODELS: list[str] = (
     [m.strip() for m in _foundry_models_raw.split(",") if m.strip()]
     if _foundry_models_raw else ([FOUNDRY_MODEL] if FOUNDRY_MODEL else [])
 )
+
+# Azure AI Foundry インスタンス一覧（複数対応）
+# 既存 FOUNDRY_* を instance 1 として扱い、FOUNDRY_2_*、FOUNDRY_3_* ... を追加可能
+def _parse_foundry_instances() -> list[dict]:
+    instances = []
+    # インスタンス 1: 既存の FOUNDRY_* (後方互換)
+    if FOUNDRY_ENDPOINT:
+        instances.append({
+            "id": "foundry_1",
+            "name": os.getenv("FOUNDRY_NAME", "Azure AI Foundry"),
+            "endpoint": FOUNDRY_ENDPOINT,
+            "api_key": FOUNDRY_API_KEY,
+            "models": FOUNDRY_MODELS,
+            "default_model": FOUNDRY_MODEL or (FOUNDRY_MODELS[0] if FOUNDRY_MODELS else ""),
+            "api_version": FOUNDRY_API_VERSION,
+        })
+    # インスタンス 2, 3, ... : FOUNDRY_N_ENDPOINT が続く限り読み込む
+    n = 2
+    while True:
+        ep = os.getenv(f"FOUNDRY_{n}_ENDPOINT", "")
+        if not ep:
+            break
+        models_raw = os.getenv(f"FOUNDRY_{n}_MODELS", "")
+        default_model = os.getenv(f"FOUNDRY_{n}_MODEL", "")
+        models = [m.strip() for m in models_raw.split(",") if m.strip()] if models_raw else ([default_model] if default_model else [])
+        instances.append({
+            "id": f"foundry_{n}",
+            "name": os.getenv(f"FOUNDRY_{n}_NAME", f"Azure AI Foundry {n}"),
+            "endpoint": ep,
+            "api_key": os.getenv(f"FOUNDRY_{n}_API_KEY", ""),
+            "models": models,
+            "default_model": default_model or (models[0] if models else ""),
+            "api_version": os.getenv(f"FOUNDRY_{n}_API_VERSION", "2024-12-01-preview"),
+        })
+        n += 1
+    return instances
+
+FOUNDRY_INSTANCES: list[dict] = _parse_foundry_instances()
+
+# エージェント名（自己紹介時に使う架空の名前）
+AGENT_NAME: str = os.getenv("AGENT_NAME", "")
 
 # GitLab 連携 (省略可)
 GITLAB_USER: str = os.getenv("GITLAB_USER", "")

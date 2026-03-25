@@ -268,7 +268,7 @@
       <label>プロバイダー種別</label>
       <select id="pv-preset" class="pv-input" onchange="onPresetChange()">
         <option value="azure">🔵 Azure OpenAI</option>
-        <option value="foundry">🟣 Azure AI Foundry</option>
+        <!-- Foundry インスタンスは JS で動的追加 -->
         <option value="local">🟢 ローカルLLM（カスタム）</option>
       </select>
     </div>
@@ -304,6 +304,9 @@
       <button id="pv-azure-btn" class="pv-btn" onclick="resetToAzure()">Azureに戻す</button>
     </div>
     <div id="pv-current"></div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid #313244;text-align:center;">
+      <a href="/setup" target="_blank" style="font-size:12px;color:#6c7086;text-decoration:none;">🔧 詳細設定（.env 編集）</a>
+    </div>
   </div>
 </div>
 
@@ -1403,7 +1406,23 @@
   async function toggleProviderPanel() {
     pvPanelOpen = !pvPanelOpen;
     document.getElementById('provider-panel').classList.toggle('open', pvPanelOpen);
-    if (pvPanelOpen) { await loadCurrentProvider(); pvUrlHistoryRender(); }
+    if (pvPanelOpen) { await loadFoundryInstances(); await loadCurrentProvider(); pvUrlHistoryRender(); }
+  }
+
+  async function loadFoundryInstances() {
+    try {
+      const presets = await fetch('/providers/presets').then(r => r.json());
+      const sel = document.getElementById('pv-preset');
+      // 既存の foundry_* オプションを削除して再構築
+      Array.from(sel.options).filter(o => o.value.startsWith('foundry')).forEach(o => o.remove());
+      const localOpt = sel.querySelector('option[value="local"]');
+      (presets.foundry_instances || []).forEach(inst => {
+        const opt = document.createElement('option');
+        opt.value = inst.id;
+        opt.textContent = `🟣 ${inst.name}`;
+        sel.insertBefore(opt, localOpt);
+      });
+    } catch(e) {}
   }
 
   async function loadCurrentProvider() {
@@ -1413,7 +1432,8 @@
       if (data.type === 'azure' || data.type === 'foundry') {
         document.getElementById('pv-url').value = '';
         document.getElementById('pv-apikey').value = '';
-        syncPresetUI(data.type);
+        // foundry の場合は preset_id（例: foundry_1）を使う
+        syncPresetUI(data.type === 'foundry' ? (data.preset_id || 'foundry_1') : 'azure');
       } else {
         // openai_compatible: URLは /v1 を除いて表示
         const base = (data.url || '').replace(/\/v1$/, '');
@@ -1436,14 +1456,15 @@
     const applyBtn = document.getElementById('pv-apply-btn');
     const azureBtn = document.getElementById('pv-azure-btn');
     const urlInput = document.getElementById('pv-url');
-    if (preset === 'azure' || preset === 'foundry') {
+    const isFoundry = preset === 'foundry' || preset.startsWith('foundry_');
+    if (preset === 'azure' || isFoundry) {
       // .env 設定を使うプリセット — URL/キー欄は不要
       urlGroup.style.display = 'none';
       apikeyGroup.style.display = 'none';
       fetchBtn.style.display = 'none';
       document.getElementById('pv-model-group').style.display = 'none';
       applyBtn.style.display = 'none';
-      azureBtn.style.display = preset === 'azure' ? '' : 'none';
+      azureBtn.style.display = (preset === 'azure') ? 'none' : '';
     } else {
       urlGroup.style.display = '';
       apikeyGroup.style.display = '';
@@ -1459,8 +1480,8 @@
     localStorage.setItem('pv_preset', preset);
     if (preset === 'azure') {
       await resetToAzure();
-    } else if (preset === 'foundry') {
-      await switchToFoundryPreset();
+    } else if (preset === 'foundry' || preset.startsWith('foundry_')) {
+      await switchToFoundryPreset(preset);
     } else {
       syncPresetUI(preset);
       document.getElementById('pv-url').value = '';
@@ -1469,26 +1490,26 @@
     }
   }
 
-  async function switchToFoundryPreset() {
-    syncPresetUI('foundry');
+  async function switchToFoundryPreset(presetId = 'foundry_1') {
+    syncPresetUI(presetId);
     setPvStatus('切り替え中...', null);
     try {
-      // まず .env に設定があるか確認
       const presets = await fetch('/providers/presets').then(r => r.json());
-      if (!presets.foundry) {
+      if (!presets.foundry_instances || presets.foundry_instances.length === 0) {
         setPvStatus('⚠️ .env に FOUNDRY_ENDPOINT / FOUNDRY_MODEL が未設定です', false);
         return;
       }
       const res = await fetch('/providers/preset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: 'foundry' }),
+        body: JSON.stringify({ preset: presetId }),
       });
       const data = await res.json();
       if (data.error) { setPvStatus('⚠️ ' + data.error, false); return; }
       updatePvCurrent(data.provider);
       await loadDeployments();
-      setPvStatus(`✓ Azure AI Foundry に切り替えました (${data.provider.model})`, true);
+      const instName = data.provider.name || 'Azure AI Foundry';
+      setPvStatus(`✓ ${instName} に切り替えました (${data.provider.model})`, true);
       if (document.getElementById('pv-reset-history').checked) {
         history = []; turns = []; localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SESSION_ID_KEY);
         chat.innerHTML = ''; updateTurnCount();
@@ -1500,15 +1521,16 @@
   }
 
   function updatePvCurrent(data) {
-    const labelMap = { azure: 'Azure OpenAI', foundry: 'Azure AI Foundry', openai_compatible: 'OpenAI互換' };
-    const iconMap  = { azure: '🔵', foundry: '🟣', openai_compatible: '🟢' };
-    const label = labelMap[data.type] || 'OpenAI互換';
-    const icon  = iconMap[data.type]  || '🟢';
+    const iconMap = { azure: '🔵', foundry: '🟣', openai_compatible: '🟢' };
+    const icon = iconMap[data.type] || '🟢';
+    const label = data.type === 'foundry' ? (data.name || 'Azure AI Foundry')
+                : data.type === 'azure'   ? 'Azure OpenAI'
+                : 'OpenAI互換';
     document.getElementById('pv-current').textContent = `現在: ${label} / ${data.model || '(未設定)'}`;
     document.getElementById('provider-label').textContent = `${icon} ${shortModel(data.model)}`;
-    // Azure以外ではデプロイ選択ドロップダウンを隠す
+    // Azure / Foundry はデプロイ選択ドロップダウンを表示
     const sel = document.getElementById('model-select');
-    if (data.type === 'azure') {
+    if (data.type === 'azure' || data.type === 'foundry') {
       if (sel.options.length > 1) sel.value = data.model;
     } else {
       sel.style.display = 'none';

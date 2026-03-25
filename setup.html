@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>AI Code Agent — 詳細設定</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; min-height: 100vh; }
+  header { background: #181825; border-bottom: 1px solid #313244; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+  header a { color: #6c7086; text-decoration: none; font-size: 13px; }
+  header a:hover { color: #cdd6f4; }
+  header h1 { font-size: 16px; font-weight: bold; }
+  .container { max-width: 760px; margin: 32px auto; padding: 0 20px 60px; }
+  .section { background: #181825; border: 1px solid #313244; border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+  .section-header { padding: 14px 20px; border-bottom: 1px solid #313244; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .section-header:hover { background: #1e1e2e; }
+  .section-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: #a6adc8; }
+  .field input, .field select { background: #313244; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; padding: 8px 10px; font-size: 13px; outline: none; width: 100%; }
+  .field input:focus, .field select:focus { border-color: #89b4fa; }
+  .field .hint { font-size: 11px; color: #6c7086; margin-top: 2px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .foundry-inst { border: 1px solid #313244; border-radius: 8px; padding: 14px; position: relative; }
+  .foundry-inst-title { font-size: 13px; font-weight: bold; color: #89b4fa; margin-bottom: 10px; }
+  .remove-btn { position: absolute; top: 10px; right: 10px; background: none; border: none; color: #6c7086; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .remove-btn:hover { background: #f38ba820; color: #f38ba8; }
+  .add-btn { background: #313244; border: 1px dashed #45475a; border-radius: 6px; color: #6c7086; padding: 8px; width: 100%; cursor: pointer; font-size: 13px; text-align: center; }
+  .add-btn:hover { border-color: #89b4fa; color: #89b4fa; }
+  .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #181825; border-top: 1px solid #313244; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+  .save-btn { background: #89b4fa; color: #1e1e2e; border: none; border-radius: 6px; padding: 8px 24px; font-size: 14px; font-weight: bold; cursor: pointer; }
+  .save-btn:hover { background: #74c7ec; }
+  .save-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
+  #save-status { font-size: 13px; }
+  .chevron { margin-left: auto; transition: transform 0.2s; }
+  .collapsed .chevron { transform: rotate(-90deg); }
+  .collapsed .section-body { display: none; }
+  .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #313244; color: #6c7086; font-weight: normal; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/">← チャットに戻る</a>
+  <h1>🔧 詳細設定（.env）</h1>
+</header>
+
+<div class="container">
+
+  <!-- Azure OpenAI -->
+  <div class="section" id="sec-azure">
+    <div class="section-header" onclick="toggleSection('sec-azure')">
+      🔵 Azure OpenAI <span class="tag">必須</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="field">
+        <label>エンドポイント URL</label>
+        <input id="az-endpoint" type="text" placeholder="https://your-resource.openai.azure.com">
+      </div>
+      <div class="field">
+        <label>API キー</label>
+        <input id="az-apikey" type="password" placeholder="（変更しない場合は空欄）">
+        <span class="hint" id="az-apikey-hint"></span>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>デフォルトデプロイ名</label>
+          <input id="az-deployment" type="text" placeholder="gpt-5-mini">
+        </div>
+        <div class="field">
+          <label>API バージョン</label>
+          <input id="az-apiversion" type="text" placeholder="2025-01-01-preview">
+        </div>
+      </div>
+      <div class="field">
+        <label>デプロイ一覧（カンマ区切り）</label>
+        <input id="az-deployments" type="text" placeholder="gpt-5-mini,gpt-4.1-mini,gpt-4.1">
+        <span class="hint">モデル切り替えドロップダウンに表示されます</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Azure AI Foundry -->
+  <div class="section" id="sec-foundry">
+    <div class="section-header" onclick="toggleSection('sec-foundry')">
+      🟣 Azure AI Foundry <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div id="foundry-list"></div>
+      <button class="add-btn" onclick="addFoundryInstance()">＋ Foundry インスタンスを追加</button>
+    </div>
+  </div>
+
+  <!-- エージェント設定 -->
+  <div class="section" id="sec-agent">
+    <div class="section-header" onclick="toggleSection('sec-agent')">
+      🤖 エージェント設定
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="field">
+        <label>エージェント名（自己紹介時に使う名前）</label>
+        <input id="agent-name" type="text" placeholder="SPEC-AI">
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>作業ディレクトリ</label>
+          <input id="agent-workdir" type="text" placeholder="./workspace">
+        </div>
+        <div class="field">
+          <label>コマンドタイムアウト（秒）</label>
+          <input id="agent-timeout" type="number" placeholder="30" min="5" max="300">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GitLab -->
+  <div class="section" id="sec-gitlab">
+    <div class="section-header" onclick="toggleSection('sec-gitlab')">
+      🦊 GitLab 連携 <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="row">
+        <div class="field">
+          <label>ユーザー名</label>
+          <input id="gl-user" type="text" placeholder="your.name">
+        </div>
+        <div class="field">
+          <label>Personal Access Token (PAT)</label>
+          <input id="gl-pat" type="password" placeholder="（変更しない場合は空欄）">
+          <span class="hint" id="gl-pat-hint"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SearXNG -->
+  <div class="section" id="sec-searxng">
+    <div class="section-header" onclick="toggleSection('sec-searxng')">
+      🔍 SearXNG 検索バックエンド <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="row">
+        <div class="field">
+          <label>ベース URL</label>
+          <input id="sx-url" type="text" placeholder="http://localhost:8888">
+        </div>
+        <div class="field">
+          <label>有効化</label>
+          <select id="sx-enabled">
+            <option value="false">無効</option>
+            <option value="true">有効</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="save-bar">
+  <button class="save-btn" id="save-btn" onclick="saveConfig()">💾 保存してサーバーを再起動</button>
+  <span id="save-status"></span>
+</div>
+
+<script>
+  let foundryInstances = [];
+
+  function toggleSection(id) {
+    document.getElementById(id).classList.toggle('collapsed');
+  }
+
+  function renderFoundryList() {
+    const container = document.getElementById('foundry-list');
+    container.innerHTML = '';
+    foundryInstances.forEach((inst, i) => {
+      const label = i === 0 ? 'インスタンス 1（メイン）' : `インスタンス ${i + 1}`;
+      const prefix = i === 0 ? 'FOUNDRY' : `FOUNDRY_${i + 1}`;
+      container.innerHTML += `
+        <div class="foundry-inst" id="fi-${i}">
+          <div class="foundry-inst-title">🟣 ${label} <span style="font-size:10px;color:#6c7086">(${prefix}_*)</span></div>
+          ${i > 0 ? `<button class="remove-btn" onclick="removeFoundryInstance(${i})" title="削除">✕</button>` : ''}
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div class="field">
+              <label>表示名</label>
+              <input type="text" value="${inst.name}" placeholder="Azure AI Foundry" oninput="foundryInstances[${i}].name=this.value">
+            </div>
+            <div class="field">
+              <label>エンドポイント URL</label>
+              <input type="text" value="${inst.endpoint}" placeholder="https://your-project.cognitiveservices.azure.com/" oninput="foundryInstances[${i}].endpoint=this.value">
+            </div>
+            <div class="field">
+              <label>API キー</label>
+              <input type="password" value="${inst.api_key}" placeholder="${inst.api_key_set ? '（変更しない場合は空欄）' : ''}" oninput="foundryInstances[${i}].api_key=this.value">
+              ${inst.api_key_set ? `<span class="hint">現在: 設定済み</span>` : ''}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="field">
+                <label>デフォルトモデル</label>
+                <input type="text" value="${inst.model}" placeholder="gpt-4.1-mini" oninput="foundryInstances[${i}].model=this.value">
+              </div>
+              <div class="field">
+                <label>API バージョン</label>
+                <input type="text" value="${inst.api_version}" placeholder="2024-12-01-preview" oninput="foundryInstances[${i}].api_version=this.value">
+              </div>
+            </div>
+            <div class="field">
+              <label>モデル一覧（カンマ区切り）</label>
+              <input type="text" value="${inst.models}" placeholder="gpt-5-mini,gpt-4.1-mini" oninput="foundryInstances[${i}].models=this.value">
+            </div>
+          </div>
+        </div>`;
+    });
+  }
+
+  function addFoundryInstance() {
+    foundryInstances.push({ name: '', endpoint: '', api_key: '', api_key_set: false, model: '', models: '', api_version: '2024-12-01-preview' });
+    renderFoundryList();
+  }
+
+  function removeFoundryInstance(i) {
+    foundryInstances.splice(i, 1);
+    renderFoundryList();
+  }
+
+  async function loadConfig() {
+    try {
+      const data = await fetch('/setup/current').then(r => r.json());
+      const az = data.azure;
+      document.getElementById('az-endpoint').value = az.endpoint;
+      document.getElementById('az-apikey').placeholder = az.api_key_set ? '（変更しない場合は空欄）' : '';
+      document.getElementById('az-apikey-hint').textContent = az.api_key_set ? '現在: 設定済み' : '未設定';
+      document.getElementById('az-deployment').value = az.deployment;
+      document.getElementById('az-deployments').value = az.deployments;
+      document.getElementById('az-apiversion').value = az.api_version;
+
+      foundryInstances = data.foundry.length > 0 ? data.foundry : [];
+      renderFoundryList();
+
+      const ag = data.agent;
+      document.getElementById('agent-name').value = ag.name;
+      document.getElementById('agent-workdir').value = ag.workdir;
+      document.getElementById('agent-timeout').value = ag.timeout;
+
+      const gl = data.gitlab;
+      document.getElementById('gl-user').value = gl.user;
+      document.getElementById('gl-pat').placeholder = gl.pat_set ? '（変更しない場合は空欄）' : '';
+      document.getElementById('gl-pat-hint').textContent = gl.pat_set ? '現在: 設定済み' : '未設定';
+
+      const sx = data.searxng;
+      document.getElementById('sx-url').value = sx.url;
+      document.getElementById('sx-enabled').value = sx.enabled;
+    } catch(e) {
+      document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
+    }
+  }
+
+  async function saveConfig() {
+    const btn = document.getElementById('save-btn');
+    const status = document.getElementById('save-status');
+    btn.disabled = true;
+    status.textContent = '保存中...';
+    status.style.color = '#6c7086';
+
+    const payload = {
+      azure: {
+        endpoint:    document.getElementById('az-endpoint').value,
+        api_key:     document.getElementById('az-apikey').value,
+        deployment:  document.getElementById('az-deployment').value,
+        deployments: document.getElementById('az-deployments').value,
+        api_version: document.getElementById('az-apiversion').value,
+      },
+      foundry: foundryInstances,
+      agent: {
+        name:    document.getElementById('agent-name').value,
+        workdir: document.getElementById('agent-workdir').value,
+        timeout: document.getElementById('agent-timeout').value,
+      },
+      gitlab: {
+        user: document.getElementById('gl-user').value,
+        pat:  document.getElementById('gl-pat').value,
+      },
+      searxng: {
+        url:     document.getElementById('sx-url').value,
+        enabled: document.getElementById('sx-enabled').value,
+      },
+    };
+
+    try {
+      const res = await fetch('/setup/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        status.textContent = '✓ 保存しました。サーバーを再起動しています...';
+        status.style.color = '#a6e3a1';
+        setTimeout(() => {
+          status.textContent = '✓ 完了。チャット画面をリロードしてください。';
+          btn.disabled = false;
+        }, 3000);
+      } else {
+        throw new Error(data.error || '不明なエラー');
+      }
+    } catch(e) {
+      status.textContent = '⚠️ ' + e.message;
+      status.style.color = '#f38ba8';
+      btn.disabled = false;
+    }
+  }
+
+  loadConfig();
+</script>
+</body>
+</html>

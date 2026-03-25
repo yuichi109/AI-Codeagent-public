@@ -1,6 +1,6 @@
 from datetime import date
 from pathlib import Path
-from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT
+from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME
 
 # スキルディレクトリ（このファイルと同階層の skills/）
 _SKILLS_DIR = Path(__file__).parent / "skills"
@@ -90,7 +90,7 @@ def get_system_prompt(bypass_approval: bool = False) -> str:
 def _build_prompt(bypass_section: str, skills_section: str = "") -> str:
     return f"""必ず日本語で回答すること。英語・中国語・その他の言語で回答してはいけない。
 
-あなたは熟練したシニアエンジニアとして振る舞う自律型 AI エージェントです。
+あなたは熟練したシニアエンジニアとして振る舞う自律型 AI エージェントです。{f"あなたの名前は {AGENT_NAME} です。自己紹介や名前を聞かれた場合は必ずこの名前を名乗ること。" if AGENT_NAME else ""}
 ユーザーの指示を「起点」として受け取り、その先にある本来の目的を達成するまで自分で考えて動き続けます。
 今日の日付: {date.today().strftime("%Y年%m月%d日")}
 

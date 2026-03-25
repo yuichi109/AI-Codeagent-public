@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES
 from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
@@ -62,15 +62,15 @@ _provider_config = _load_provider_config()
 
 def _make_client():
     """現在の _provider_config に基づいてLLMクライアントを生成する"""
-    if _provider_config["type"] == "azure":
+    if _provider_config["type"] in ("azure", "foundry"):
         return AzureOpenAI(
             azure_endpoint=_provider_config["url"],
             api_key=_provider_config["api_key"],
-            api_version=_provider_config["api_version"],
+            api_version=_provider_config["api_version"] or (FOUNDRY_API_VERSION if _provider_config["type"] == "foundry" else AZURE_OPENAI_API_VERSION),
             http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
         )
     else:
-        # "foundry" も "openai_compatible" も OpenAI互換クライアントで統一
+        # "openai_compatible" (ローカルLLM等) は OpenAI互換クライアント
         return OpenAI(
             base_url=_provider_config["url"].rstrip("/") + "/v1",
             api_key=_provider_config["api_key"] or "dummy",
@@ -973,11 +973,23 @@ class ProviderConfigRequest(BaseModel):
     tools_enabled: bool | None = None  # None=自動判定（Azure→True, ローカル→False）
 
 
+def _active_foundry_instance() -> dict | None:
+    """現在アクティブな Foundry インスタンスを返す（非 foundry タイプなら None）"""
+    if _provider_config["type"] != "foundry":
+        return None
+    preset_id = _provider_config.get("preset_id", "foundry_1")
+    for inst in FOUNDRY_INSTANCES:
+        if inst["id"] == preset_id:
+            return inst
+    return FOUNDRY_INSTANCES[0] if FOUNDRY_INSTANCES else None
+
+
 @app.get("/providers/deployments")
 async def providers_deployments():
     """現在のプロバイダーのモデル一覧と現在のモデルを返す"""
     if _provider_config["type"] == "foundry":
-        deployments = FOUNDRY_MODELS
+        inst = _active_foundry_instance()
+        deployments = inst["models"] if inst else FOUNDRY_MODELS
     else:
         deployments = AZURE_OPENAI_DEPLOYMENTS
     return JSONResponse({
@@ -994,7 +1006,11 @@ class DeploymentRequest(BaseModel):
 async def providers_set_deployment(req: DeploymentRequest):
     """現在のプロバイダーのモデルだけを切り替える"""
     global _provider_config
-    allowed = FOUNDRY_MODELS if _provider_config["type"] == "foundry" else AZURE_OPENAI_DEPLOYMENTS
+    if _provider_config["type"] == "foundry":
+        inst = _active_foundry_instance()
+        allowed = inst["models"] if inst else FOUNDRY_MODELS
+    else:
+        allowed = AZURE_OPENAI_DEPLOYMENTS
     if req.model not in allowed:
         return JSONResponse({"error": f"未登録のモデル: {req.model}"}, status_code=400)
     _provider_config = {**_provider_config, "model": req.model}
@@ -1006,6 +1022,8 @@ async def providers_set_deployment(req: DeploymentRequest):
 async def providers_current():
     return JSONResponse({
         "type": _provider_config["type"],
+        "preset_id": _provider_config.get("preset_id", _provider_config["type"]),
+        "name": _provider_config.get("name", ""),
         "url": _provider_config["url"],
         "model": _provider_config["model"],
         "tools_enabled": _provider_config.get("tools_enabled", True),
@@ -1043,11 +1061,13 @@ class PresetRequest(BaseModel):
 
 @app.get("/providers/presets")
 async def providers_presets():
-    """どのプリセットが .env に設定済みかを返す"""
+    """設定済みプリセット一覧を返す"""
     return JSONResponse({
         "azure": bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY),
-        "foundry": bool(FOUNDRY_ENDPOINT and FOUNDRY_MODEL),
-        "foundry_model": FOUNDRY_MODEL,
+        "foundry_instances": [
+            {"id": inst["id"], "name": inst["name"], "default_model": inst["default_model"]}
+            for inst in FOUNDRY_INSTANCES
+        ],
     })
 
 
@@ -1057,15 +1077,20 @@ async def providers_set_preset(req: PresetRequest):
     global _provider_config
     if req.preset == "azure":
         _provider_config = dict(_default_provider_config)
-    elif req.preset == "foundry":
-        if not FOUNDRY_ENDPOINT or not FOUNDRY_MODEL:
-            return JSONResponse({"error": "FOUNDRY_ENDPOINT / FOUNDRY_MODEL が .env に未設定です"}, status_code=400)
+    elif req.preset.startswith("foundry"):
+        # "foundry" (後方互換) → "foundry_1" に正規化
+        preset_id = req.preset if req.preset != "foundry" else "foundry_1"
+        inst = next((i for i in FOUNDRY_INSTANCES if i["id"] == preset_id), None)
+        if not inst:
+            return JSONResponse({"error": f"Foundry インスタンスが見つかりません: {preset_id}"}, status_code=400)
         _provider_config = {
             "type": "foundry",
-            "url": FOUNDRY_ENDPOINT,
-            "api_key": FOUNDRY_API_KEY,
-            "model": FOUNDRY_MODEL,
-            "api_version": "",
+            "preset_id": inst["id"],
+            "name": inst["name"],
+            "url": inst["endpoint"],
+            "api_key": inst["api_key"],
+            "model": inst["default_model"],
+            "api_version": inst["api_version"],
             "tools_enabled": True,
         }
     else:
@@ -1073,6 +1098,8 @@ async def providers_set_preset(req: PresetRequest):
     _save_provider_config(_provider_config)
     return JSONResponse({"status": "ok", "provider": {
         "type": _provider_config["type"],
+        "preset_id": _provider_config.get("preset_id", _provider_config["type"]),
+        "name": _provider_config.get("name", ""),
         "url": _provider_config["url"],
         "model": _provider_config["model"],
         "tools_enabled": _provider_config.get("tools_enabled", True),
@@ -1087,15 +1114,23 @@ async def providers_config(req: ProviderConfigRequest):
         # Azureデフォルトにリセット
         _provider_config = dict(_default_provider_config)
     else:
-        provider_type = "azure" if ".openai.azure.com" in req.url else "openai_compatible"
-        # tools_enabled: 明示指定があればそれを使う。なければ Azure→True, ローカル→False
-        tools_enabled = req.tools_enabled if req.tools_enabled is not None else (provider_type == "azure")
+        if ".openai.azure.com" in req.url:
+            provider_type = "azure"
+            api_version = _default_provider_config["api_version"]
+        elif ".cognitiveservices.azure.com" in req.url:
+            provider_type = "foundry"
+            api_version = FOUNDRY_API_VERSION
+        else:
+            provider_type = "openai_compatible"
+            api_version = _default_provider_config["api_version"]
+        # tools_enabled: 明示指定があればそれを使う。なければ Azure/Foundry→True, ローカル→False
+        tools_enabled = req.tools_enabled if req.tools_enabled is not None else (provider_type in ("azure", "foundry"))
         _provider_config = {
             "type": provider_type,
             "url": req.url,
             "api_key": req.api_key,
             "model": req.model,
-            "api_version": _default_provider_config["api_version"],  # Azure用（openai_compatibleでは未使用）
+            "api_version": api_version,
             "tools_enabled": tools_enabled,
         }
     _save_provider_config(_provider_config)
@@ -1259,3 +1294,188 @@ async def delete_session(session_id: str):
 @app.get("/")
 async def index():
     return FileResponse("index.html")
+
+
+@app.get("/setup")
+async def setup_page():
+    return FileResponse("setup.html")
+
+
+@app.get("/setup/current")
+async def setup_current():
+    """現在の .env 値を返す（APIキーはマスク）"""
+    def mask(v: str) -> str:
+        return v[:6] + "***" if len(v) > 6 else ("***" if v else "")
+
+    env_path = Path(__file__).parent / ".env"
+    raw = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                raw[k.strip()] = v.strip()
+
+    # Foundry インスタンスを動的に収集
+    foundry_list = []
+    # インスタンス 1 (既存 FOUNDRY_*)
+    if raw.get("FOUNDRY_ENDPOINT"):
+        foundry_list.append({
+            "name":        raw.get("FOUNDRY_NAME", ""),
+            "endpoint":    raw.get("FOUNDRY_ENDPOINT", ""),
+            "api_key":     mask(raw.get("FOUNDRY_API_KEY", "")),
+            "api_key_set": bool(raw.get("FOUNDRY_API_KEY")),
+            "model":       raw.get("FOUNDRY_MODEL", ""),
+            "models":      raw.get("FOUNDRY_MODELS", ""),
+            "api_version": raw.get("FOUNDRY_API_VERSION", "2024-12-01-preview"),
+            "env_prefix":  "FOUNDRY",
+        })
+    # インスタンス 2, 3, ...
+    n = 2
+    while raw.get(f"FOUNDRY_{n}_ENDPOINT"):
+        foundry_list.append({
+            "name":        raw.get(f"FOUNDRY_{n}_NAME", ""),
+            "endpoint":    raw.get(f"FOUNDRY_{n}_ENDPOINT", ""),
+            "api_key":     mask(raw.get(f"FOUNDRY_{n}_API_KEY", "")),
+            "api_key_set": bool(raw.get(f"FOUNDRY_{n}_API_KEY")),
+            "model":       raw.get(f"FOUNDRY_{n}_MODEL", ""),
+            "models":      raw.get(f"FOUNDRY_{n}_MODELS", ""),
+            "api_version": raw.get(f"FOUNDRY_{n}_API_VERSION", "2024-12-01-preview"),
+            "env_prefix":  f"FOUNDRY_{n}",
+        })
+        n += 1
+
+    return JSONResponse({
+        "azure": {
+            "endpoint":    raw.get("AZURE_OPENAI_ENDPOINT", ""),
+            "api_key":     mask(raw.get("AZURE_OPENAI_API_KEY", "")),
+            "api_key_set": bool(raw.get("AZURE_OPENAI_API_KEY")),
+            "deployment":  raw.get("AZURE_OPENAI_DEPLOYMENT", ""),
+            "deployments": raw.get("AZURE_OPENAI_DEPLOYMENTS", ""),
+            "api_version": raw.get("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
+        },
+        "foundry": foundry_list,
+        "agent": {
+            "name":    raw.get("AGENT_NAME", ""),
+            "workdir": raw.get("ALLOWED_WORK_DIR", "./workspace"),
+            "timeout": raw.get("COMMAND_TIMEOUT_SECONDS", "30"),
+        },
+        "gitlab": {
+            "user": raw.get("GITLAB_USER", ""),
+            "pat":  mask(raw.get("GITLAB_PAT", "")),
+            "pat_set": bool(raw.get("GITLAB_PAT")),
+        },
+        "searxng": {
+            "url":     raw.get("SEARXNG_BASE_URL", "http://localhost:8888"),
+            "enabled": raw.get("SEARXNG_ENABLED", "false"),
+        },
+    })
+
+
+class SetupSaveRequest(BaseModel):
+    azure: dict
+    foundry: list
+    agent: dict
+    gitlab: dict
+    searxng: dict
+
+
+@app.post("/setup/save")
+async def setup_save(req: SetupSaveRequest):
+    """フォームの値を .env に書き込んでサービスを再起動する"""
+    env_path = Path(__file__).parent / ".env"
+
+    # 既存 .env を読んで「既知キー以外のコメント行・カスタム行」を保持
+    existing_lines = []
+    known_prefixes = (
+        "AZURE_OPENAI_", "FOUNDRY", "AGENT_NAME", "ALLOWED_WORK_DIR",
+        "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "no_proxy", "NO_PROXY",
+    )
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or not stripped:
+                existing_lines.append(line)  # コメント・空行は保持
+            elif not any(stripped.startswith(p) for p in known_prefixes):
+                existing_lines.append(line)  # 未知キーも保持
+
+    def api_key_val(new_val: str, key_in_env: str) -> str:
+        """新値が *** のみの場合は既存値を維持"""
+        if "***" in new_val:
+            # 既存 .env から取得
+            if env_path.exists():
+                for line in env_path.read_text().splitlines():
+                    if line.startswith(key_in_env + "="):
+                        return line.partition("=")[2].strip()
+            return ""
+        return new_val
+
+    lines = ["# AI Code Agent 設定ファイル（/setup で生成）", ""]
+
+    # Azure OpenAI
+    az = req.azure
+    lines += [
+        "# Azure OpenAI",
+        f"AZURE_OPENAI_API_KEY={api_key_val(az.get('api_key',''), 'AZURE_OPENAI_API_KEY')}",
+        f"AZURE_OPENAI_ENDPOINT={az.get('endpoint','')}",
+        f"AZURE_OPENAI_DEPLOYMENT={az.get('deployment','')}",
+        f"AZURE_OPENAI_DEPLOYMENTS={az.get('deployments','')}",
+        f"AZURE_OPENAI_API_VERSION={az.get('api_version','2025-01-01-preview')}",
+        "",
+    ]
+
+    # Foundry インスタンス
+    for i, inst in enumerate(req.foundry):
+        prefix = "FOUNDRY" if i == 0 else f"FOUNDRY_{i+1}"
+        lines += [
+            f"# Azure AI Foundry {'' if i == 0 else i+1}",
+            f"{prefix}_NAME={inst.get('name','')}",
+            f"{prefix}_ENDPOINT={inst.get('endpoint','')}",
+            f"{prefix}_API_KEY={api_key_val(inst.get('api_key',''), prefix+'_API_KEY')}",
+            f"{prefix}_MODEL={inst.get('model','')}",
+            f"{prefix}_MODELS={inst.get('models','')}",
+            f"{prefix}_API_VERSION={inst.get('api_version','2024-12-01-preview')}",
+            "",
+        ]
+
+    # エージェント設定
+    ag = req.agent
+    lines += [
+        "# エージェント設定",
+        f"AGENT_NAME={ag.get('name','')}",
+        f"ALLOWED_WORK_DIR={ag.get('workdir','./workspace')}",
+        f"COMMAND_TIMEOUT_SECONDS={ag.get('timeout','30')}",
+        "",
+    ]
+
+    # GitLab
+    gl = req.gitlab
+    lines += [
+        "# GitLab 連携",
+        f"GITLAB_USER={gl.get('user','')}",
+        f"GITLAB_PAT={api_key_val(gl.get('pat',''), 'GITLAB_PAT')}",
+        "",
+    ]
+
+    # SearXNG
+    sx = req.searxng
+    lines += [
+        "# SearXNG 検索バックエンド",
+        f"SEARXNG_BASE_URL={sx.get('url','http://localhost:8888')}",
+        f"SEARXNG_ENABLED={sx.get('enabled','false')}",
+        "",
+    ]
+
+    # プロキシ行（既存から保持）
+    proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]
+    if proxy_lines:
+        lines += ["# プロキシバイパス"] + proxy_lines + [""]
+
+    env_path.write_text("\n".join(lines))
+
+    # systemd サービスを再起動
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})

@@ -1,5 +1,31 @@
 from datetime import date
+from pathlib import Path
 from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT
+
+# スキルディレクトリ（このファイルと同階層の skills/）
+_SKILLS_DIR = Path(__file__).parent / "skills"
+
+
+def _load_skills() -> str:
+    """skills/*/SKILL.md を読み込んでシステムプロンプト用文字列を返す"""
+    if not _SKILLS_DIR.exists():
+        return ""
+    sections = []
+    for skill_dir in sorted(_SKILLS_DIR.iterdir()):
+        skill_file = skill_dir / "SKILL.md"
+        if skill_dir.is_dir() and skill_file.exists():
+            try:
+                content = skill_file.read_text(encoding="utf-8")
+                # frontmatter (--- ... ---) を除いた本文だけ取得
+                lines = content.split("\n")
+                if lines[0].strip() == "---":
+                    end = next((i for i, l in enumerate(lines[1:], 1) if l.strip() == "---"), None)
+                    if end:
+                        content = "\n".join(lines[end + 1:]).strip()
+                sections.append(content)
+            except Exception:
+                pass
+    return "\n\n---\n\n".join(sections)
 
 BYPASS_SECTION = """
 ## ⚠️ 承認バイパスモード: ON（最優先ルール）
@@ -57,9 +83,11 @@ _gitlab_section = f"""
 
 def get_system_prompt(bypass_approval: bool = False) -> str:
     bypass_section = BYPASS_SECTION if bypass_approval else BYPASS_DISABLED_SECTION
-    return _build_prompt(bypass_section)
+    skills = _load_skills()
+    skills_section = f"\n### 登録済みスキル\n\n{skills}" if skills else ""
+    return _build_prompt(bypass_section, skills_section)
 
-def _build_prompt(bypass_section: str) -> str:
+def _build_prompt(bypass_section: str, skills_section: str = "") -> str:
     return f"""必ず日本語で回答すること。英語・中国語・その他の言語で回答してはいけない。
 
 あなたは熟練したシニアエンジニアとして振る舞う自律型 AI エージェントです。
@@ -358,7 +386,47 @@ todo_update([
 - `docker compose up -d` は対象ディレクトリを `work_dir` に指定して実行する
 {_gitlab_section}
 作業ディレクトリ: {ALLOWED_WORK_DIR}
-"""
+スキルディレクトリ: {str(_SKILLS_DIR.resolve())}
 
-# 後方互換性のためデフォルト（バイパスなし）で SYSTEM_PROMPT も残す
+## スキルシステム
+
+スキルは `{str(_SKILLS_DIR.resolve())}/スキル名/SKILL.md` に保存される。
+ユーザーが `/スキル名` と入力するか、スキル名に対応する操作を依頼したときに発動する。
+
+### スキルの一覧表示
+「スキル一覧を見せて」と言われたら:
+- `run_command("ls {str(_SKILLS_DIR.resolve())}")` でディレクトリ一覧を取得
+- 各スキルの `SKILL.md` から `description:` 行を読んで説明付きで列挙する
+
+### スキルの作成
+「〇〇をスキルとして覚えて」「このやり方をスキルに登録して」と言われたら:
+1. スキル名を英小文字・ハイフン区切りで決める（例: `new-azure-project`）
+2. `run_command("mkdir -p {str(_SKILLS_DIR.resolve())}/スキル名")` でディレクトリ作成
+3. 以下の形式で SKILL.md を `run_command` の `tee` コマンドで作成する:
+   ```
+   ---
+   name: スキル名
+   description: 1行説明
+   trigger: /スキル名
+   ---
+
+   ## スキル: /スキル名
+
+   （手順・ルールを記述）
+   ```
+4. 「スキル `/スキル名` を登録しました」と報告する
+
+### スキルの編集
+「〇〇スキルを修正して」と言われたら:
+- `run_command("cat {str(_SKILLS_DIR.resolve())}/スキル名/SKILL.md")` で現在の内容を確認
+- `run_command` で tee を使って上書きするか、edit_file が使えない場合は全体を tee で書き直す
+
+### スキルの削除
+「〇〇スキルを削除して」と言われたら:
+- `run_command("rm -rf {str(_SKILLS_DIR.resolve())}/スキル名")` で削除
+- 「スキル `/スキル名` を削除しました」と報告する
+
+{skills_section}"""
+
+# 後方互換性のためデフォルト（バイパスなし）で SYSTEM_PROMPT も残す（起動時スナップショット）
 SYSTEM_PROMPT = get_system_prompt(bypass_approval=False)

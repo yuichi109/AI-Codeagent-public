@@ -76,6 +76,12 @@
   .folded-turns > summary::before { content: '▸'; transition: transform 0.2s; }
   .folded-turns[open] > summary::before { content: '▾'; }
   .folded-inner { display: flex; flex-direction: column; gap: 0; }
+  #skill-popup { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: min(860px, calc(100% - 40px)); background: #1e1e2e; border: 1px solid #45475a; border-bottom: none; border-radius: 10px 10px 0 0; z-index: 200; overflow: hidden; }
+  .skill-item { padding: 8px 14px; cursor: pointer; display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid #313244; }
+  .skill-item:last-child { border-bottom: none; }
+  .skill-item:hover, .skill-item.active { background: #313244; }
+  .skill-trigger { color: #cba6f7; font-family: monospace; font-size: 13px; min-width: 140px; }
+  .skill-desc { color: #a6adc8; font-size: 12px; }
   #input-area { padding: 10px 20px 14px; background: #181825; border-top: 1px solid #313244; }
   #input-box { max-width: 860px; margin: 0 auto; border: 1px solid #45475a; border-radius: 12px; background: #313244; display: flex; flex-direction: column; padding: 10px 12px 8px; gap: 6px; transition: border-color 0.15s; }
   #input-box:focus-within { border-color: #89b4fa; }
@@ -361,6 +367,7 @@
   <button id="session-banner-back" onclick="newSession()">＋ 新しい会話</button>
 </div>
 <div id="chat"></div>
+<div id="skill-popup" style="display:none"></div>
 <div id="input-area">
   <div id="input-box">
     <textarea id="input" placeholder="指示を入力してください..." rows="1"></textarea>
@@ -560,8 +567,90 @@
     if (abortController) abortController.abort();
   }
 
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
-  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; });
+  // ---- スキルオートコンプリート ----
+  let _skills = null;
+  let _skillActiveIdx = -1;
+
+  async function _fetchSkills() {
+    if (_skills !== null) return _skills;
+    try {
+      const res = await fetch('/skills');
+      _skills = await res.json();
+    } catch { _skills = []; }
+    return _skills;
+  }
+
+  function _skillPopupClose() {
+    document.getElementById('skill-popup').style.display = 'none';
+    _skillActiveIdx = -1;
+  }
+
+  function _skillPopupShow(items, query) {
+    const popup = document.getElementById('skill-popup');
+    const filtered = items.filter(s => s.trigger.startsWith('/' + query));
+    if (!filtered.length) { _skillPopupClose(); return; }
+    popup.innerHTML = filtered.map((s, i) =>
+      `<div class="skill-item" data-trigger="${s.trigger}" onclick="_skillSelect('${s.trigger}')">
+        <span class="skill-trigger">${s.trigger}</span>
+        <span class="skill-desc">${s.description}</span>
+      </div>`
+    ).join('');
+    _skillActiveIdx = -1;
+    popup.style.display = 'block';
+  }
+
+  function _skillSelect(trigger) {
+    const val = input.value;
+    const slashPos = val.lastIndexOf('/');
+    input.value = val.substring(0, slashPos) + trigger + ' ';
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+    _skillPopupClose();
+    input.focus();
+  }
+
+  input.addEventListener('keydown', e => {
+    const popup = document.getElementById('skill-popup');
+    if (popup.style.display !== 'none') {
+      const items = popup.querySelectorAll('.skill-item');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _skillActiveIdx = Math.min(_skillActiveIdx + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('active', i === _skillActiveIdx));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _skillActiveIdx = Math.max(_skillActiveIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('active', i === _skillActiveIdx));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && _skillActiveIdx >= 0)) {
+        e.preventDefault();
+        const active = popup.querySelector('.skill-item.active') || popup.querySelector('.skill-item');
+        if (active) _skillSelect(active.dataset.trigger);
+        return;
+      }
+      if (e.key === 'Escape') { _skillPopupClose(); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  input.addEventListener('input', async () => {
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+    const val = input.value;
+    const slashPos = val.lastIndexOf('/');
+    if (slashPos !== -1 && (slashPos === 0 || /\s/.test(val[slashPos - 1]))) {
+      const query = val.substring(slashPos + 1);
+      if (!/\s/.test(query)) {
+        const skills = await _fetchSkills();
+        _skillPopupShow(skills, query);
+        return;
+      }
+    }
+    _skillPopupClose();
+  });
 
   // ---- 画像添付 ----
   function fileToBase64(file) {

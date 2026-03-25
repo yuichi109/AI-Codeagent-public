@@ -882,6 +882,31 @@ async def chat(req: ChatRequest):
     )
 
 
+@app.get("/skills")
+async def get_skills():
+    """登録済みスキルの一覧を返す"""
+    from prompts import _SKILLS_DIR
+    result = []
+    if _SKILLS_DIR.exists():
+        for skill_dir in sorted(_SKILLS_DIR.iterdir()):
+            skill_file = skill_dir / "SKILL.md"
+            if skill_dir.is_dir() and skill_file.exists():
+                try:
+                    content = skill_file.read_text(encoding="utf-8")
+                    name = skill_dir.name
+                    description = ""
+                    trigger = f"/{name}"
+                    for line in content.split("\n"):
+                        if line.startswith("description:"):
+                            description = line.split(":", 1)[1].strip()
+                        elif line.startswith("trigger:"):
+                            trigger = line.split(":", 1)[1].strip()
+                    result.append({"name": name, "trigger": trigger, "description": description})
+                except Exception:
+                    pass
+    return result
+
+
 @app.get("/gitlab/issues")
 async def gitlab_issues(project: str = "", state: str = "opened"):
     """GitLab イシュー一覧を取得する。project は 'namespace/repo' 形式。省略時は GITLAB_USER のデフォルトリポジトリ。"""

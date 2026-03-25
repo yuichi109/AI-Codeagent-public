@@ -237,6 +237,10 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **タイトル・アイコン変更**（index.html）: 「Azure Code Agent」→「AI Code Agent」、アイコンを ⚛️ に変更、SVG ファビコン追加（2026-03-24）
 - [x] **セッションファイルをGit管理外に**（.gitignore）: `sessions/` ディレクトリを .gitignore に追加（2026-03-24）
 - [x] **prompts.py イシュー表示指示改善**（2026-03-24）: イシュー一覧を全件・Markdown表形式で出力、コードブロックで囲まない指示を追加
+- [x] **複数 Azure AI Foundry インスタンス対応**（2026-03-26）: `FOUNDRY_N_*` 環境変数で N 個のインスタンスを定義可能。`FOUNDRY_INSTANCES` リスト（config.py）、`/providers/presets` の `foundry_instances` 配列、⚙️パネルの動的 `<select>` 生成
+- [x] **AGENT_NAME 設定**（2026-03-26）: `.env` の `AGENT_NAME` をシステムプロンプトに注入。自己紹介時に任意の名前を名乗らせる（現在: SPEC-AI）
+- [x] **セットアップウィザード `/setup`**（2026-03-26）: `setup.html` + server.py の `/setup/current`・`/setup/save` エンドポイント。ブラウザから `.env` を GUI 編集して保存・サービス自動再起動。⚙️パネル下部にリンクを追加
+- [x] **Foundry api_version バグ修正**（2026-03-26）: `cognitiveservices.azure.com` URL を `openai_compatible` に誤分類していた問題を修正。正しく `foundry` タイプ・`FOUNDRY_API_VERSION` を使用
 
 ### 品質・テスト
 - [ ] 各ツールの単体テスト（pytest）を書く
@@ -342,7 +346,21 @@ skills/
 AZURE_OPENAI_API_KEY=...
 AZURE_OPENAI_ENDPOINT=https://xxx.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT=gpt-5-mini
+AZURE_OPENAI_DEPLOYMENTS=gpt-5-mini,gpt-4.1-mini,gpt-4.1
 AZURE_OPENAI_API_VERSION=2025-01-01-preview
+# Azure AI Foundry（インスタンス1）
+FOUNDRY_NAME=Azure AI Foundry
+FOUNDRY_ENDPOINT=https://xxx.cognitiveservices.azure.com/
+FOUNDRY_API_KEY=...
+FOUNDRY_MODEL=gpt-4.1-mini
+FOUNDRY_MODELS=gpt-5-mini,gpt-4.1-mini
+FOUNDRY_API_VERSION=2024-12-01-preview
+# Azure AI Foundry（インスタンス2以降）— FOUNDRY_2_*, FOUNDRY_3_* と続けて定義可
+# FOUNDRY_2_NAME=別リージョン
+# FOUNDRY_2_ENDPOINT=https://xxx2.cognitiveservices.azure.com/
+# ...
+# エージェント名（自己紹介時に使う名前）
+AGENT_NAME=SPEC-AI
 ALLOWED_WORK_DIR=./workspace
 COMMAND_TIMEOUT_SECONDS=30
 GITLAB_USER=yuichi.matsuo
@@ -361,4 +379,4 @@ SEARXNG_ENABLED=true
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-24（UI改善・GitLabイシューエンドポイント・スキルシステム #30 新規追加）
+- **最終更新**: 2026-03-26（複数Foundryインスタンス対応・AGENT_NAME・セットアップウィザード）

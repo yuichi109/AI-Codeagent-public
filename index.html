@@ -818,7 +818,7 @@
         if (aiText) {
           const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
           if (modelName && aiMsgEl._labelEl) {
-            aiMsgEl._labelEl.textContent = `Assistant (${modelName})`;
+            aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
           }
         }
         turns.push({ el: turnEl, userText: u.content, aiText, modelName });
@@ -917,7 +917,7 @@
         appendMsg(turnEl, 'user', u.content);
         if (aiText) {
           const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
-          if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `Assistant (${modelName})`;
+          if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
         }
         turns.push({ el: turnEl, userText: u.content, aiText, modelName });
         turnIdx++;
@@ -997,7 +997,7 @@
     wrapper.className = `msg-wrapper ${cls}-wrapper`;
     const label = document.createElement('div');
     label.className = 'msg-role-label';
-    label.textContent = cls === 'user' ? 'You' : 'Assistant';
+    label.textContent = cls === 'user' ? 'You' : (_currentProviderName + (_currentModel ? ` (${shortModel(_currentModel)})` : ''));
     wrapper.appendChild(label);
     const d = document.createElement('div');
     d.className = `msg ${cls}`;
@@ -1700,6 +1700,8 @@
   }
 
   let _currentProviderType = 'azure';
+  let _currentProviderName = 'Azure OpenAI';
+  let _currentModel = '';
 
   function updatePvCurrent(data) {
     _currentProviderType = data.type;
@@ -1707,9 +1709,11 @@
                 : data.type === 'azure'   ? 'Azure OpenAI'
                 : data.type === 'gemini'  ? 'Google Gemini'
                 : 'OpenAI互換';
+    _currentProviderName = label;
+    _currentModel = data.model || '';
     document.getElementById('pv-current').textContent = `現在: ${label} / ${data.model || '(未設定)'}`;
     const labelEl = document.getElementById('provider-label');
-    labelEl.innerHTML = (PROVIDER_SVG[data.type] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shortModel(data.model)}</span>`;
+    labelEl.innerHTML = (PROVIDER_SVG[data.type] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>`;
     // Azure / Foundry / Gemini はデプロイ選択ドロップダウンを表示
     const sel = document.getElementById('model-select');
     if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini') {
@@ -1748,8 +1752,9 @@
       });
       const data = await res.json();
       if (data.status === 'ok') {
+        _currentModel = model;
         const labelEl = document.getElementById('provider-label');
-        labelEl.innerHTML = (PROVIDER_SVG[_currentProviderType] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shortModel(model)}</span>`;
+        labelEl.innerHTML = (PROVIDER_SVG[_currentProviderType] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_currentProviderName}</span>`;
       }
     } catch(e) { /* 無視 */ }
   }
@@ -2032,7 +2037,7 @@
             // モデル名をラベルに表示
             if (data.model) {
               currentModelName = data.model;
-              if (aiMsg?._labelEl) aiMsg._labelEl.textContent = `Assistant (${data.model})`;
+              if (aiMsg?._labelEl) aiMsg._labelEl.textContent = `${_currentProviderName} (${data.model})`;
             }
             // ツールグループを折りたたみ、サマリーを完了表示に更新
             if (currentToolGroupEl) {

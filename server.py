@@ -1444,6 +1444,8 @@ async def setup_current():
             "user":    raw.get("GITLAB_USER", ""),
             "pat":     mask(raw.get("GITLAB_PAT", "")),
             "pat_set": bool(raw.get("GITLAB_PAT")),
+            "email":   subprocess.run(["git", "config", "--global", "user.email"],
+                           capture_output=True, text=True).stdout.strip(),
         },
         "searxng": {
             "url":     raw.get("SEARXNG_BASE_URL", "http://localhost:8888"),
@@ -1626,6 +1628,12 @@ async def setup_save(req: SetupSaveRequest):
         f"GITLAB_PAT={api_key_val(gl.get('pat',''), 'GITLAB_PAT')}",
         "",
     ]
+    # git config --global user.email を更新し、リポジトリのローカル上書きがあれば削除
+    git_email = gl.get('email', '').strip()
+    if git_email:
+        subprocess.run(["git", "config", "--global", "user.email", git_email], check=False)
+        repo_dir = str(Path(__file__).parent)
+        subprocess.run(["git", "-C", repo_dir, "config", "--unset", "user.email"], check=False)
 
     # SearXNG
     sx = req.searxng

@@ -110,6 +110,11 @@
           <span class="hint" id="gl-pat-hint"></span>
         </div>
       </div>
+      <div class="field">
+        <label>メールアドレス（git コミットのアバター表示に使用）</label>
+        <input id="gl-email" type="text" placeholder="your@email.com">
+        <span class="hint" id="gl-email-hint"></span>
+      </div>
     </div>
   </div>
 
@@ -379,10 +384,12 @@ async function loadConfig() {
     document.getElementById('agent-timeout').value  = d.agent.timeout;
 
     // GitLab
-    document.getElementById('gl-user').value = d.gitlab.user;
-    document.getElementById('gl-pat').value  = d.gitlab.pat || '';
+    document.getElementById('gl-user').value  = d.gitlab.user;
+    document.getElementById('gl-pat').value   = d.gitlab.pat || '';
     document.getElementById('gl-pat').placeholder = d.gitlab.pat_set ? '' : '（未設定）';
     document.getElementById('gl-pat-hint').textContent = d.gitlab.pat_set ? '現在: 設定済み' : '未設定';
+    document.getElementById('gl-email').value = d.gitlab.email || '';
+    document.getElementById('gl-email-hint').textContent = d.gitlab.email ? `現在の git config: ${d.gitlab.email}` : '未設定（保存時に git config --global user.email を更新）';
 
     // SearXNG
     document.getElementById('sx-url').value     = d.searxng.url;
@@ -420,8 +427,9 @@ async function saveConfig() {
       timeout: document.getElementById('agent-timeout').value,
     },
     gitlab: {
-      user: document.getElementById('gl-user').value,
-      pat:  document.getElementById('gl-pat').value,
+      user:  document.getElementById('gl-user').value,
+      pat:   document.getElementById('gl-pat').value,
+      email: document.getElementById('gl-email').value,
     },
     searxng: {
       url:     document.getElementById('sx-url').value,

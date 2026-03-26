@@ -11,8 +11,18 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS
 from prompts import get_system_prompt
+
+# Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
+_GEMINI_DEFAULT_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
+]
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command
 from tools.web_tools import web_search, web_fetch, web_research
@@ -62,12 +72,23 @@ _provider_config = _load_provider_config()
 
 def _make_client():
     """現在の _provider_config に基づいてLLMクライアントを生成する"""
+    if not _provider_config.get("url") and not _provider_config.get("api_key") and _provider_config["type"] in ("azure", "foundry"):
+        raise ValueError("LLMプロバイダーが未設定です。/setup でセットアップを完了してください。")
+    if _provider_config["type"] == "gemini" and not _provider_config.get("api_key"):
+        raise ValueError("Gemini APIキーが未設定です。/setup でセットアップを完了してください。")
     if _provider_config["type"] in ("azure", "foundry"):
         return AzureOpenAI(
             azure_endpoint=_provider_config["url"],
             api_key=_provider_config["api_key"],
             api_version=_provider_config["api_version"] or (FOUNDRY_API_VERSION if _provider_config["type"] == "foundry" else AZURE_OPENAI_API_VERSION),
             http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
+        )
+    elif _provider_config["type"] == "gemini":
+        # Google Gemini (OpenAI互換エンドポイント経由)
+        return OpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=_provider_config["api_key"],
+            http_client=httpx.Client(trust_env=False),
         )
     else:
         # "openai_compatible" (ローカルLLM等) は OpenAI互換クライアント
@@ -707,7 +728,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     if compressed_history is not None:
         yield f"data: {json.dumps({'type': 'history_compressed', 'messages': compressed_history})}\n\n"
 
-    is_local = _provider_config["type"] not in ("azure", "foundry")
+    is_local = _provider_config["type"] not in ("azure", "foundry", "gemini")
     tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
     while True:
@@ -990,6 +1011,8 @@ async def providers_deployments():
     if _provider_config["type"] == "foundry":
         inst = _active_foundry_instance()
         deployments = inst["models"] if inst else FOUNDRY_MODELS
+    elif _provider_config["type"] == "gemini":
+        deployments = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
     else:
         deployments = AZURE_OPENAI_DEPLOYMENTS
     return JSONResponse({
@@ -1009,6 +1032,8 @@ async def providers_set_deployment(req: DeploymentRequest):
     if _provider_config["type"] == "foundry":
         inst = _active_foundry_instance()
         allowed = inst["models"] if inst else FOUNDRY_MODELS
+    elif _provider_config["type"] == "gemini":
+        allowed = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
     else:
         allowed = AZURE_OPENAI_DEPLOYMENTS
     if req.model not in allowed:
@@ -1068,6 +1093,8 @@ async def providers_presets():
             {"id": inst["id"], "name": inst["name"], "default_model": inst["default_model"]}
             for inst in FOUNDRY_INSTANCES
         ],
+        "gemini": bool(GEMINI_API_KEY),
+        "gemini_models": GEMINI_MODELS or _GEMINI_DEFAULT_MODELS,
     })
 
 
@@ -1091,6 +1118,20 @@ async def providers_set_preset(req: PresetRequest):
             "api_key": inst["api_key"],
             "model": inst["default_model"],
             "api_version": inst["api_version"],
+            "tools_enabled": True,
+        }
+    elif req.preset == "gemini":
+        if not GEMINI_API_KEY:
+            return JSONResponse({"error": ".env に GEMINI_API_KEY が未設定です"}, status_code=400)
+        default_model = (GEMINI_MODELS[0] if GEMINI_MODELS else _GEMINI_DEFAULT_MODELS[0])
+        _provider_config = {
+            "type": "gemini",
+            "preset_id": "gemini",
+            "name": "Google Gemini",
+            "url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "api_key": GEMINI_API_KEY,
+            "model": default_model,
+            "api_version": "",
             "tools_enabled": True,
         }
     else:
@@ -1305,7 +1346,8 @@ async def setup_page():
 async def setup_current():
     """現在の .env 値を返す（APIキーはマスク）"""
     def mask(v: str) -> str:
-        return v[:6] + "***" if len(v) > 6 else ("***" if v else "")
+        """末尾4文字を残して *** でマスク（フィールドに値として表示し、未変更時に保持する）"""
+        return "***" + v[-4:] if len(v) > 4 else ("***" if v else "")
 
     env_path = Path(__file__).parent / ".env"
     raw = {}
@@ -1316,53 +1358,66 @@ async def setup_current():
                 k, _, v = line.partition("=")
                 raw[k.strip()] = v.strip()
 
-    # Foundry インスタンスを動的に収集
-    foundry_list = []
-    # インスタンス 1 (既存 FOUNDRY_*)
+    # providers: 設定済みプロバイダーを順番に収集
+    providers = []
+
+    # Azure OpenAI（常に1番目・未設定でも空エントリを返す）
+    providers.append({
+        "type":        "azure_openai",
+        "endpoint":    raw.get("AZURE_OPENAI_ENDPOINT", ""),
+        "api_key":     mask(raw.get("AZURE_OPENAI_API_KEY", "")),
+        "api_key_set": bool(raw.get("AZURE_OPENAI_API_KEY")),
+        "deployment":  raw.get("AZURE_OPENAI_DEPLOYMENT", ""),
+        "deployments": raw.get("AZURE_OPENAI_DEPLOYMENTS", ""),
+        "api_version": raw.get("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
+    })
+
+    # Azure AI Foundry インスタンス 1
     if raw.get("FOUNDRY_ENDPOINT"):
-        foundry_list.append({
-            "name":        raw.get("FOUNDRY_NAME", ""),
+        providers.append({
+            "type":        "azure_foundry",
+            "name":        raw.get("FOUNDRY_NAME", "") or "Azure AI Foundry",
             "endpoint":    raw.get("FOUNDRY_ENDPOINT", ""),
             "api_key":     mask(raw.get("FOUNDRY_API_KEY", "")),
             "api_key_set": bool(raw.get("FOUNDRY_API_KEY")),
             "model":       raw.get("FOUNDRY_MODEL", ""),
             "models":      raw.get("FOUNDRY_MODELS", ""),
             "api_version": raw.get("FOUNDRY_API_VERSION", "2024-12-01-preview"),
-            "env_prefix":  "FOUNDRY",
         })
-    # インスタンス 2, 3, ...
+    # Azure AI Foundry インスタンス 2, 3, ...
     n = 2
     while raw.get(f"FOUNDRY_{n}_ENDPOINT"):
-        foundry_list.append({
-            "name":        raw.get(f"FOUNDRY_{n}_NAME", ""),
+        providers.append({
+            "type":        "azure_foundry",
+            "name":        raw.get(f"FOUNDRY_{n}_NAME", "") or f"Azure AI Foundry {n}",
             "endpoint":    raw.get(f"FOUNDRY_{n}_ENDPOINT", ""),
             "api_key":     mask(raw.get(f"FOUNDRY_{n}_API_KEY", "")),
             "api_key_set": bool(raw.get(f"FOUNDRY_{n}_API_KEY")),
             "model":       raw.get(f"FOUNDRY_{n}_MODEL", ""),
             "models":      raw.get(f"FOUNDRY_{n}_MODELS", ""),
             "api_version": raw.get(f"FOUNDRY_{n}_API_VERSION", "2024-12-01-preview"),
-            "env_prefix":  f"FOUNDRY_{n}",
         })
         n += 1
 
+    # Google Gemini
+    if raw.get("GEMINI_API_KEY"):
+        providers.append({
+            "type":        "gemini",
+            "api_key":     mask(raw.get("GEMINI_API_KEY", "")),
+            "api_key_set": bool(raw.get("GEMINI_API_KEY")),
+            "models":      raw.get("GEMINI_MODELS", ""),
+        })
+
     return JSONResponse({
-        "azure": {
-            "endpoint":    raw.get("AZURE_OPENAI_ENDPOINT", ""),
-            "api_key":     mask(raw.get("AZURE_OPENAI_API_KEY", "")),
-            "api_key_set": bool(raw.get("AZURE_OPENAI_API_KEY")),
-            "deployment":  raw.get("AZURE_OPENAI_DEPLOYMENT", ""),
-            "deployments": raw.get("AZURE_OPENAI_DEPLOYMENTS", ""),
-            "api_version": raw.get("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
-        },
-        "foundry": foundry_list,
+        "providers": providers,
         "agent": {
             "name":    raw.get("AGENT_NAME", ""),
             "workdir": raw.get("ALLOWED_WORK_DIR", "./workspace"),
             "timeout": raw.get("COMMAND_TIMEOUT_SECONDS", "30"),
         },
         "gitlab": {
-            "user": raw.get("GITLAB_USER", ""),
-            "pat":  mask(raw.get("GITLAB_PAT", "")),
+            "user":    raw.get("GITLAB_USER", ""),
+            "pat":     mask(raw.get("GITLAB_PAT", "")),
             "pat_set": bool(raw.get("GITLAB_PAT")),
         },
         "searxng": {
@@ -1373,8 +1428,7 @@ async def setup_current():
 
 
 class SetupSaveRequest(BaseModel):
-    azure: dict
-    foundry: list
+    providers: list = []  # 統合プロバイダーリスト（新形式）
     agent: dict
     gitlab: dict
     searxng: dict
@@ -1388,7 +1442,7 @@ async def setup_save(req: SetupSaveRequest):
     # 既存 .env を読んで「既知キー以外のコメント行・カスタム行」を保持
     existing_lines = []
     known_prefixes = (
-        "AZURE_OPENAI_", "FOUNDRY", "AGENT_NAME", "ALLOWED_WORK_DIR",
+        "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -1412,31 +1466,41 @@ async def setup_save(req: SetupSaveRequest):
 
     lines = ["# AI Code Agent 設定ファイル（/setup で生成）", ""]
 
-    # Azure OpenAI
-    az = req.azure
-    lines += [
-        "# Azure OpenAI",
-        f"AZURE_OPENAI_API_KEY={api_key_val(az.get('api_key',''), 'AZURE_OPENAI_API_KEY')}",
-        f"AZURE_OPENAI_ENDPOINT={az.get('endpoint','')}",
-        f"AZURE_OPENAI_DEPLOYMENT={az.get('deployment','')}",
-        f"AZURE_OPENAI_DEPLOYMENTS={az.get('deployments','')}",
-        f"AZURE_OPENAI_API_VERSION={az.get('api_version','2025-01-01-preview')}",
-        "",
-    ]
-
-    # Foundry インスタンス
-    for i, inst in enumerate(req.foundry):
-        prefix = "FOUNDRY" if i == 0 else f"FOUNDRY_{i+1}"
-        lines += [
-            f"# Azure AI Foundry {'' if i == 0 else i+1}",
-            f"{prefix}_NAME={inst.get('name','')}",
-            f"{prefix}_ENDPOINT={inst.get('endpoint','')}",
-            f"{prefix}_API_KEY={api_key_val(inst.get('api_key',''), prefix+'_API_KEY')}",
-            f"{prefix}_MODEL={inst.get('model','')}",
-            f"{prefix}_MODELS={inst.get('models','')}",
-            f"{prefix}_API_VERSION={inst.get('api_version','2024-12-01-preview')}",
-            "",
-        ]
+    # providers リストを種別ごとに分類して .env に書き込む
+    foundry_count = 0
+    for prov in req.providers:
+        ptype = prov.get("type", "")
+        if ptype == "azure_openai":
+            lines += [
+                "# Azure OpenAI",
+                f"AZURE_OPENAI_API_KEY={api_key_val(prov.get('api_key',''), 'AZURE_OPENAI_API_KEY')}",
+                f"AZURE_OPENAI_ENDPOINT={prov.get('endpoint','')}",
+                f"AZURE_OPENAI_DEPLOYMENT={prov.get('deployment','')}",
+                f"AZURE_OPENAI_DEPLOYMENTS={prov.get('deployments','')}",
+                f"AZURE_OPENAI_API_VERSION={prov.get('api_version','2025-01-01-preview')}",
+                "",
+            ]
+        elif ptype == "azure_foundry":
+            prefix = "FOUNDRY" if foundry_count == 0 else f"FOUNDRY_{foundry_count + 1}"
+            label = "" if foundry_count == 0 else f" {foundry_count + 1}"
+            lines += [
+                f"# Azure AI Foundry{label}",
+                f"{prefix}_NAME={prov.get('name','')}",
+                f"{prefix}_ENDPOINT={prov.get('endpoint','')}",
+                f"{prefix}_API_KEY={api_key_val(prov.get('api_key',''), prefix+'_API_KEY')}",
+                f"{prefix}_MODEL={prov.get('model','')}",
+                f"{prefix}_MODELS={prov.get('models','')}",
+                f"{prefix}_API_VERSION={prov.get('api_version','2024-12-01-preview')}",
+                "",
+            ]
+            foundry_count += 1
+        elif ptype == "gemini":
+            lines += [
+                "# Google Gemini",
+                f"GEMINI_API_KEY={api_key_val(prov.get('api_key',''), 'GEMINI_API_KEY')}",
+                f"GEMINI_MODELS={prov.get('models','')}",
+                "",
+            ]
 
     # エージェント設定
     ag = req.agent

@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# 必須: 未設定時は起動時に KeyError で即時エラー
-AZURE_OPENAI_API_KEY: str = os.environ["AZURE_OPENAI_API_KEY"]
-AZURE_OPENAI_ENDPOINT: str = os.environ["AZURE_OPENAI_ENDPOINT"]
+# Azure OpenAI（未設定時は空文字。セットアップウィザードで設定可能）
+AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY", "")
+AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 
 # オプション: デフォルト値あり
 AZURE_OPENAI_DEPLOYMENT: str = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
@@ -45,7 +45,7 @@ def _parse_foundry_instances() -> list[dict]:
     if FOUNDRY_ENDPOINT:
         instances.append({
             "id": "foundry_1",
-            "name": os.getenv("FOUNDRY_NAME", "Azure AI Foundry"),
+            "name": os.getenv("FOUNDRY_NAME", "") or "Azure AI Foundry",
             "endpoint": FOUNDRY_ENDPOINT,
             "api_key": FOUNDRY_API_KEY,
             "models": FOUNDRY_MODELS,
@@ -63,7 +63,7 @@ def _parse_foundry_instances() -> list[dict]:
         models = [m.strip() for m in models_raw.split(",") if m.strip()] if models_raw else ([default_model] if default_model else [])
         instances.append({
             "id": f"foundry_{n}",
-            "name": os.getenv(f"FOUNDRY_{n}_NAME", f"Azure AI Foundry {n}"),
+            "name": os.getenv(f"FOUNDRY_{n}_NAME", "") or f"Azure AI Foundry {n}",
             "endpoint": ep,
             "api_key": os.getenv(f"FOUNDRY_{n}_API_KEY", ""),
             "models": models,
@@ -77,6 +77,14 @@ FOUNDRY_INSTANCES: list[dict] = _parse_foundry_instances()
 
 # エージェント名（自己紹介時に使う架空の名前）
 AGENT_NAME: str = os.getenv("AGENT_NAME", "")
+
+# Google Gemini (省略可)
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+_gemini_models_raw = os.getenv("GEMINI_MODELS", "")
+GEMINI_MODELS: list[str] = (
+    [m.strip() for m in _gemini_models_raw.split(",") if m.strip()]
+    if _gemini_models_raw else []
+)
 
 # GitLab 連携 (省略可)
 GITLAB_USER: str = os.getenv("GITLAB_USER", "")

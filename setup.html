@@ -10,7 +10,7 @@
   header a { color: #6c7086; text-decoration: none; font-size: 13px; }
   header a:hover { color: #cdd6f4; }
   header h1 { font-size: 16px; font-weight: bold; }
-  .container { max-width: 760px; margin: 32px auto; padding: 0 20px 60px; }
+  .container { max-width: 760px; margin: 32px auto; padding: 0 20px 80px; }
   .section { background: #181825; border: 1px solid #313244; border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
   .section-header { padding: 14px 20px; border-bottom: 1px solid #313244; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
   .section-header:hover { background: #1e1e2e; }
@@ -21,25 +21,31 @@
   .field input:focus, .field select:focus { border-color: #89b4fa; }
   .field .hint { font-size: 11px; color: #6c7086; margin-top: 2px; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .foundry-inst { border: 1px solid #313244; border-radius: 8px; padding: 14px; position: relative; }
-  .foundry-inst-title { font-size: 13px; font-weight: bold; color: #89b4fa; margin-bottom: 10px; }
-  .remove-btn { position: absolute; top: 10px; right: 10px; background: none; border: none; color: #6c7086; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
-  .remove-btn:hover { background: #f38ba820; color: #f38ba8; }
-  .add-btn { background: #313244; border: 1px dashed #45475a; border-radius: 6px; color: #6c7086; padding: 8px; width: 100%; cursor: pointer; font-size: 13px; text-align: center; }
-  .add-btn:hover { border-color: #89b4fa; color: #89b4fa; }
+  .chevron { margin-left: auto; transition: transform 0.2s; }
+  .collapsed .chevron { transform: rotate(-90deg); }
+  .collapsed .section-body { display: none; }
+  .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #313244; color: #6c7086; font-weight: normal; }
+  /* プロバイダーカード */
+  .provider-card { border: 1px solid #313244; border-radius: 8px; padding: 14px; margin-bottom: 12px; position: relative; }
+  .provider-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #313244; }
+  .provider-card-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 22px; height: 22px; }
+  .provider-card-icon svg { width: 22px; height: 22px; }
+  .provider-type-select { flex: 1; background: #313244; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; padding: 7px 10px; font-size: 13px; outline: none; font-weight: bold; }
+  .provider-type-select:focus { border-color: #89b4fa; }
+  .provider-fields { display: flex; flex-direction: column; gap: 12px; }
+  .remove-card-btn { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; line-height: 1; }
+  .remove-card-btn:hover { background: #f38ba820; color: #f38ba8; }
+  .add-provider-btn { background: #313244; border: 1px dashed #45475a; border-radius: 6px; color: #89b4fa; padding: 10px; width: 100%; cursor: pointer; font-size: 13px; text-align: center; margin-top: 4px; }
+  .add-provider-btn:hover { border-color: #89b4fa; background: #1e1e2e; }
+  /* 下部保存バー */
   .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #181825; border-top: 1px solid #313244; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
   .save-btn { background: #89b4fa; color: #1e1e2e; border: none; border-radius: 6px; padding: 8px 24px; font-size: 14px; font-weight: bold; cursor: pointer; }
   .save-btn:hover { background: #74c7ec; }
   .save-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #save-status { font-size: 13px; }
-  .chevron { margin-left: auto; transition: transform 0.2s; }
-  .collapsed .chevron { transform: rotate(-90deg); }
-  .collapsed .section-body { display: none; }
-  .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #313244; color: #6c7086; font-weight: normal; }
 </style>
 </head>
 <body>
-
 <header>
   <a href="/">← チャットに戻る</a>
   <h1>🔧 詳細設定（.env）</h1>
@@ -47,49 +53,15 @@
 
 <div class="container">
 
-  <!-- Azure OpenAI -->
-  <div class="section" id="sec-azure">
-    <div class="section-header" onclick="toggleSection('sec-azure')">
-      🔵 Azure OpenAI <span class="tag">必須</span>
+  <!-- LLMプロバイダー -->
+  <div class="section" id="sec-providers">
+    <div class="section-header" onclick="toggleSection('sec-providers')">
+      🤖 LLMプロバイダー <span class="tag">1つ以上必須</span>
       <span class="chevron">▾</span>
     </div>
     <div class="section-body">
-      <div class="field">
-        <label>エンドポイント URL</label>
-        <input id="az-endpoint" type="text" placeholder="https://your-resource.openai.azure.com">
-      </div>
-      <div class="field">
-        <label>API キー</label>
-        <input id="az-apikey" type="password" placeholder="（変更しない場合は空欄）">
-        <span class="hint" id="az-apikey-hint"></span>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label>デフォルトデプロイ名</label>
-          <input id="az-deployment" type="text" placeholder="gpt-5-mini">
-        </div>
-        <div class="field">
-          <label>API バージョン</label>
-          <input id="az-apiversion" type="text" placeholder="2025-01-01-preview">
-        </div>
-      </div>
-      <div class="field">
-        <label>デプロイ一覧（カンマ区切り）</label>
-        <input id="az-deployments" type="text" placeholder="gpt-5-mini,gpt-4.1-mini,gpt-4.1">
-        <span class="hint">モデル切り替えドロップダウンに表示されます</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Azure AI Foundry -->
-  <div class="section" id="sec-foundry">
-    <div class="section-header" onclick="toggleSection('sec-foundry')">
-      🟣 Azure AI Foundry <span class="tag">省略可</span>
-      <span class="chevron">▾</span>
-    </div>
-    <div class="section-body">
-      <div id="foundry-list"></div>
-      <button class="add-btn" onclick="addFoundryInstance()">＋ Foundry インスタンスを追加</button>
+      <div id="provider-list"></div>
+      <button class="add-provider-btn" onclick="addProviderCard()">＋ プロバイダーを追加</button>
     </div>
   </div>
 
@@ -131,7 +103,7 @@
         </div>
         <div class="field">
           <label>Personal Access Token (PAT)</label>
-          <input id="gl-pat" type="password" placeholder="（変更しない場合は空欄）">
+          <input id="gl-pat" type="password" placeholder="（未設定）">
           <span class="hint" id="gl-pat-hint"></span>
         </div>
       </div>
@@ -169,153 +141,243 @@
 </div>
 
 <script>
-  let foundryInstances = [];
+// ---- プロバイダー定義 ----
+const PROVIDER_TYPES = [
+  { value: 'azure_openai',  label: 'Azure OpenAI' },
+  { value: 'azure_foundry', label: 'Azure AI Foundry' },
+  { value: 'gemini',        label: 'Google Gemini' },
+];
 
-  function toggleSection(id) {
-    document.getElementById(id).classList.toggle('collapsed');
+const PROVIDER_SVG = {
+  azure_openai:  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none"><path fill="#0078d4" fill-rule="evenodd" clip-rule="evenodd" d="M4.998 13.098v37.8a8.1 8.1 0 0 0 8.1 8.1h37.8a8.1 8.1 0 0 0 8.1-8.1v-37.8a8.1 8.1 0 0 0-8.1-8.1h-37.8a8.1 8.1 0 0 0-8.1 8.1m32.4-8.1v10.8c0 11.928 9.672 21.6 21.6 21.6h-10.8c-11.928 0-21.597 9.666-21.6 21.594V48.198c0-11.928-9.672-21.6-21.6-21.6h10.8c11.928 0 21.6-9.672 21.6-21.6"/></svg>`,
+  azure_foundry: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" fill="none"><path fill="#c4b5fd" d="M11.958 11.683c.037 0 .074-.1.074-.238V7.577c0-.853.66-1.76 1.585-2.034-.057-.188-.645-2.112-.81-2.646C12.631 2.335 12.131 1 11.52 1l-.014.001q-.07.013-.135.129c-.32.583-.463 3.015-.463 4.837V8.23c.275.97.912 3.217.961 3.353 0 0 .05.1.088.1"/><path fill="#7c3aed" d="M16.015 5.456h-1.807c-1.214 0-2.175 1.085-2.175 2.109v3.867c0 .139-.037.239-.074.239-.038 0-.088-.1-.088-.1s.075.212.175.212h1.98c.616 0 2.475-.611 2.475-2.52V6.006c0-.414-.237-.551-.486-.551"/><path fill="#4c1d95" d="M2.336 17h5.38c2.346 0 3.194-2.034 3.194-3.807V5.967c0-2.084.188-4.967.612-4.967H8.296c-.768 0-1.43.824-2.178 2.484-.75 1.66-4.357 11.872-4.518 12.355-.262.787-.025 1.161.736 1.161"/></svg>`,
+  gemini:        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#4285f4" d="M50 3C48.5 33 37 47 3 50C37 53 48.5 67 50 97C51.5 67 63 53 97 50C63 47 51.5 33 50 3Z"/></svg>`,
+};
+
+// ---- フィールド定義 ----
+function renderFields(type, data = {}) {
+  const hint = data.api_key_set ? '現在: 設定済み（末尾4文字表示）' : '未設定';
+  const keyPlaceholder = data.api_key_set ? '' : '（未設定）';
+
+  if (type === 'azure_openai') return `
+    <div class="field">
+      <label>エンドポイント URL</label>
+      <input type="text" name="endpoint" value="${esc(data.endpoint||'')}" placeholder="https://your-resource.openai.azure.com">
+    </div>
+    <div class="field">
+      <label>API キー</label>
+      <input type="password" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      <span class="hint">${hint}</span>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>デフォルトデプロイ名</label>
+        <input type="text" name="deployment" value="${esc(data.deployment||'')}" placeholder="gpt-4.1-mini">
+      </div>
+      <div class="field">
+        <label>API バージョン</label>
+        <input type="text" name="api_version" value="${esc(data.api_version||'2025-01-01-preview')}" placeholder="2025-01-01-preview">
+      </div>
+    </div>
+    <div class="field">
+      <label>デプロイ一覧（カンマ区切り）</label>
+      <input type="text" name="deployments" value="${esc(data.deployments||'')}" placeholder="gpt-5-mini,gpt-4.1-mini,gpt-4.1">
+      <span class="hint">モデル切り替えドロップダウンに表示されます</span>
+    </div>`;
+
+  if (type === 'azure_foundry') return `
+    <div class="field">
+      <label>表示名</label>
+      <input type="text" name="name" value="${esc(data.name||'')}" placeholder="Azure AI Foundry">
+    </div>
+    <div class="field">
+      <label>エンドポイント URL</label>
+      <input type="text" name="endpoint" value="${esc(data.endpoint||'')}" placeholder="https://your-project.cognitiveservices.azure.com/">
+    </div>
+    <div class="field">
+      <label>API キー</label>
+      <input type="password" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      <span class="hint">${hint}</span>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>デフォルトモデル</label>
+        <input type="text" name="model" value="${esc(data.model||'')}" placeholder="gpt-4.1-mini">
+      </div>
+      <div class="field">
+        <label>API バージョン</label>
+        <input type="text" name="api_version" value="${esc(data.api_version||'2024-12-01-preview')}" placeholder="2024-12-01-preview">
+      </div>
+    </div>
+    <div class="field">
+      <label>モデル一覧（カンマ区切り）</label>
+      <input type="text" name="models" value="${esc(data.models||'')}" placeholder="gpt-5-mini,gpt-4.1-mini">
+    </div>`;
+
+  if (type === 'gemini') return `
+    <div class="field">
+      <label>API キー</label>
+      <input type="password" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      <span class="hint">${hint}</span>
+    </div>
+    <div class="field">
+      <label>モデル一覧（カンマ区切り）</label>
+      <input type="text" name="models" value="${esc(data.models||'')}" placeholder="gemini-2.5-pro,gemini-2.5-flash,gemini-2.0-flash">
+      <span class="hint">空欄の場合はデフォルト一覧（gemini-2.5-pro / gemini-2.5-flash 等）を使用</span>
+    </div>`;
+
+  return '';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ---- カード操作 ----
+function buildCard(data, isFirst) {
+  const card = document.createElement('div');
+  card.className = 'provider-card';
+  const typeOptions = PROVIDER_TYPES.map(t =>
+    `<option value="${t.value}"${t.value === data.type ? ' selected' : ''}>${t.label}</option>`
+  ).join('');
+  card.innerHTML = `
+    <div class="provider-card-header">
+      <span class="provider-card-icon">${PROVIDER_SVG[data.type] || ''}</span>
+      <select class="provider-type-select" onchange="onTypeChange(this)">
+        ${typeOptions}
+      </select>
+      ${isFirst ? '' : '<button class="remove-card-btn" onclick="removeCard(this)" title="削除">✕</button>'}
+    </div>
+    <div class="provider-fields">${renderFields(data.type, data)}</div>`;
+  return card;
+}
+
+function onTypeChange(sel) {
+  const card = sel.closest('.provider-card');
+  card.querySelector('.provider-card-icon').innerHTML = PROVIDER_SVG[sel.value] || '';
+  card.querySelector('.provider-fields').innerHTML = renderFields(sel.value, {});
+}
+
+function addProviderCard(data = { type: 'azure_openai' }) {
+  const list = document.getElementById('provider-list');
+  const isFirst = list.children.length === 0;
+  list.appendChild(buildCard(data, isFirst));
+}
+
+function removeCard(btn) {
+  const list = document.getElementById('provider-list');
+  if (list.children.length > 1) btn.closest('.provider-card').remove();
+}
+
+function getCardData(card) {
+  const type = card.querySelector('.provider-type-select').value;
+  const data = { type };
+  card.querySelectorAll('.provider-fields [name]').forEach(el => { data[el.name] = el.value; });
+  return data;
+}
+
+// ---- セクション開閉 ----
+function toggleSection(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+
+// ---- 読み込み ----
+async function loadConfig() {
+  try {
+    const d = await fetch('/setup/current').then(r => r.json());
+
+    // プロバイダーカードを構築
+    const list = document.getElementById('provider-list');
+    list.innerHTML = '';
+    const providers = d.providers && d.providers.length > 0
+      ? d.providers
+      : [{ type: 'azure_openai' }];
+    providers.forEach((prov, i) => addProviderCard(prov));
+    // 先頭カードは削除ボタンを非表示にする（addProviderCard 内で isFirst=true にしても
+    // 後から追加した場合を考慮して再確認）
+    updateFirstCard();
+
+    // エージェント
+    document.getElementById('agent-name').value    = d.agent.name;
+    document.getElementById('agent-workdir').value  = d.agent.workdir;
+    document.getElementById('agent-timeout').value  = d.agent.timeout;
+
+    // GitLab
+    document.getElementById('gl-user').value = d.gitlab.user;
+    document.getElementById('gl-pat').value  = d.gitlab.pat || '';
+    document.getElementById('gl-pat').placeholder = d.gitlab.pat_set ? '' : '（未設定）';
+    document.getElementById('gl-pat-hint').textContent = d.gitlab.pat_set ? '現在: 設定済み（末尾4文字表示）' : '未設定';
+
+    // SearXNG
+    document.getElementById('sx-url').value     = d.searxng.url;
+    document.getElementById('sx-enabled').value = d.searxng.enabled;
+  } catch(e) {
+    document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
   }
+}
 
-  function renderFoundryList() {
-    const container = document.getElementById('foundry-list');
-    container.innerHTML = '';
-    foundryInstances.forEach((inst, i) => {
-      const label = i === 0 ? 'インスタンス 1（メイン）' : `インスタンス ${i + 1}`;
-      const prefix = i === 0 ? 'FOUNDRY' : `FOUNDRY_${i + 1}`;
-      container.innerHTML += `
-        <div class="foundry-inst" id="fi-${i}">
-          <div class="foundry-inst-title">🟣 ${label} <span style="font-size:10px;color:#6c7086">(${prefix}_*)</span></div>
-          ${i > 0 ? `<button class="remove-btn" onclick="removeFoundryInstance(${i})" title="削除">✕</button>` : ''}
-          <div style="display:flex;flex-direction:column;gap:10px;">
-            <div class="field">
-              <label>表示名</label>
-              <input type="text" value="${inst.name}" placeholder="Azure AI Foundry" oninput="foundryInstances[${i}].name=this.value">
-            </div>
-            <div class="field">
-              <label>エンドポイント URL</label>
-              <input type="text" value="${inst.endpoint}" placeholder="https://your-project.cognitiveservices.azure.com/" oninput="foundryInstances[${i}].endpoint=this.value">
-            </div>
-            <div class="field">
-              <label>API キー</label>
-              <input type="password" value="${inst.api_key}" placeholder="${inst.api_key_set ? '（変更しない場合は空欄）' : ''}" oninput="foundryInstances[${i}].api_key=this.value">
-              ${inst.api_key_set ? `<span class="hint">現在: 設定済み</span>` : ''}
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="field">
-                <label>デフォルトモデル</label>
-                <input type="text" value="${inst.model}" placeholder="gpt-4.1-mini" oninput="foundryInstances[${i}].model=this.value">
-              </div>
-              <div class="field">
-                <label>API バージョン</label>
-                <input type="text" value="${inst.api_version}" placeholder="2024-12-01-preview" oninput="foundryInstances[${i}].api_version=this.value">
-              </div>
-            </div>
-            <div class="field">
-              <label>モデル一覧（カンマ区切り）</label>
-              <input type="text" value="${inst.models}" placeholder="gpt-5-mini,gpt-4.1-mini" oninput="foundryInstances[${i}].models=this.value">
-            </div>
-          </div>
-        </div>`;
+function updateFirstCard() {
+  const cards = document.querySelectorAll('.provider-card');
+  cards.forEach((card, i) => {
+    const removeBtn = card.querySelector('.remove-card-btn');
+    if (i === 0) {
+      if (removeBtn) removeBtn.remove();
+    }
+  });
+}
+
+// ---- 保存 ----
+async function saveConfig() {
+  const btn = document.getElementById('save-btn');
+  const status = document.getElementById('save-status');
+  btn.disabled = true;
+  status.textContent = '保存中...';
+  status.style.color = '#6c7086';
+
+  const providers = Array.from(document.querySelectorAll('.provider-card')).map(getCardData);
+
+  const payload = {
+    providers,
+    agent: {
+      name:    document.getElementById('agent-name').value,
+      workdir: document.getElementById('agent-workdir').value,
+      timeout: document.getElementById('agent-timeout').value,
+    },
+    gitlab: {
+      user: document.getElementById('gl-user').value,
+      pat:  document.getElementById('gl-pat').value,
+    },
+    searxng: {
+      url:     document.getElementById('sx-url').value,
+      enabled: document.getElementById('sx-enabled').value,
+    },
+  };
+
+  try {
+    const res = await fetch('/setup/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-  }
-
-  function addFoundryInstance() {
-    foundryInstances.push({ name: '', endpoint: '', api_key: '', api_key_set: false, model: '', models: '', api_version: '2024-12-01-preview' });
-    renderFoundryList();
-  }
-
-  function removeFoundryInstance(i) {
-    foundryInstances.splice(i, 1);
-    renderFoundryList();
-  }
-
-  async function loadConfig() {
-    try {
-      const data = await fetch('/setup/current').then(r => r.json());
-      const az = data.azure;
-      document.getElementById('az-endpoint').value = az.endpoint;
-      document.getElementById('az-apikey').placeholder = az.api_key_set ? '（変更しない場合は空欄）' : '';
-      document.getElementById('az-apikey-hint').textContent = az.api_key_set ? '現在: 設定済み' : '未設定';
-      document.getElementById('az-deployment').value = az.deployment;
-      document.getElementById('az-deployments').value = az.deployments;
-      document.getElementById('az-apiversion').value = az.api_version;
-
-      foundryInstances = data.foundry.length > 0 ? data.foundry : [];
-      renderFoundryList();
-
-      const ag = data.agent;
-      document.getElementById('agent-name').value = ag.name;
-      document.getElementById('agent-workdir').value = ag.workdir;
-      document.getElementById('agent-timeout').value = ag.timeout;
-
-      const gl = data.gitlab;
-      document.getElementById('gl-user').value = gl.user;
-      document.getElementById('gl-pat').placeholder = gl.pat_set ? '（変更しない場合は空欄）' : '';
-      document.getElementById('gl-pat-hint').textContent = gl.pat_set ? '現在: 設定済み' : '未設定';
-
-      const sx = data.searxng;
-      document.getElementById('sx-url').value = sx.url;
-      document.getElementById('sx-enabled').value = sx.enabled;
-    } catch(e) {
-      document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
+    const data = await res.json();
+    if (data.status === 'ok') {
+      status.textContent = '✓ 保存しました。サーバーを再起動しています...';
+      status.style.color = '#a6e3a1';
+      setTimeout(() => {
+        status.textContent = '✓ 完了。チャット画面をリロードしてください。';
+        btn.disabled = false;
+      }, 3000);
+    } else {
+      throw new Error(data.error || '不明なエラー');
     }
+  } catch(e) {
+    status.textContent = '⚠️ ' + e.message;
+    status.style.color = '#f38ba8';
+    btn.disabled = false;
   }
+}
 
-  async function saveConfig() {
-    const btn = document.getElementById('save-btn');
-    const status = document.getElementById('save-status');
-    btn.disabled = true;
-    status.textContent = '保存中...';
-    status.style.color = '#6c7086';
-
-    const payload = {
-      azure: {
-        endpoint:    document.getElementById('az-endpoint').value,
-        api_key:     document.getElementById('az-apikey').value,
-        deployment:  document.getElementById('az-deployment').value,
-        deployments: document.getElementById('az-deployments').value,
-        api_version: document.getElementById('az-apiversion').value,
-      },
-      foundry: foundryInstances,
-      agent: {
-        name:    document.getElementById('agent-name').value,
-        workdir: document.getElementById('agent-workdir').value,
-        timeout: document.getElementById('agent-timeout').value,
-      },
-      gitlab: {
-        user: document.getElementById('gl-user').value,
-        pat:  document.getElementById('gl-pat').value,
-      },
-      searxng: {
-        url:     document.getElementById('sx-url').value,
-        enabled: document.getElementById('sx-enabled').value,
-      },
-    };
-
-    try {
-      const res = await fetch('/setup/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.status === 'ok') {
-        status.textContent = '✓ 保存しました。サーバーを再起動しています...';
-        status.style.color = '#a6e3a1';
-        setTimeout(() => {
-          status.textContent = '✓ 完了。チャット画面をリロードしてください。';
-          btn.disabled = false;
-        }, 3000);
-      } else {
-        throw new Error(data.error || '不明なエラー');
-      }
-    } catch(e) {
-      status.textContent = '⚠️ ' + e.message;
-      status.style.color = '#f38ba8';
-      btn.disabled = false;
-    }
-  }
-
-  loadConfig();
+loadConfig();
 </script>
 </body>
 </html>

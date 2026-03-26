@@ -10,9 +10,9 @@
   #header { padding: 10px 20px; background: #181825; border-bottom: 1px solid #313244; font-weight: bold; font-size: 16px; display: flex; align-items: center; gap: 8px; }
   #header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   #turn-count { font-size: 11px; color: #6c7086; font-weight: normal; }
-  #clear-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #clear-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #clear-btn:hover { background: #f38ba8; color: #1e1e2e; }
-  #gitlab-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; display: none; }
+  #gitlab-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; display: none; }
   #gitlab-btn:hover { background: #fab387; color: #1e1e2e; }
   #gitlab-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #gitlab-panel.open { transform: translateX(0); }
@@ -90,13 +90,13 @@
   #input-bottom { display: flex; align-items: center; justify-content: space-between; }
   #input-left { display: flex; align-items: center; gap: 2px; }
   #input-right { display: flex; align-items: center; gap: 4px; }
-  #attach-btn { padding: 5px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; line-height: 1; }
+  #attach-btn { padding: 5px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 20px; line-height: 1; }
   #attach-btn:hover { background: #45475a; color: #cdd6f4; }
-  #mic-btn { padding: 5px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; line-height: 1; transition: background 0.2s; }
+  #mic-btn { padding: 5px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 20px; line-height: 1; transition: background 0.2s; }
   #mic-btn:hover { background: #45475a; color: #cdd6f4; }
   #mic-btn.recording { background: #f38ba8; color: #1e1e2e; animation: mic-pulse 1s ease-in-out infinite; }
   #mic-btn.unsupported { opacity: 0.4; cursor: not-allowed; }
-  #bypass-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 12px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
+  #bypass-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 14px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #bypass-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #bypass-btn.active { color: #a6e3a1; border-color: #a6e3a1; font-weight: bold; }
   @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(243,139,168,0.6); } 50% { box-shadow: 0 0 0 6px rgba(243,139,168,0); } }
@@ -109,9 +109,12 @@
   .img-preview-del { position: absolute; top: -4px; right: -4px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; line-height: 16px; text-align: center; padding: 0; }
   .msg-img { max-width: 200px; max-height: 200px; border-radius: 8px; margin-top: 6px; display: block; }
   /* ---- プロバイダー設定 ---- */
-  #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
-  #provider-label { font-size: 11px; color: #89b4fa; font-weight: normal; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #provider-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #89b4fa; font-weight: normal; max-width: 180px; overflow: hidden; flex-shrink: 0; }
+  #provider-label svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .pv-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .pv-icon svg { width: 18px; height: 18px; }
   #model-select { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; max-width: 140px; }
   #model-select:hover { border-color: #89b4fa; }
   #model-select:focus { outline: none; border-color: #89b4fa; }
@@ -143,7 +146,7 @@
   .pv-ok  { color: #a6e3a1; }
   .pv-err { color: #f38ba8; }
   /* ---- タスクパネル ---- */
-  #todo-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; position: relative; }
+  #todo-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; position: relative; }
   #todo-btn:hover { background: #a6e3a1; color: #1e1e2e; }
   #todo-badge { position: absolute; top: -4px; right: -4px; background: #fab387; color: #1e1e2e; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; font-weight: bold; display: none; align-items: center; justify-content: center; }
   #todo-panel { position: fixed; top: 44px; right: 0; width: 300px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
@@ -188,7 +191,7 @@
   #cleanup-exec-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #cleanup-confirm-msg { font-size: 12px; color: #f38ba8; display: none; }
   /* ---- セッション履歴パネル ---- */
-  #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #sessions-btn:hover { background: #89dceb; color: #1e1e2e; }
   #sessions-panel { position: fixed; top: 44px; left: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(-100%); transition: transform 0.2s ease; }
   #sessions-panel.open { transform: translateX(0); }
@@ -266,11 +269,14 @@
   <div id="provider-panel-body">
     <div class="pv-group">
       <label>プロバイダー種別</label>
-      <select id="pv-preset" class="pv-input" onchange="onPresetChange()">
-        <option value="azure">🔵 Azure OpenAI</option>
-        <!-- Foundry インスタンスは JS で動的追加 -->
-        <option value="local">🟢 ローカルLLM（カスタム）</option>
-      </select>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="pv-preset-icon" class="pv-icon"></span>
+        <select id="pv-preset" class="pv-input" onchange="onPresetChange()" style="flex:1">
+          <option value="azure">Azure OpenAI</option>
+          <!-- Foundry / Gemini インスタンスは JS で動的追加 -->
+          <option value="local">ローカルLLM（カスタム）</option>
+        </select>
+      </div>
     </div>
     <div id="pv-url-group" class="pv-group">
       <label>エンドポイントURL</label>
@@ -383,7 +389,7 @@
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
-        <button id="mic-btn" onclick="toggleMic()" title="音声入力（日本語）">🎤</button>
+        <button id="mic-btn" onclick="toggleMic()" title="音声入力（日本語）"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
         <button id="send" onclick="sendMessage()">送信</button>
         <button id="stop" onclick="stopGeneration()">■ 停止</button>
       </div>
@@ -709,6 +715,14 @@
       addImagePreview(img);
     }
   });
+
+  // ---- プロバイダーSVGアイコン ----
+  const PROVIDER_SVG = {
+    azure: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none"><path fill="#0078d4" fill-rule="evenodd" clip-rule="evenodd" d="M4.998 13.098v37.8a8.1 8.1 0 0 0 8.1 8.1h37.8a8.1 8.1 0 0 0 8.1-8.1v-37.8a8.1 8.1 0 0 0-8.1-8.1h-37.8a8.1 8.1 0 0 0-8.1 8.1m32.4-8.1v10.8c0 11.928 9.672 21.6 21.6 21.6h-10.8c-11.928 0-21.597 9.666-21.6 21.594V48.198c0-11.928-9.672-21.6-21.6-21.6h10.8c11.928 0 21.6-9.672 21.6-21.6"/></svg>`,
+    foundry: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" fill="none"><path fill="#c4b5fd" d="M11.958 11.683c.037 0 .074-.1.074-.238V7.577c0-.853.66-1.76 1.585-2.034-.057-.188-.645-2.112-.81-2.646C12.631 2.335 12.131 1 11.52 1l-.014.001q-.07.013-.135.129c-.32.583-.463 3.015-.463 4.837V8.23c.275.97.912 3.217.961 3.353 0 0 .05.1.088.1"/><path fill="#7c3aed" d="M16.015 5.456h-1.807c-1.214 0-2.175 1.085-2.175 2.109v3.867c0 .139-.037.239-.074.239-.038 0-.088-.1-.088-.1s.075.212.175.212h1.98c.616 0 2.475-.611 2.475-2.52V6.006c0-.414-.237-.551-.486-.551"/><path fill="#4c1d95" d="M2.336 17h5.38c2.346 0 3.194-2.034 3.194-3.807V5.967c0-2.084.188-4.967.612-4.967H8.296c-.768 0-1.43.824-2.178 2.484-.75 1.66-4.357 11.872-4.518 12.355-.262.787-.025 1.161.736 1.161"/></svg>`,
+    gemini: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#4285f4" d="M50 3C48.5 33 37 47 3 50C37 53 48.5 67 50 97C51.5 67 63 53 97 50C63 47 51.5 33 50 3Z"/></svg>`,
+    openai_compatible: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="15" rx="2" stroke="#6b7280" stroke-width="1.5"/><path d="M6 8l4 3.5L6 15" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="13" y1="15" x2="18" y2="15" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round"/><line x1="8" y1="21" x2="16" y2="21" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="21" stroke="#6b7280" stroke-width="1.5"/></svg>`,
+  };
 
   // ---- ツールアイコン ----
   const TOOL_ICONS = {
@@ -1413,27 +1427,31 @@
     try {
       const presets = await fetch('/providers/presets').then(r => r.json());
       const sel = document.getElementById('pv-preset');
-      // 既存の foundry_* オプションを削除して再構築
-      Array.from(sel.options).filter(o => o.value.startsWith('foundry')).forEach(o => o.remove());
-      const localOpt = sel.querySelector('option[value="local"]');
-      (presets.foundry_instances || []).forEach(inst => {
-        const opt = document.createElement('option');
-        opt.value = inst.id;
-        opt.textContent = `🟣 ${inst.name}`;
-        sel.insertBefore(opt, localOpt);
-      });
-    } catch(e) {}
+      const prev = sel.value;  // 現在の選択を保持
+      // セレクト全体を再構築（Azure → Foundry複数 → Gemini → ローカル）
+      const foundryOpts = (presets.foundry_instances || [])
+        .map((inst, i) => `<option value="${inst.id}">${inst.name || `Azure AI Foundry ${i > 0 ? i+1 : ''}`}</option>`)
+        .join('');
+      const geminiOpt = presets.gemini ? `<option value="gemini">Google Gemini</option>` : '';
+      sel.innerHTML =
+        `<option value="azure">Azure OpenAI</option>` +
+        foundryOpts +
+        geminiOpt +
+        `<option value="local">ローカルLLM（カスタム）</option>`;
+      // 以前の選択を復元（存在する場合のみ）
+      if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
+    } catch(e) { console.error('loadFoundryInstances:', e); }
   }
 
   async function loadCurrentProvider() {
     try {
       const res = await fetch('/providers/current');
       const data = await res.json();
-      if (data.type === 'azure' || data.type === 'foundry') {
+      if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini') {
         document.getElementById('pv-url').value = '';
         document.getElementById('pv-apikey').value = '';
-        // foundry の場合は preset_id（例: foundry_1）を使う
-        syncPresetUI(data.type === 'foundry' ? (data.preset_id || 'foundry_1') : 'azure');
+        // preset_id を使う（foundry→foundry_1, gemini→gemini, azure→azure）
+        syncPresetUI(data.type === 'foundry' ? (data.preset_id || 'foundry_1') : data.type);
       } else {
         // openai_compatible: URLは /v1 を除いて表示
         const base = (data.url || '').replace(/\/v1$/, '');
@@ -1448,8 +1466,18 @@
     } catch(e) {}
   }
 
+  function presetToType(preset) {
+    if (preset === 'azure') return 'azure';
+    if (preset === 'gemini') return 'gemini';
+    if (preset.startsWith('foundry')) return 'foundry';
+    return 'openai_compatible';
+  }
+
   function syncPresetUI(preset) {
     document.getElementById('pv-preset').value = preset;
+    // アイコン更新
+    const iconEl = document.getElementById('pv-preset-icon');
+    if (iconEl) iconEl.innerHTML = PROVIDER_SVG[presetToType(preset)] || '';
     const urlGroup = document.getElementById('pv-url-group');
     const apikeyGroup = document.getElementById('pv-apikey-group');
     const fetchBtn = document.getElementById('pv-fetch-btn');
@@ -1457,7 +1485,8 @@
     const azureBtn = document.getElementById('pv-azure-btn');
     const urlInput = document.getElementById('pv-url');
     const isFoundry = preset === 'foundry' || preset.startsWith('foundry_');
-    if (preset === 'azure' || isFoundry) {
+    const isPreset = preset === 'azure' || isFoundry || preset === 'gemini';
+    if (isPreset) {
       // .env 設定を使うプリセット — URL/キー欄は不要
       urlGroup.style.display = 'none';
       apikeyGroup.style.display = 'none';
@@ -1482,6 +1511,8 @@
       await resetToAzure();
     } else if (preset === 'foundry' || preset.startsWith('foundry_')) {
       await switchToFoundryPreset(preset);
+    } else if (preset === 'gemini') {
+      await switchToGeminiPreset();
     } else {
       syncPresetUI(preset);
       document.getElementById('pv-url').value = '';
@@ -1520,17 +1551,49 @@
     }
   }
 
+  async function switchToGeminiPreset() {
+    syncPresetUI('gemini');
+    setPvStatus('切り替え中...', null);
+    try {
+      const presets = await fetch('/providers/presets').then(r => r.json());
+      if (!presets.gemini) {
+        setPvStatus('⚠️ .env に GEMINI_API_KEY が未設定です（/setup で設定）', false);
+        return;
+      }
+      const res = await fetch('/providers/preset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: 'gemini' }),
+      });
+      const data = await res.json();
+      if (data.error) { setPvStatus('⚠️ ' + data.error, false); return; }
+      updatePvCurrent(data.provider);
+      await loadDeployments();
+      setPvStatus(`✓ Google Gemini に切り替えました (${data.provider.model})`, true);
+      if (document.getElementById('pv-reset-history').checked) {
+        history = []; turns = []; localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SESSION_ID_KEY);
+        chat.innerHTML = ''; updateTurnCount();
+      }
+      setTimeout(() => toggleProviderPanel(), 800);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
+  let _currentProviderType = 'azure';
+
   function updatePvCurrent(data) {
-    const iconMap = { azure: '🔵', foundry: '🟣', openai_compatible: '🟢' };
-    const icon = iconMap[data.type] || '🟢';
+    _currentProviderType = data.type;
     const label = data.type === 'foundry' ? (data.name || 'Azure AI Foundry')
                 : data.type === 'azure'   ? 'Azure OpenAI'
+                : data.type === 'gemini'  ? 'Google Gemini'
                 : 'OpenAI互換';
     document.getElementById('pv-current').textContent = `現在: ${label} / ${data.model || '(未設定)'}`;
-    document.getElementById('provider-label').textContent = `${icon} ${shortModel(data.model)}`;
-    // Azure / Foundry はデプロイ選択ドロップダウンを表示
+    const labelEl = document.getElementById('provider-label');
+    labelEl.innerHTML = (PROVIDER_SVG[data.type] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shortModel(data.model)}</span>`;
+    // Azure / Foundry / Gemini はデプロイ選択ドロップダウンを表示
     const sel = document.getElementById('model-select');
-    if (data.type === 'azure' || data.type === 'foundry') {
+    if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini') {
       if (sel.options.length > 1) sel.value = data.model;
     } else {
       sel.style.display = 'none';
@@ -1540,7 +1603,7 @@
   async function loadDeployments() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure' && pv.type !== 'foundry') return; // ローカルはデプロイ選択不要
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini') return; // ローカルはデプロイ選択不要
       const res = await fetch('/providers/deployments');
       const data = await res.json();
       const sel = document.getElementById('model-select');
@@ -1566,7 +1629,8 @@
       });
       const data = await res.json();
       if (data.status === 'ok') {
-        document.getElementById('provider-label').textContent = `🔵 ${shortModel(model)}`;
+        const labelEl = document.getElementById('provider-label');
+        labelEl.innerHTML = (PROVIDER_SVG[_currentProviderType] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shortModel(model)}</span>`;
       }
     } catch(e) { /* 無視 */ }
   }

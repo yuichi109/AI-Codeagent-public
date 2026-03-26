@@ -37,6 +37,9 @@
   .remove-card-btn:hover { background: #f38ba820; color: #f38ba8; }
   .add-provider-btn { background: #313244; border: 1px dashed #45475a; border-radius: 6px; color: #89b4fa; padding: 10px; width: 100%; cursor: pointer; font-size: 13px; text-align: center; margin-top: 4px; }
   .add-provider-btn:hover { border-color: #89b4fa; background: #1e1e2e; }
+  .fetch-models-btn { background: #313244; border: 1px solid #45475a; border-radius: 6px; color: #89b4fa; padding: 7px 10px; cursor: pointer; font-size: 13px; flex-shrink: 0; white-space: nowrap; }
+  .fetch-models-btn:hover { border-color: #89b4fa; }
+  .fetch-models-btn:disabled { color: #6c7086; cursor: not-allowed; }
   /* 下部保存バー */
   .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #181825; border-top: 1px solid #313244; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
   .save-btn { background: #89b4fa; color: #1e1e2e; border: none; border-radius: 6px; padding: 8px 24px; font-size: 14px; font-weight: bold; cursor: pointer; }
@@ -103,7 +106,7 @@
         </div>
         <div class="field">
           <label>Personal Access Token (PAT)</label>
-          <input id="gl-pat" type="password" placeholder="（未設定）">
+          <input id="gl-pat" type="text" placeholder="（未設定）">
           <span class="hint" id="gl-pat-hint"></span>
         </div>
       </div>
@@ -155,8 +158,31 @@ const PROVIDER_SVG = {
 };
 
 // ---- フィールド定義 ----
+// select の全オプションからモデル一覧を生成するヘルパー
+function buildModelOpts(current, list) {
+  const opts = list ? list.split(',').map(s => s.trim()).filter(Boolean) : [];
+  if (current && !opts.includes(current)) opts.unshift(current);
+  if (!opts.length) return `<option value="">(🔍 で取得)</option>`;
+  return opts.map(m => `<option value="${esc(m)}"${m===current?' selected':''}>${esc(m)}</option>`).join('');
+}
+
+// モデル選択UI（select + 🔍 + 手動追加行）を生成
+function modelSelectBlock(selectName, current, list, addHint='') {
+  const opts = buildModelOpts(current, list);
+  return `
+    <div style="display:flex;gap:6px;align-items:center">
+      <select name="${selectName}" class="model-select" style="flex:1">${opts}</select>
+      <button type="button" class="fetch-models-btn" onclick="fetchModelsBtn(this)" title="サーバーからモデル一覧を取得">🔍</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:5px">
+      <input type="text" class="model-add-input" placeholder="モデル名を手動追加..." style="flex:1;background:#313244;border:1px solid #45475a;border-radius:6px;color:#cdd6f4;padding:6px 10px;font-size:13px;outline:none">
+      <button type="button" class="fetch-models-btn" onclick="addModelOption(this)" title="追加">＋</button>
+    </div>
+    ${addHint ? `<span class="hint">${addHint}</span>` : ''}`;
+}
+
 function renderFields(type, data = {}) {
-  const hint = data.api_key_set ? '現在: 設定済み（末尾4文字表示）' : '未設定';
+  const hint = data.api_key_set ? '現在: 設定済み' : '未設定';
   const keyPlaceholder = data.api_key_set ? '' : '（未設定）';
 
   if (type === 'azure_openai') return `
@@ -166,23 +192,18 @@ function renderFields(type, data = {}) {
     </div>
     <div class="field">
       <label>API キー</label>
-      <input type="password" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
       <span class="hint">${hint}</span>
     </div>
     <div class="row">
       <div class="field">
-        <label>デフォルトデプロイ名</label>
-        <input type="text" name="deployment" value="${esc(data.deployment||'')}" placeholder="gpt-4.1-mini">
+        <label>使用モデル（デプロイ名）</label>
+        ${modelSelectBlock('deployment', data.deployment, data.deployments)}
       </div>
       <div class="field">
         <label>API バージョン</label>
         <input type="text" name="api_version" value="${esc(data.api_version||'2025-01-01-preview')}" placeholder="2025-01-01-preview">
       </div>
-    </div>
-    <div class="field">
-      <label>デプロイ一覧（カンマ区切り）</label>
-      <input type="text" name="deployments" value="${esc(data.deployments||'')}" placeholder="gpt-5-mini,gpt-4.1-mini,gpt-4.1">
-      <span class="hint">モデル切り替えドロップダウンに表示されます</span>
     </div>`;
 
   if (type === 'azure_foundry') return `
@@ -196,34 +217,29 @@ function renderFields(type, data = {}) {
     </div>
     <div class="field">
       <label>API キー</label>
-      <input type="password" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
       <span class="hint">${hint}</span>
     </div>
     <div class="row">
       <div class="field">
-        <label>デフォルトモデル</label>
-        <input type="text" name="model" value="${esc(data.model||'')}" placeholder="gpt-4.1-mini">
+        <label>使用モデル</label>
+        ${modelSelectBlock('model', data.model, data.models)}
       </div>
       <div class="field">
         <label>API バージョン</label>
         <input type="text" name="api_version" value="${esc(data.api_version||'2024-12-01-preview')}" placeholder="2024-12-01-preview">
       </div>
-    </div>
-    <div class="field">
-      <label>モデル一覧（カンマ区切り）</label>
-      <input type="text" name="models" value="${esc(data.models||'')}" placeholder="gpt-5-mini,gpt-4.1-mini">
     </div>`;
 
   if (type === 'gemini') return `
     <div class="field">
       <label>API キー</label>
-      <input type="password" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
       <span class="hint">${hint}</span>
     </div>
     <div class="field">
-      <label>モデル一覧（カンマ区切り）</label>
-      <input type="text" name="models" value="${esc(data.models||'')}" placeholder="gemini-2.5-pro,gemini-2.5-flash,gemini-2.0-flash">
-      <span class="hint">空欄の場合はデフォルト一覧（gemini-2.5-pro / gemini-2.5-flash 等）を使用</span>
+      <label>使用モデル</label>
+      ${modelSelectBlock('model', data.model||data.models?.split(',')[0], data.models, '空欄の場合はデフォルト一覧を使用')}
     </div>`;
 
   return '';
@@ -272,13 +288,73 @@ function removeCard(btn) {
 function getCardData(card) {
   const type = card.querySelector('.provider-type-select').value;
   const data = { type };
-  card.querySelectorAll('.provider-fields [name]').forEach(el => { data[el.name] = el.value; });
+  card.querySelectorAll('.provider-fields [name]').forEach(el => {
+    if (el.classList.contains('model-select')) {
+      // 選択値 = デフォルト、全オプション = 一覧（選択値を先頭に）
+      data[el.name] = el.value;
+      const listKey = el.name === 'deployment' ? 'deployments' : 'models';
+      const allOpts = [...el.options].map(o => o.value).filter(Boolean);
+      const ordered = el.value
+        ? [el.value, ...allOpts.filter(v => v !== el.value)]
+        : allOpts;
+      data[listKey] = ordered.join(',');
+    } else {
+      data[el.name] = el.value;
+    }
+  });
   return data;
+}
+
+function addModelOption(btn) {
+  const card = btn.closest('.provider-card');
+  const input = card.querySelector('.model-add-input');
+  const val = input.value.trim();
+  if (!val) return;
+  const sel = card.querySelector('.model-select');
+  if ([...sel.options].some(o => o.value === val)) { input.value = ''; return; }
+  sel.add(new Option(val, val, false, true));
+  input.value = '';
 }
 
 // ---- セクション開閉 ----
 function toggleSection(id) {
   document.getElementById(id).classList.toggle('collapsed');
+}
+
+// ---- モデル取得 ----
+async function fetchModelsBtn(btn) {
+  const card = btn.closest('.provider-card');
+  const type = card.querySelector('.provider-type-select').value;
+  const endpointEl = card.querySelector('[name=endpoint]');
+  const endpoint = endpointEl ? endpointEl.value : '';
+
+  btn.textContent = '⏳';
+  btn.disabled = true;
+
+  try {
+    const params = new URLSearchParams({ type, endpoint });
+    const resp = await fetch('/setup/fetch-models?' + params);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    // model-select の options を取得結果で置き換え
+    const sel = card.querySelector('select.model-select');
+    if (sel) {
+      const current = sel.value;
+      sel.innerHTML = data.models.map(m =>
+        `<option value="${esc(m)}"${m===current?' selected':''}>${esc(m)}</option>`
+      ).join('');
+      if (!sel.value && data.models.length) sel.value = data.models[0];
+    }
+
+    btn.textContent = '✓';
+  } catch(e) {
+    btn.textContent = '✗';
+    alert('モデル取得失敗: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { btn.textContent = '🔍'; }, 2000);
+  }
 }
 
 // ---- 読み込み ----
@@ -306,7 +382,7 @@ async function loadConfig() {
     document.getElementById('gl-user').value = d.gitlab.user;
     document.getElementById('gl-pat').value  = d.gitlab.pat || '';
     document.getElementById('gl-pat').placeholder = d.gitlab.pat_set ? '' : '（未設定）';
-    document.getElementById('gl-pat-hint').textContent = d.gitlab.pat_set ? '現在: 設定済み（末尾4文字表示）' : '未設定';
+    document.getElementById('gl-pat-hint').textContent = d.gitlab.pat_set ? '現在: 設定済み' : '未設定';
 
     // SearXNG
     document.getElementById('sx-url').value     = d.searxng.url;

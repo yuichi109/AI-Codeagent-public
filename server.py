@@ -1187,6 +1187,31 @@ class CleanupRequest(BaseModel):
     paths: list
 
 
+@app.get("/workspace/cleanup-preview")
+async def workspace_cleanup_preview_api():
+    """UIから直接掃除モーダルを開くためのエンドポイント"""
+    result = workspace_cleanup_preview()
+    return JSONResponse(json.loads(result) if isinstance(result, str) else result)
+
+
+class ProtectedUpdateRequest(BaseModel):
+    paths: list[str]
+
+@app.post("/workspace/protected")
+async def workspace_protected_update(req: ProtectedUpdateRequest):
+    """保護リストをUIから直接更新する"""
+    from tools.workspace_tools import PROTECTED_LIST_FILE, ALWAYS_PROTECTED
+    try:
+        clean = list(dict.fromkeys(p for p in req.paths if p not in ALWAYS_PROTECTED))
+        PROTECTED_LIST_FILE.write_text(
+            json.dumps({"paths": clean}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return JSONResponse({"paths": clean, "count": len(clean)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/workspace/cleanup")
 async def workspace_cleanup(req: CleanupRequest):
     """保護リストにないファイル・ディレクトリを削除する"""
@@ -1427,6 +1452,78 @@ async def setup_current():
     })
 
 
+@app.get("/setup/fetch-models")
+async def setup_fetch_models(type: str, endpoint: str = ""):
+    """セットアップ画面用: .env に保存済みのキーを使ってモデル/デプロイ一覧を取得"""
+    env_path = Path(__file__).parent / ".env"
+    raw: dict = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                raw[k.strip()] = v.strip().strip('"').strip("'")
+
+    try:
+        if type == "azure_openai":
+            api_key = raw.get("AZURE_OPENAI_API_KEY", "")
+            ep = (endpoint or raw.get("AZURE_OPENAI_ENDPOINT", "")).rstrip("/")
+            api_ver = raw.get("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
+            if not ep or not api_key:
+                return JSONResponse({"error": "エンドポイントまたはAPIキーが未設定です"}, status_code=400)
+            url = f"{ep}/openai/deployments?api-version={api_ver}"
+            resp = requests.get(url, headers={"api-key": api_key}, timeout=8, proxies={"http": None, "https": None})
+            resp.raise_for_status()
+            data = resp.json()
+            models = [d["id"] for d in data.get("value", [])]
+
+        elif type == "azure_foundry":
+            # endpoint で一致するFoundryインスタンスを探す
+            api_key = ""
+            api_ver = ""
+            matched_ep = ""
+            for prefix in ["FOUNDRY"] + [f"FOUNDRY_{n}" for n in range(2, 10)]:
+                ep = raw.get(f"{prefix}_ENDPOINT", "").rstrip("/")
+                if not ep:
+                    continue
+                if not endpoint or ep == endpoint.rstrip("/"):
+                    api_key = raw.get(f"{prefix}_API_KEY", "")
+                    api_ver = raw.get(f"{prefix}_API_VERSION", "2024-12-01-preview")
+                    matched_ep = ep
+                    break
+            if not matched_ep or not api_key:
+                return JSONResponse({"error": "エンドポイントまたはAPIキーが未設定です"}, status_code=400)
+            # Foundry は /openai/deployments か /v1/models の両方を試みる
+            url = f"{matched_ep}/openai/deployments?api-version={api_ver}"
+            resp = requests.get(url, headers={"api-key": api_key}, timeout=8, proxies={"http": None, "https": None})
+            resp.raise_for_status()
+            data = resp.json()
+            if "value" in data:
+                models = [d["id"] for d in data.get("value", [])]
+            else:
+                models = [m["id"] for m in data.get("data", [])]
+
+        elif type == "gemini":
+            api_key = raw.get("GEMINI_API_KEY", "")
+            if not api_key:
+                return JSONResponse({"error": "GEMINI_API_KEY が未設定です"}, status_code=400)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=100"
+            resp = requests.get(url, timeout=8, proxies={"http": None, "https": None})
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m["name"].replace("models/", "") for m in data.get("models", [])
+                      if "generateContent" in m.get("supportedGenerationMethods", [])]
+
+        else:
+            return JSONResponse({"error": f"未対応のtype: {type}"}, status_code=400)
+
+        return JSONResponse({"models": models})
+    except requests.HTTPError as e:
+        return JSONResponse({"error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}, status_code=502)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 class SetupSaveRequest(BaseModel):
     providers: list = []  # 統合プロバイダーリスト（新形式）
     agent: dict
@@ -1495,10 +1592,19 @@ async def setup_save(req: SetupSaveRequest):
             ]
             foundry_count += 1
         elif ptype == "gemini":
+            # model（選択値）が先頭になるよう models を整理
+            sel_model = prov.get('model', '')
+            models_str = prov.get('models', '')
+            if sel_model and models_str:
+                parts = [m.strip() for m in models_str.split(',') if m.strip()]
+                ordered = [sel_model] + [m for m in parts if m != sel_model]
+                models_str = ','.join(ordered)
+            elif sel_model:
+                models_str = sel_model
             lines += [
                 "# Google Gemini",
                 f"GEMINI_API_KEY={api_key_val(prov.get('api_key',''), 'GEMINI_API_KEY')}",
-                f"GEMINI_MODELS={prov.get('models','')}",
+                f"GEMINI_MODELS={models_str}",
                 "",
             ]
 

@@ -101,9 +101,11 @@ def workspace_cleanup_preview() -> dict:
 
             # 保護判定（末尾スラッシュあり・なし両方を照合）
             if name in protected_names or (name + "/") in protected_names:
+                size = _calc_size(entry)
                 protected_found.append({
                     "name": name,
                     "type": "dir" if is_dir else "file",
+                    "size_str": _fmt_size(size),
                 })
             else:
                 size = _calc_size(entry)

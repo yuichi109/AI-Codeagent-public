@@ -644,6 +644,18 @@ def _convert_messages_for_local(messages: list) -> list:
     return result
 
 
+def _is_recent_head_unsafe(msgs: list) -> bool:
+    """recent_part の先頭が孤立するメッセージかどうかを判定"""
+    if not msgs:
+        return False
+    head = msgs[0]
+    if head.get("role") == "tool":
+        return True
+    if head.get("role") == "assistant" and head.get("tool_calls"):
+        return True
+    return False
+
+
 def _sanitize_history(history: list) -> list:
     """
     トリミング後に先頭に残った孤立 tool メッセージを除去する。
@@ -674,23 +686,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     if len(trimmed) > SUMMARY_TRIGGER:
         old_part = trimmed[:-SUMMARY_KEEP_RECENT]
         recent_part = trimmed[-SUMMARY_KEEP_RECENT:]
-        # recent_part の先頭が tool メッセージだと孤立する（直前の assistant+tool_calls が
-        # old_part に吸収されるため）。tool または assistant (tool_calls あり) が先頭に来る間は
-        # old_part から1件ずつ recent_part に移して境界を安全な位置に調整する。
-        def _recent_head_unsafe(msgs):
-            if not msgs:
-                return False
-            head = msgs[0]
-            # tool メッセージが先頭 → 直前の assistant+tool_calls が必要
-            if head.get("role") == "tool":
-                return True
-            # assistant+tool_calls が先頭 → その tool メッセージが直後に来るはずなので問題ないが
-            # tool_calls だけ残って tool メッセージが old_part 側に切れるケースを防ぐ
-            if head.get("role") == "assistant" and head.get("tool_calls"):
-                return True
-            return False
-
-        while _recent_head_unsafe(recent_part) and old_part:
+        while _is_recent_head_unsafe(recent_part) and old_part:
             recent_part = [old_part[-1]] + recent_part
             old_part = old_part[:-1]
         summary = _summarize_history(old_part)
@@ -1187,6 +1183,31 @@ class CleanupRequest(BaseModel):
     paths: list
 
 
+@app.get("/workspace/ls")
+async def workspace_ls():
+    """workspace のファイル一覧を直接返す（LLM経由なし）"""
+    result = list_files()
+    return JSONResponse({"output": result})
+
+
+@app.get("/workspace/git-status")
+async def workspace_git_status():
+    """workspace の git status を直接返す（LLM経由なし）"""
+    result = run_command("git status")
+    output = result.get("stdout") or result.get("stderr") or result.get("error", "エラー")
+    return JSONResponse({"output": output})
+
+
+@app.get("/workspace/git-diff")
+async def workspace_git_diff():
+    """workspace の git diff を直接返す（LLM経由なし）"""
+    result = run_command("git diff")
+    output = result.get("stdout") or result.get("stderr") or result.get("error", "エラー")
+    if not output.strip():
+        output = "(変更なし)"
+    return JSONResponse({"output": output})
+
+
 @app.get("/workspace/cleanup-preview")
 async def workspace_cleanup_preview_api():
     """UIから直接掃除モーダルを開くためのエンドポイント"""
@@ -1267,6 +1288,31 @@ class SessionSaveRequest(BaseModel):
     session_id: str
     history: list
     turn_models: list = []
+
+
+class CompactRequest(BaseModel):
+    messages: list
+
+
+@app.post("/compact")
+async def compact_history_endpoint(req: CompactRequest):
+    """クライアントから明示的に /compact を実行したときの圧縮エンドポイント"""
+    messages = _sanitize_history(req.messages)
+    if len(messages) <= SUMMARY_KEEP_RECENT:
+        return JSONResponse({"messages": messages, "compressed": False})
+    old_part = messages[:-SUMMARY_KEEP_RECENT]
+    recent_part = messages[-SUMMARY_KEEP_RECENT:]
+    while _is_recent_head_unsafe(recent_part) and old_part:
+        recent_part = [old_part[-1]] + recent_part
+        old_part = old_part[:-1]
+    summary = _summarize_history(old_part)
+    if not summary:
+        return JSONResponse({"messages": messages, "compressed": False})
+    compressed = [
+        {"role": "user", "content": f"[これまでの作業サマリー]\n{summary}"},
+        {"role": "assistant", "content": "了解しました。続けます。"},
+    ] + recent_part
+    return JSONResponse({"messages": compressed, "compressed": True})
 
 
 @app.get("/sessions")

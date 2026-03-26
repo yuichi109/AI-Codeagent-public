@@ -588,6 +588,149 @@
   }
 
   // ---- スキルオートコンプリート ----
+  // ---- UIスラッシュコマンド定義 ----
+  const UI_COMMANDS = {
+    '/clear':    { description: '履歴をクリアする',                 action: () => { clearHistory(); } },
+    '/compact':  { description: '会話履歴を今すぐ圧縮する',         action: () => _cmdCompact() },
+    '/help':     { description: '利用可能なコマンド一覧を表示',     action: () => _cmdHelp() },
+    '/skills':   { description: '登録済みスキル一覧を表示',         action: () => _cmdSkills() },
+    '/model':    { description: 'LLM設定パネルを開く',              action: () => toggleProviderPanel() },
+    '/bypass':   { description: '承認バイパスをトグル',             action: () => { toggleBypass(); _showCmdFeedback(`承認バイパス: ${isBypassActive() ? 'ON 🔓' : 'OFF 🔒'}`); } },
+    '/no_think': { description: '/no_think モードをトグル',         action: () => _cmdNoThink() },
+    '/gitlab':   { description: 'GitLabパネルを開く',               action: () => toggleGitLabPanel() },
+    '/sessions': { description: 'セッション履歴パネルを開く',       action: () => toggleSessionsPanel() },
+    '/todo':     { description: 'タスクパネルを開く',               action: () => toggleTodoPanel() },
+    '/new':      { description: '新しいセッションを開始',           action: () => newSession() },
+    '/export':   { description: '会話をMarkdownでエクスポート',     action: () => _cmdExport() },
+    '/token':    { description: '現在のトークン使用量を表示',        action: () => _cmdToken() },
+    '/diff':     { description: 'workspace の git diff を表示',     action: () => _cmdDirect('/workspace/git-diff', 'git diff') },
+    '/status':   { description: 'workspace の git status を表示',   action: () => _cmdDirect('/workspace/git-status', 'git status') },
+    '/ls':       { description: 'workspace のファイル一覧を表示',   action: () => _cmdDirect('/workspace/ls', 'ls') },
+  };
+
+  function _showCmdFeedback(msg) {
+    const turnEl = createTurnEl();
+    const d = document.createElement('div');
+    d.className = 'msg ai';
+    d.style.cssText = 'color:#a6adc8;font-size:12px;padding:6px 10px;';
+    d.textContent = `⚡ ${msg}`;
+    turnEl.appendChild(d);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function _cmdNoThink() {
+    const next = !isNoThinkActive();
+    localStorage.setItem('noThink', next);
+    document.getElementById('pv-no-think').checked = next;
+    _showCmdFeedback(`/no_think: ${next ? 'ON' : 'OFF'}`);
+  }
+
+  async function _cmdCompact() {
+    const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+    if (!history.length) { _showCmdFeedback('圧縮する履歴がありません'); return; }
+    _showCmdFeedback('履歴を圧縮中...');
+    try {
+      const res = await fetch('/compact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history }),
+      });
+      const data = await res.json();
+      if (data.compressed) {
+        localStorage.setItem('chatHistory', JSON.stringify(data.messages));
+        _showCmdFeedback(`圧縮完了: ${history.length} → ${data.messages.length} メッセージ`);
+      } else {
+        _showCmdFeedback('圧縮不要（履歴が少ない）');
+      }
+    } catch(e) {
+      _showCmdFeedback('圧縮に失敗しました');
+    }
+  }
+
+  function _cmdExport() {
+    const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+    let md = `# AI Code Agent 会話ログ\n\n*エクスポート: ${new Date().toLocaleString('ja-JP')}*\n\n---\n\n`;
+    for (const msg of history) {
+      if (msg.role === 'user') {
+        const text = typeof msg.content === 'string' ? msg.content : '(画像)';
+        md += `## You\n\n${text}\n\n`;
+      } else if (msg.role === 'assistant' && msg.content) {
+        md += `## Assistant\n\n${msg.content}\n\n`;
+      }
+    }
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-${new Date().toISOString().slice(0,10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function _cmdToken() {
+    const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'k' : String(n);
+    _showCmdFeedback(
+      `トークン使用量 — 入力: ${fmt(tokenSession.prompt)} / 出力: ${fmt(tokenSession.completion)} / 合計: ${fmt(tokenSession.total)}`
+    );
+  }
+
+  async function _cmdSkills() {
+    const turnEl = createTurnEl();
+    try {
+      const skills = await fetch('/skills').then(r => r.json());
+      if (!skills.length) {
+        appendMsg(turnEl, 'ai', '登録済みスキルはありません。');
+        return;
+      }
+      const rows = skills.map(s => `| \`${s.trigger}\` | ${s.description} |`).join('\n');
+      appendMsg(turnEl, 'ai',
+        `**登録済みスキル**\n\n| トリガー | 説明 |\n|---|---|\n${rows}\n\n` +
+        `**スキルの管理**\n\n| 操作 | 方法 |\n|---|---|\n` +
+        `| 呼び出す | \`/スキル名\` と入力して送信 |\n` +
+        `| 新規登録 | 「今やった手順を \`/スキル名\` として覚えて」 |\n` +
+        `| 修正 | 「\`/スキル名\` を修正して〇〇するように変えて」 |\n` +
+        `| 削除 | 「\`/スキル名\` スキルを削除して」 |`
+      );
+    } catch(e) {
+      appendMsg(turnEl, 'ai', 'スキル一覧の取得に失敗しました。');
+    }
+  }
+
+  function _cmdHelp() {
+    const rows = Object.entries(UI_COMMANDS)
+      .map(([cmd, def]) => `| \`${cmd}\` | ${def.description} |`)
+      .join('\n');
+    const turnEl = createTurnEl();
+    const d = appendMsg(turnEl, 'ai',
+      `**利用可能なスラッシュコマンド**\n\n| コマンド | 説明 |\n|---|---|\n${rows}`
+    );
+  }
+
+  async function _cmdDirect(endpoint, label) {
+    const turnEl = createTurnEl();
+    const d = appendMsg(turnEl, 'ai', '');
+    d._labelEl.textContent = label;
+    try {
+      const data = await fetch(endpoint).then(r => r.json());
+      const out = data.output || '(結果なし)';
+      // git diff はカラー表示、それ以外はコードブロック
+      if (label === 'git diff') {
+        renderDiff(d, out);
+      } else {
+        d.innerHTML = renderMarkdown('```\n' + out + '\n```');
+        hljs.highlightAll();
+      }
+    } catch(e) {
+      d.textContent = 'エラー: ' + e.message;
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function _cmdSendAgent(text) {
+    input.value = text;
+    sendMessage();
+  }
+
   let _skills = null;
   let _skillActiveIdx = -1;
 
@@ -665,7 +808,8 @@
       const query = val.substring(slashPos + 1);
       if (!/\s/.test(query)) {
         const skills = await _fetchSkills();
-        _skillPopupShow(skills, query);
+        const uiItems = Object.entries(UI_COMMANDS).map(([trigger, def]) => ({ trigger, description: def.description }));
+        _skillPopupShow([...uiItems, ...skills], query);
         return;
       }
     }
@@ -1858,6 +2002,18 @@
   async function sendMessage() {
     const text = input.value.trim();
     if (!text && pendingImages.length === 0) return;
+
+    // UIスラッシュコマンドのインターセプト
+    if (text && text.startsWith('/')) {
+      const cmdKey = text.split(/\s/)[0].toLowerCase();
+      if (UI_COMMANDS[cmdKey]) {
+        input.value = '';
+        input.style.height = 'auto';
+        UI_COMMANDS[cmdKey].action();
+        return;
+      }
+    }
+
     input.value = '';
     input.style.height = 'auto';
     abortController = new AbortController();

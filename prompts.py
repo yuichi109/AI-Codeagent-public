@@ -5,6 +5,50 @@ from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME
 # スキルディレクトリ（このファイルと同階層の skills/）
 _SKILLS_DIR = Path(__file__).parent / "skills"
 
+_CLAUDE_MD_MAX_BYTES = 20_000  # 1ファイルあたりの上限文字数
+
+
+def _load_workspace_claude_mds() -> str:
+    """workspace/ ルートと1階層下のサブディレクトリにある CLAUDE.md を収集して返す"""
+    work_dir = Path(ALLOWED_WORK_DIR).resolve()
+    if not work_dir.exists():
+        return ""
+
+    found = []
+    # workspace 直下の CLAUDE.md
+    root_md = work_dir / "CLAUDE.md"
+    if root_md.exists():
+        found.append((root_md, "workspace/CLAUDE.md"))
+
+    # 1階層下のサブディレクトリ（最終更新順で最大10件）
+    subdirs = sorted(
+        [d for d in work_dir.iterdir() if d.is_dir()],
+        key=lambda d: d.stat().st_mtime,
+        reverse=True,
+    )[:10]
+    for subdir in subdirs:
+        md = subdir / "CLAUDE.md"
+        if md.exists():
+            found.append((md, f"workspace/{subdir.name}/CLAUDE.md"))
+
+    if not found:
+        return ""
+
+    sections = []
+    for path, label in found:
+        try:
+            content = path.read_text(encoding="utf-8")
+            if len(content) > _CLAUDE_MD_MAX_BYTES:
+                content = content[:_CLAUDE_MD_MAX_BYTES] + "\n...(省略)"
+            sections.append(f"### {label}\n\n{content.strip()}")
+        except Exception:
+            pass
+
+    if not sections:
+        return ""
+
+    return "## プロジェクト固有の指示（CLAUDE.md）\n\n" + "\n\n---\n\n".join(sections)
+
 
 def _load_skills() -> str:
     """skills/*/SKILL.md を読み込んでシステムプロンプト用文字列を返す"""
@@ -85,9 +129,10 @@ def get_system_prompt(bypass_approval: bool = False) -> str:
     bypass_section = BYPASS_SECTION if bypass_approval else BYPASS_DISABLED_SECTION
     skills = _load_skills()
     skills_section = f"\n### 登録済みスキル\n\n{skills}" if skills else ""
-    return _build_prompt(bypass_section, skills_section)
+    claude_mds_section = _load_workspace_claude_mds()
+    return _build_prompt(bypass_section, skills_section, claude_mds_section)
 
-def _build_prompt(bypass_section: str, skills_section: str = "") -> str:
+def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_section: str = "") -> str:
     return f"""必ず日本語で回答すること。英語・中国語・その他の言語で回答してはいけない。
 
 あなたは熟練したシニアエンジニアとして振る舞う自律型 AI エージェントです。{f"あなたの名前は {AGENT_NAME} です。自己紹介や名前を聞かれた場合は必ずこの名前を名乗ること。" if AGENT_NAME else ""}
@@ -426,7 +471,9 @@ todo_update([
 - `run_command("rm -rf {str(_SKILLS_DIR.resolve())}/スキル名")` で削除
 - 「スキル `/スキル名` を削除しました」と報告する
 
-{skills_section}"""
+{skills_section}
+
+{claude_mds_section}"""
 
 # 後方互換性のためデフォルト（バイパスなし）で SYSTEM_PROMPT も残す（起動時スナップショット）
 SYSTEM_PROMPT = get_system_prompt(bypass_approval=False)

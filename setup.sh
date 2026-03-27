@@ -108,8 +108,8 @@ cmd_setup() {
 
     # Python venv
     section "Python 仮想環境"
-    # python3-venv が未インストールの場合は自動インストール
-    if ! python3 -m venv --help &>/dev/null 2>&1; then
+    # ensurepip（python3-venv）が未インストールの場合は自動インストール
+    if ! python3 -c "import ensurepip" &>/dev/null 2>&1; then
         info "python3-venv が見つかりません。インストール中..."
         sudo apt-get install -y python3-venv
         ok "python3-venv をインストールしました"

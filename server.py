@@ -1053,9 +1053,23 @@ async def providers_current():
 
 @app.get("/providers/models")
 async def providers_models(url: str, api_key: str = ""):
-    """指定URLの /v1/models を叩いてモデル一覧を返す"""
+    """指定URLの /v1/models を叩いてモデル一覧を返す。
+    Azure OpenAI の場合は /v1/models が存在しないため .env の設定値を返す。"""
     try:
-        # URLを正規化: 末尾の /v1 を除去してから /v1/models を付ける
+        # Azure OpenAI / Foundry は /v1/models をサポートしないため設定値を返す
+        if "openai.azure.com" in url or "cognitiveservices.azure.com" in url:
+            from config import AZURE_OPENAI_DEPLOYMENTS, FOUNDRY_INSTANCES
+            models = list(AZURE_OPENAI_DEPLOYMENTS)
+            # Foundry インスタンスのモデルも追加
+            for inst in FOUNDRY_INSTANCES:
+                if inst["endpoint"].rstrip("/") == url.rstrip("/"):
+                    models = list(inst["models"])
+                    break
+            if not models:
+                models = []
+            return JSONResponse({"models": models, "note": "Azure: .envの設定値を使用"})
+
+        # OpenAI 互換エンドポイント（LM Studio, Ollama 等）
         base = url.rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3]

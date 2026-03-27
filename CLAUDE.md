@@ -292,10 +292,14 @@ skills/
 - `GET /skills` エンドポイントでスキル一覧をJSON取得可能
 
 ### 配布・チーム展開（#15）
-- [ ] **Ansibleプレイブック**（`setup.yml`）: Docker・Ansible導入済みUbuntuイメージへの一撃セットアップ
-  - 配布Ubuntuイメージ前提: Docker・Ansible インストール済み
-  - 不足パッケージ補完（python3-venv, bubblewrap, git）
-  - venv作成・pip install・.env設定・systemdサービス登録まで自動化
+- [x] **setup.sh による別PCデプロイ**（2026-03-27）: WSL2 Ubuntu への一撃セットアップ
+  - 実行権限を git に記録（clone後に chmod 不要）
+  - 改行コード CRLF→LF（`.gitattributes`）
+  - python3-venv / bubblewrap / Docker を自動インストール
+  - Docker グループにユーザー追加（sudo不要化）
+  - 対話入力を廃止 → ブラウザ `/setup` で設定する設計に一本化
+  - セットアップ完了時に `http://localhost:8000/setup` を表示
+- [ ] **Ansibleプレイブック**（`setup.yml`）: 未着手（setup.sh で代替中）
 - [ ] **Docker化オプション**（WSL2なし環境向け）: bubblewrapをオプション化し `SANDBOX=none` で無効化可能に
 
 ### ドキュメント

@@ -192,6 +192,10 @@ function renderFields(type, data = {}) {
 
   if (type === 'azure_openai') return `
     <div class="field">
+      <label>表示名</label>
+      <input type="text" name="name" value="${esc(data.name||'')}" placeholder="Azure OpenAI">
+    </div>
+    <div class="field">
       <label>エンドポイント URL</label>
       <input type="text" name="endpoint" value="${esc(data.endpoint||'')}" placeholder="https://your-resource.openai.azure.com">
     </div>

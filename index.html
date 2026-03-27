@@ -1882,8 +1882,8 @@
         if (d === data.current) opt.selected = true;
         sel.appendChild(opt);
       });
-      // 複数デプロイがある場合のみ表示
-      sel.style.display = data.deployments.length > 1 ? '' : 'none';
+      // 1つ以上デプロイがある場合は表示
+      sel.style.display = data.deployments.length >= 1 ? '' : 'none';
     } catch(e) { /* 無視 */ }
   }
 

@@ -1451,6 +1451,7 @@ async def setup_current():
     # Azure OpenAI（常に1番目・未設定でも空エントリを返す）
     providers.append({
         "type":        "azure_openai",
+        "name":        raw.get("AZURE_OPENAI_NAME", "") or "Azure OpenAI",
         "endpoint":    raw.get("AZURE_OPENAI_ENDPOINT", ""),
         "api_key":     mask(raw.get("AZURE_OPENAI_API_KEY", "")),
         "api_key_set": bool(raw.get("AZURE_OPENAI_API_KEY")),
@@ -1639,6 +1640,7 @@ async def setup_save(req: SetupSaveRequest):
         if ptype == "azure_openai":
             lines += [
                 "# Azure OpenAI",
+                f"AZURE_OPENAI_NAME={prov.get('name','')}",
                 f"AZURE_OPENAI_API_KEY={api_key_val(prov.get('api_key',''), 'AZURE_OPENAI_API_KEY')}",
                 f"AZURE_OPENAI_ENDPOINT={prov.get('endpoint','')}",
                 f"AZURE_OPENAI_DEPLOYMENT={prov.get('deployment','')}",

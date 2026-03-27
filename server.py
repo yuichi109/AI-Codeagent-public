@@ -100,6 +100,14 @@ def _make_client():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 起動時に一時ディレクトリを自動削除
+    import shutil
+    for tmp_name in ["_gp_tmp"]:
+        tmp_path = ALLOWED_WORK_DIR / tmp_name
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+            print(f"[INFO] 起動時クリーンアップ: {tmp_path} を削除しました")
+
     # SearXNG を自動起動
     if SEARXNG_ENABLED:
         compose_file = Path(__file__).parent / "docker-compose.searxng.yml"

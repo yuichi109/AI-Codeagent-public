@@ -1656,8 +1656,8 @@ async def setup_save(req: SetupSaveRequest):
                 f"{prefix}_NAME={prov.get('name','')}",
                 f"{prefix}_ENDPOINT={prov.get('endpoint','')}",
                 f"{prefix}_API_KEY={api_key_val(prov.get('api_key',''), prefix+'_API_KEY')}",
-                f"{prefix}_MODEL={prov.get('model','')}",
                 f"{prefix}_MODELS={prov.get('models','')}",
+                f"{prefix}_MODEL={prov.get('models','').split(',')[0].strip() if prov.get('models') else prov.get('model','')}",
                 f"{prefix}_API_VERSION={prov.get('api_version','2024-12-01-preview')}",
                 "",
             ]

@@ -1697,8 +1697,11 @@ async def setup_save(req: SetupSaveRequest):
         f"GITLAB_PAT={api_key_val(gl.get('pat',''), 'GITLAB_PAT')}",
         "",
     ]
-    # git config --global user.email を更新し、リポジトリのローカル上書きがあれば削除
+    # git config --global user.name / user.email を更新
+    git_user = gl.get('user', '').strip()
     git_email = gl.get('email', '').strip()
+    if git_user:
+        subprocess.run(["git", "config", "--global", "user.name", git_user], check=False)
     if git_email:
         subprocess.run(["git", "config", "--global", "user.email", git_email], check=False)
         repo_dir = str(Path(__file__).parent)

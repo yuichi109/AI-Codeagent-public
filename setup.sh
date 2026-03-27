@@ -55,7 +55,7 @@ show_menu() {
 cmd_setup() {
     section "初回セットアップ"
 
-    # .env 作成
+    # .env 作成（対話なし・上書きなし）
     if [ ! -f "$ENV_FILE" ]; then
         if [ ! -f "$ENV_EXAMPLE" ]; then
             error ".env.example が見つかりません: $ENV_EXAMPLE"
@@ -64,55 +64,11 @@ cmd_setup() {
         cp "$ENV_EXAMPLE" "$ENV_FILE"
         ok ".env を作成しました（.env.example からコピー）"
     else
-        warn ".env はすでに存在します（スキップ）"
-    fi
-
-    # 必須項目の対話入力
-    section ".env の必須項目を設定"
-    echo "（Enterでスキップ → 後で手動編集可）"
-    echo ""
-
-    prompt_env() {
-        local key="$1" prompt="$2" current
-        current=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
-        if [ -n "$current" ] && [[ "$current" != *"your_"* ]]; then
-            echo "  $key: ${current} （設定済み、スキップ）"
-            return
-        fi
-        read -rp "  $prompt: " val
-        if [ -n "$val" ]; then
-            if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
-                sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
-            else
-                echo "${key}=${val}" >> "$ENV_FILE"
-            fi
-            ok "$key を設定しました"
-        fi
-    }
-
-    prompt_env "AZURE_OPENAI_API_KEY"       "Azure OpenAI API キー"
-    prompt_env "AZURE_OPENAI_ENDPOINT"      "Azure OpenAI エンドポイント URL"
-    prompt_env "AZURE_OPENAI_DEPLOYMENT"    "デプロイメント名（例: gpt-5-mini）"
-    prompt_env "GITLAB_PAT"                 "GitLab Personal Access Token（不要なら空Enter）"
-    prompt_env "GITLAB_USER"                "GitLab ユーザー名（不要なら空Enter）"
-
-    # プロキシ設定
-    echo ""
-    read -rp "社内プロキシを使用しますか？ [y/N]: " USE_PROXY
-    if [[ "$USE_PROXY" =~ ^[Yy]$ ]]; then
-        read -rp "プロキシURL（例: http://10.210.1.23:3128）: " PROXY_URL
-        if [ -n "$PROXY_URL" ]; then
-            sed -i "s|^#\?HTTPS_PROXY=.*|HTTPS_PROXY=${PROXY_URL}|" "$ENV_FILE" 2>/dev/null || \
-                echo "HTTPS_PROXY=${PROXY_URL}" >> "$ENV_FILE"
-            sed -i "s|^#\?HTTP_PROXY=.*|HTTP_PROXY=${PROXY_URL}|" "$ENV_FILE" 2>/dev/null || \
-                echo "HTTP_PROXY=${PROXY_URL}" >> "$ENV_FILE"
-            ok "プロキシを .env に設定しました"
-        fi
+        ok ".env はすでに存在します（スキップ）"
     fi
 
     # Python venv
     section "Python 仮想環境"
-    # ensurepip（python3-venv）が未インストールの場合は自動インストール
     if ! python3 -c "import ensurepip" &>/dev/null 2>&1; then
         info "python3-venv が見つかりません。インストール中..."
         sudo apt-get install -y python3-venv
@@ -123,7 +79,7 @@ cmd_setup() {
         python3 -m venv "$VENV_DIR"
         ok "venv を作成しました"
     else
-        warn "venv はすでに存在します（スキップ）"
+        ok "venv はすでに存在します（スキップ）"
     fi
 
     info "依存パッケージをインストール中..."
@@ -136,67 +92,25 @@ cmd_setup() {
     mkdir -p "$SCRIPT_DIR/workspace"
     ok "workspace/ を確認しました"
 
-    # bubblewrap チェック
+    # bubblewrap（自動インストール）
     section "bubblewrap（サンドボックス）"
     if command -v bwrap &>/dev/null; then
         ok "bubblewrap はインストール済みです: $(bwrap --version 2>&1 | head -1)"
     else
-        warn "bubblewrap が見つかりません"
-        echo "  → インストール: sudo apt install bubblewrap"
-        read -rp "  今すぐインストールしますか？ [y/N]: " INSTALL_BWRAP
-        if [[ "$INSTALL_BWRAP" =~ ^[Yy]$ ]]; then
-            sudo apt-get install -y bubblewrap
-            ok "bubblewrap をインストールしました"
-        fi
+        info "bubblewrap をインストール中..."
+        sudo apt-get install -y bubblewrap
+        ok "bubblewrap をインストールしました"
     fi
 
-    # Manim チェック
-    section "Manim（アニメーション生成・オプション）"
-    if command -v manim &>/dev/null; then
-        ok "manim はインストール済みです: $(manim --version 2>&1 | head -1)"
-    else
-        warn "manim が見つかりません（render_manim ツールが動作しません）"
-        echo "  → 必要なシステムパッケージ: libcairo2-dev libpango1.0-dev ffmpeg"
-        read -rp "  今すぐインストールしますか？ [y/N]: " INSTALL_MANIM
-        if [[ "$INSTALL_MANIM" =~ ^[Yy]$ ]]; then
-            sudo apt-get install -y libcairo2-dev libpango1.0-dev ffmpeg
-            pip install manim
-            ok "manim をインストールしました"
-        else
-            info "スキップ（後で: sudo apt install libcairo2-dev libpango1.0-dev ffmpeg && pip install manim）"
-        fi
-    fi
-
-    # Docker チェック
-    section "Docker"
-    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
-        ok "Docker は起動しています"
-    else
-        warn "Docker が起動していないか未インストールです"
-        echo "  → WSL2 の場合: Docker Desktop を起動するか、Docker Engine をインストールしてください"
-    fi
-
-    # SearXNG
-    section "SearXNG（検索バックエンド）"
-    SEARXNG_ENABLED=$(grep -E "^SEARXNG_ENABLED=" "$ENV_FILE" | cut -d'=' -f2-)
-    if [ "$SEARXNG_ENABLED" = "true" ]; then
-        info "SearXNG コンテナを起動中..."
-        cd "$SCRIPT_DIR" && docker compose -f docker-compose.searxng.yml up -d
-        ok "SearXNG を起動しました（http://localhost:8888）"
-    else
-        warn "SEARXNG_ENABLED=false のためスキップ（必要なら .env で true に変更）"
-    fi
-
-    # systemd サービス
+    # systemd サービス（自動登録）
     section "systemd サービス登録"
     if systemctl is-enabled "$SERVICE_NAME" &>/dev/null 2>&1; then
         ok "サービスはすでに登録済みです"
+        sudo systemctl restart "$SERVICE_NAME"
+        ok "サービスを再起動しました"
     else
-        read -rp "systemd サービスとして自動起動を登録しますか？ [Y/n]: " REG_SERVICE
-        if [[ ! "$REG_SERVICE" =~ ^[Nn]$ ]]; then
-            # サービスファイルのユーザー・パスを現在の環境に合わせて生成
-            CURRENT_USER="$(whoami)"
-            sudo tee "$SERVICE_FILE" > /dev/null << EOF
+        CURRENT_USER="$(whoami)"
+        sudo tee "$SERVICE_FILE" > /dev/null << EOF
 [Unit]
 Description=AI Code Agent (FastAPI + uvicorn)
 After=network.target
@@ -213,21 +127,22 @@ EnvironmentFile=${ENV_FILE}
 [Install]
 WantedBy=multi-user.target
 EOF
-            sudo systemctl daemon-reload
-            sudo systemctl enable "$SERVICE_NAME"
-            sudo systemctl start "$SERVICE_NAME"
-            ok "サービスを登録・起動しました"
-            echo "  → 状態確認: systemctl status $SERVICE_NAME"
-        fi
+        sudo systemctl daemon-reload
+        sudo systemctl enable "$SERVICE_NAME"
+        sudo systemctl start "$SERVICE_NAME"
+        ok "サービスを登録・起動しました"
     fi
 
+    # 完了メッセージ
     section "セットアップ完了"
     echo ""
     ok "AI-Codeagent のセットアップが完了しました！"
     echo ""
-    echo "  起動:      systemctl start $SERVICE_NAME   または   uvicorn server:app --reload"
-    echo "  ブラウザ:  http://localhost:8000"
-    echo "  .env 編集: nano $ENV_FILE"
+    # このマシンのIPアドレスを取得して表示
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+    echo "  ブラウザで以下にアクセスして設定を行ってください:"
+    echo ""
+    echo "    http://${LOCAL_IP}:8000/setup"
     echo ""
 }
 

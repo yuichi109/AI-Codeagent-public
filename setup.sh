@@ -74,7 +74,7 @@ cmd_setup() {
 
     prompt_env() {
         local key="$1" prompt="$2" current
-        current=$(grep -E "^${key}=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '"')
+        current=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)
         if [ -n "$current" ] && [[ "$current" != *"your_"* ]]; then
             echo "  $key: ${current} （設定済み、スキップ）"
             return

@@ -89,6 +89,17 @@ cmd_setup() {
     mkdir -p "$SCRIPT_DIR/workspace"
     ok "workspace/ を確認しました"
 
+    # Manim チェック（オプション・重いので案内のみ）
+    section "Manim（アニメーション生成・オプション）"
+    if command -v manim &>/dev/null; then
+        ok "manim はインストール済みです: $(manim --version 2>&1 | head -1)"
+    else
+        warn "manim が見つかりません（render_manim ツールが動作しません）"
+        echo "  → 必要な場合は後でインストール:"
+        echo "     sudo apt install libcairo2-dev libpango1.0-dev ffmpeg"
+        echo "     venv/bin/pip install manim"
+    fi
+
     # bubblewrap（自動インストール）
     section "bubblewrap（サンドボックス）"
     if command -v bwrap &>/dev/null; then

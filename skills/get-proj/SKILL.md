@@ -57,11 +57,14 @@ curl -s "https://gitlab.com/api/v4/projects/<id>/repository/tree?per_page=100&pa
 
 ### ステップ4: クローンしてコピーする（**この手順のみ使う**）
 
-**`work_dir` は絶対に使わない。以下の3コマンドを順番に実行する。失敗したら別の方法を試みず、エラー内容をそのまま報告する。**
-
+**`work_dir` は絶対に使わない。以下の4コマンドを順番に実行する。**
+**⛔ 失敗したら即座に止めてエラー内容をそのまま報告する。リトライ・別方法への切り替え・追加コマンドの実行は絶対禁止。**
 **`$HOME` は使わない（shell=Falseのため展開されない）。`~` を使う（チルダ展開は有効）。**
 
 ```bash
+# 0. 残骸を事前削除（前回失敗時の残骸対策）
+rm -rf ~/AI-Codeagent/workspace/_gp_tmp
+
 # 1. クローン（work_dir 指定なし）
 git clone --depth 1 "https://oauth2:<GITLAB_PAT>@<リポジトリURL(https://以降)>" ~/AI-Codeagent/workspace/_gp_tmp
 
@@ -73,7 +76,8 @@ rm -rf ~/AI-Codeagent/workspace/_gp_tmp
 ```
 
 - `<リポジトリURL(https://以降)>` は `http_url_to_repo` の `https://` を除いた部分（例: `gitlab.com/yuichi.matsuo/HOGE.git`）
-- **いずれかのコマンドが失敗したらその場で止めてエラーを報告する。リトライや別方法への切り替えは禁止**
+- **コマンドは必ずこの4つのみ。追加で ls・find・cat 等を実行してはいけない**
+- **returncode が 0 以外、または stderr にエラーがあれば即停止してそのまま報告**
 
 ### ステップ5: git管理の有無を確認する
 

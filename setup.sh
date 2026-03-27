@@ -182,8 +182,8 @@ cmd_setup() {
     if systemctl is-enabled "$SERVICE_NAME" &>/dev/null 2>&1; then
         ok "サービスはすでに登録済みです"
     else
-        read -rp "systemd サービスとして自動起動を登録しますか？ [y/N]: " REG_SERVICE
-        if [[ "$REG_SERVICE" =~ ^[Yy]$ ]]; then
+        read -rp "systemd サービスとして自動起動を登録しますか？ [Y/n]: " REG_SERVICE
+        if [[ ! "$REG_SERVICE" =~ ^[Nn]$ ]]; then
             # サービスファイルのユーザー・パスを現在の環境に合わせて生成
             CURRENT_USER="$(whoami)"
             sudo tee "$SERVICE_FILE" > /dev/null << EOF

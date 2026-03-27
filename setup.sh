@@ -105,6 +105,32 @@ cmd_setup() {
         fi
     fi
 
+    # Docker（自動インストール＋グループ追加）
+    section "Docker"
+    if command -v docker &>/dev/null; then
+        ok "Docker はインストール済みです: $(docker --version)"
+    else
+        info "Docker が見つかりません。インストール中..."
+        sudo apt-get install -y ca-certificates curl gnupg lsb-release
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -q
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        ok "Docker をインストールしました"
+    fi
+    # カレントユーザーを docker グループに追加（sudoなし実行のため）
+    if groups "$USER" | grep -qw docker; then
+        ok "ユーザー '$USER' はすでに docker グループに所属しています"
+    else
+        sudo usermod -aG docker "$USER"
+        ok "ユーザー '$USER' を docker グループに追加しました"
+        warn "グループ変更を反映するには一度ログアウト＆ログインが必要です"
+    fi
+
     # bubblewrap（自動インストール）
     section "bubblewrap（サンドボックス）"
     if command -v bwrap &>/dev/null; then

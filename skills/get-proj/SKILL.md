@@ -59,21 +59,17 @@ curl -s "https://gitlab.com/api/v4/projects/<id>/repository/tree?per_page=100&pa
 
 **`work_dir` は絶対に使わない。以下の3コマンドを順番に実行する。失敗したら別の方法を試みず、エラー内容をそのまま報告する。**
 
-まずホームディレクトリを取得する：
-```bash
-echo $HOME
-```
-得られたパスを `<HOME>` として以下に使う（例: `/home/user`）。
+**`$HOME` は使わない（shell=Falseのため展開されない）。`~` を使う（チルダ展開は有効）。**
 
 ```bash
 # 1. クローン（work_dir 指定なし）
-git clone --depth 1 "https://oauth2:<GITLAB_PAT>@<リポジトリURL(https://以降)>" <HOME>/AI-Codeagent/workspace/_gp_tmp
+git clone --depth 1 "https://oauth2:<GITLAB_PAT>@<リポジトリURL(https://以降)>" ~/AI-Codeagent/workspace/_gp_tmp
 
 # 2. コピー（work_dir 指定なし）
-cp -r <HOME>/AI-Codeagent/workspace/_gp_tmp/<ディレクトリ名> <HOME>/AI-Codeagent/workspace/<取り出し先>
+cp -r ~/AI-Codeagent/workspace/_gp_tmp/<ディレクトリ名> ~/AI-Codeagent/workspace/<取り出し先>
 
 # 3. 一時ディレクトリ削除（work_dir 指定なし）
-rm -rf <HOME>/AI-Codeagent/workspace/_gp_tmp
+rm -rf ~/AI-Codeagent/workspace/_gp_tmp
 ```
 
 - `<リポジトリURL(https://以降)>` は `http_url_to_repo` の `https://` を除いた部分（例: `gitlab.com/yuichi.matsuo/HOGE.git`）

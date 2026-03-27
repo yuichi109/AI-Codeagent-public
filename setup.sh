@@ -55,14 +55,11 @@ show_menu() {
 cmd_setup() {
     section "初回セットアップ"
 
-    # .env 作成（対話なし・上書きなし）
+    # .env 作成（空ファイル・上書きなし）
+    # APIキー等の設定はブラウザ（/setup）で行う
     if [ ! -f "$ENV_FILE" ]; then
-        if [ ! -f "$ENV_EXAMPLE" ]; then
-            error ".env.example が見つかりません: $ENV_EXAMPLE"
-            exit 1
-        fi
-        cp "$ENV_EXAMPLE" "$ENV_FILE"
-        ok ".env を作成しました（.env.example からコピー）"
+        touch "$ENV_FILE"
+        ok ".env を作成しました（空ファイル）"
     else
         ok ".env はすでに存在します（スキップ）"
     fi
@@ -138,11 +135,9 @@ EOF
     echo ""
     ok "AI-Codeagent のセットアップが完了しました！"
     echo ""
-    # このマシンのIPアドレスを取得して表示
-    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
     echo "  ブラウザで以下にアクセスして設定を行ってください:"
     echo ""
-    echo "    http://${LOCAL_IP}:8000/setup"
+    echo "    http://localhost:8000/setup"
     echo ""
 }
 

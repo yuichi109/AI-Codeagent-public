@@ -1643,8 +1643,8 @@ async def setup_save(req: SetupSaveRequest):
                 f"AZURE_OPENAI_NAME={prov.get('name','')}",
                 f"AZURE_OPENAI_API_KEY={api_key_val(prov.get('api_key',''), 'AZURE_OPENAI_API_KEY')}",
                 f"AZURE_OPENAI_ENDPOINT={prov.get('endpoint','')}",
-                f"AZURE_OPENAI_DEPLOYMENT={prov.get('deployment','')}",
                 f"AZURE_OPENAI_DEPLOYMENTS={prov.get('deployments','')}",
+                f"AZURE_OPENAI_DEPLOYMENT={prov.get('deployments','').split(',')[0].strip() if prov.get('deployments') else ''}",
                 f"AZURE_OPENAI_API_VERSION={prov.get('api_version','2025-01-01-preview')}",
                 "",
             ]

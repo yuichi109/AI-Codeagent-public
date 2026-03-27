@@ -206,8 +206,9 @@ function renderFields(type, data = {}) {
     </div>
     <div class="row">
       <div class="field">
-        <label>使用モデル（デプロイ名）</label>
-        ${modelSelectBlock('deployment', data.deployment, data.deployments)}
+        <label>デプロイ名（カンマ区切りで複数可）</label>
+        <input type="text" name="deployments" value="${esc(data.deployments||data.deployment||'')}" placeholder="gpt-5-mini,gpt-4.1-mini">
+        <span class="hint">Azureポータルのデプロイ名を入力（例: gpt-5-mini）</span>
       </div>
       <div class="field">
         <label>API バージョン</label>

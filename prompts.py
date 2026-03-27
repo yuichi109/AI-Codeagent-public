@@ -90,6 +90,14 @@ _gitlab_section = f"""
 - GitLab PAT: {GITLAB_PAT}
 - GitLab API ベース URL: https://gitlab.com/api/v4
 
+### リポジトリを workspace にクローンする手順
+「workspace にクローンして」と依頼されたら以下のコマンド **1つだけ** 実行する。`_gp_tmp` は使わない。
+```
+git clone https://oauth2:{GITLAB_PAT}@gitlab.com/ユーザー名/リポジトリ名.git ~/AI-Codeagent/workspace/リポジトリ名
+```
+- `~` を使う（`$HOME` は shell=False のため展開されない）
+- クローン後は `list_files("リポジトリ名")` で中身を確認して報告する
+
 ### 新規プロジェクト作成の手順
 1. `write_file` で README.md / .gitignore / CLAUDE.md 等を配置（例: "MYPROJ/README.md"）
 2. `run_command` で `curl` → GitLab API にプロジェクト作成

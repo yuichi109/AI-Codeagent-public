@@ -50,10 +50,29 @@ Azure Portal で以下を用意する:
 
 ### Step 1: リポジトリをクローン
 
+**HTTPS（推奨・初回）:**
+
 ```bash
+# 別マシンのWSL2上で
 git clone https://gitlab.com/yuichi.matsuo/AI-Codeagent.git
 cd AI-Codeagent
+./setup.sh install
 ```
+
+**SSH（SSHキー配置済みの場合）:**
+
+```bash
+git clone git@gitlab.com:yuichi.matsuo/AI-Codeagent.git
+cd AI-Codeagent
+./setup.sh install
+```
+
+`setup.sh install` を実行すると、venv作成・依存パッケージインストール・systemdサービス登録まで自動で行われます。
+完了後、ブラウザで **http://localhost:8000/setup** を開いて API キーや GitLab PAT などの設定を行ってください。
+
+---
+
+> 以下は手動セットアップの手順です。`setup.sh` を使う場合はスキップ可。
 
 ### Step 2: Python 仮想環境を作成
 
@@ -83,13 +102,13 @@ pip install -r requirements.txt
 
 ### Step 4: 環境変数ファイルを作成
 
-`.env.example` をコピーして `.env` を作成:
+ブラウザで **http://localhost:8000/setup** を開いて設定するか、手動で `.env` を作成:
 
 ```bash
-cp .env.example .env
+touch .env
 ```
 
-`.env` をテキストエディタで開いて値を設定:
+`.env` に以下を設定:
 
 ```env
 AZURE_OPENAI_API_KEY=your_api_key_here        # Azure の API キー

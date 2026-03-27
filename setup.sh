@@ -81,7 +81,11 @@ cmd_setup() {
         fi
         read -rp "  $prompt: " val
         if [ -n "$val" ]; then
-            sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+            if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+            else
+                echo "${key}=${val}" >> "$ENV_FILE"
+            fi
             ok "$key を設定しました"
         fi
     }

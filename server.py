@@ -104,10 +104,12 @@ async def lifespan(app: FastAPI):
     if SEARXNG_ENABLED:
         compose_file = Path(__file__).parent / "docker-compose.searxng.yml"
         if compose_file.exists():
-            subprocess.run(
+            result = subprocess.run(
                 ["docker", "compose", "-f", str(compose_file), "up", "-d"],
-                capture_output=True,
+                capture_output=True, text=True,
             )
+            if result.returncode != 0:
+                print(f"[WARN] SearXNG 起動失敗: {result.stderr.strip() or result.stdout.strip()}")
     yield
 
 
@@ -1535,6 +1537,11 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
                 return JSONResponse({"error": "エンドポイントまたはAPIキーが未設定です"}, status_code=400)
             url = f"{ep}/openai/deployments?api-version={api_ver}"
             resp = requests.get(url, headers={"api-key": api_key}, timeout=8, proxies={"http": None, "https": None})
+            if resp.status_code == 404:
+                # /openai/deployments が使えないリソースの場合は .env の設定値を返す
+                saved = raw.get("AZURE_OPENAI_DEPLOYMENTS", raw.get("AZURE_OPENAI_DEPLOYMENT", ""))
+                models = [m.strip() for m in saved.split(",") if m.strip()]
+                return JSONResponse({"models": models, "note": "deployments API 非対応のため .env の設定値を使用"})
             resp.raise_for_status()
             data = resp.json()
             models = [d["id"] for d in data.get("value", [])]

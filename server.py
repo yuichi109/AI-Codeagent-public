@@ -1257,6 +1257,17 @@ async def workspace_protected_update(req: ProtectedUpdateRequest):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+class RawWriteRequest(BaseModel):
+    path: str
+    content: str
+
+@app.post("/workspace/write-raw")
+async def workspace_write_raw(req: RawWriteRequest):
+    """LLMを経由せずコンテンツをそのままworkspaceに書き込む"""
+    result = write_file(req.path, req.content)
+    return JSONResponse({"result": result})
+
+
 @app.post("/workspace/cleanup")
 async def workspace_cleanup(req: CleanupRequest):
     """保護リストにないファイル・ディレクトリを削除する"""

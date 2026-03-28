@@ -404,6 +404,12 @@
         <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="ファイルを添付（画像・YAML・JSON・テキスト等）">📎</button>
         <input id="file-input" type="file" accept="image/*,.yml,.yaml,.json,.toml,.ini,.conf,.txt,.md,.py,.sh,.bash,.js,.ts,.html,.css,.xml,.env" multiple style="display:none" onchange="handleFileSelect(event)">
         <button id="codeblock-btn" onclick="insertCodeBlock()" title="コードブロックを挿入（選択テキストを囲む）">&lt;/&gt;</button>
+        <button id="rawwrite-btn" onclick="toggleRawWriteBar()" title="コードをLLMを通さず直接ファイルに保存">💾 直接保存</button>
+        <div id="rawwrite-bar" style="display:none;align-items:center;gap:6px;margin-top:4px;">
+          <input id="rawwrite-path" placeholder="保存先 (例: check.yml)" style="flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--surface2);background:var(--base);color:var(--text);font-size:13px;">
+          <button onclick="doRawWrite()" style="padding:4px 10px;border-radius:6px;background:var(--blue);color:#fff;border:none;cursor:pointer;font-size:13px;">保存</button>
+          <button onclick="toggleRawWriteBar()" style="padding:4px 8px;border-radius:6px;background:var(--surface1);color:var(--text);border:none;cursor:pointer;font-size:13px;">✕</button>
+        </div>
         <button id="bypass-btn" onclick="toggleBypass()" title="承認バイパス: ONにすると確認なしで即実行">🔒 承認</button>
       </div>
       <div id="input-right">
@@ -905,6 +911,41 @@
     ta.setSelectionRange(start + 4, start + 4 + selected.length);
     ta.focus();
     autoResize(ta);
+  }
+
+  // 直接保存バーの表示/非表示
+  function toggleRawWriteBar() {
+    const bar = document.getElementById('rawwrite-bar');
+    const visible = bar.style.display !== 'none';
+    bar.style.display = visible ? 'none' : 'flex';
+    if (!visible) document.getElementById('rawwrite-path').focus();
+  }
+
+  // LLMを経由せずtextareaの内容をworkspaceに直接書き込む
+  async function doRawWrite() {
+    const pathInput = document.getElementById('rawwrite-path').value.trim();
+    if (!pathInput) { alert('保存先ファイル名を入力してください'); return; }
+    const ta = document.getElementById('input');
+    let content = ta.value;
+    // コードブロック(``` ... ```)が含まれている場合はその中身だけ取り出す
+    const cbMatch = content.match(/```[^\n]*\n([\s\S]*?)```/);
+    if (cbMatch) content = cbMatch[1];
+    if (!content.trim()) { alert('保存する内容がありません'); return; }
+    try {
+      const res = await fetch('/workspace/write-raw', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ path: pathInput, content })
+      });
+      const data = await res.json();
+      appendMsg('assistant', `✅ **直接保存完了**: \`${pathInput}\`\n\n${data.result || ''}`, []);
+      ta.value = '';
+      autoResize(ta);
+      toggleRawWriteBar();
+      document.getElementById('rawwrite-path').value = '';
+    } catch(e) {
+      alert('保存失敗: ' + e.message);
+    }
   }
 
   function addImagePreview(img) {

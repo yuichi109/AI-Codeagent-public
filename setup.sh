@@ -55,6 +55,18 @@ show_menu() {
 cmd_setup() {
     section "初回セットアップ"
 
+    # sudo NOPASSWD チェック（まっさらな Ubuntu では未設定の場合がある）
+    section "sudo NOPASSWD チェック"
+    CURRENT_USER="$(whoami)"
+    if sudo -n true 2>/dev/null; then
+        ok "sudo NOPASSWD は有効です"
+    else
+        warn "sudo NOPASSWD が無効です。設定します（パスワードを1回入力）..."
+        echo "${CURRENT_USER} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/nopass > /dev/null
+        sudo chmod 440 /etc/sudoers.d/nopass
+        ok "sudo NOPASSWD を設定しました（/etc/sudoers.d/nopass）"
+    fi
+
     # .env 作成（空ファイル・上書きなし）
     # APIキー等の設定はブラウザ（/setup）で行う
     if [ ! -f "$ENV_FILE" ]; then

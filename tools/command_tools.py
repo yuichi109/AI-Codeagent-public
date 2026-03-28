@@ -13,7 +13,7 @@ BLOCKED_COMMANDS = {
     "init",
 }
 
-LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew"}
+LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo"}
 
 
 def _run_bash_sandboxed(args: list) -> dict:

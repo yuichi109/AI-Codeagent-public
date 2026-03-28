@@ -364,3 +364,65 @@ docker volume prune       # 未使用ボリュームを削除
 - [ ] (任意) systemd サービスを登録して自動起動を設定した
 - [ ] (任意) Docker をインストールして Portainer 等のコンテナ管理 UI を起動した
 - [ ] (任意) Manim をインストールした (`sudo apt install libcairo2-dev libpango1.0-dev ffmpeg && pip install manim`)
+- [ ] (任意) Ansible を使用する場合はインストールした
+- [ ] (任意) Azure を Ansible で操作する場合は azcollection をインストールした
+
+---
+
+## Ansible を使用する場合
+
+### Ansible のインストール
+
+```bash
+sudo apt install -y ansible
+```
+
+### 動作確認
+
+```bash
+ansible --version
+```
+
+---
+
+## Ansible で Azure を操作する場合
+
+Azure リソースグループ・VM・VNET 等を Ansible から操作するには `azure.azcollection` と依存パッケージが必要です。
+
+### Azure コレクションのインストール
+
+```bash
+# azure.azcollection をインストール
+ansible-galaxy collection install azure.azcollection --force
+
+# Python 依存パッケージをインストール
+pip3 install -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt --break-system-packages
+```
+
+### 認証設定
+
+環境変数でサービスプリンシパルまたはマネージド ID を指定します。
+
+```bash
+export AZURE_SUBSCRIPTION_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export AZURE_CLIENT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export AZURE_SECRET="your-client-secret"
+export AZURE_TENANT="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+または Playbook の `vars` に直接記載するか、`~/.azure/credentials` ファイルを使用します。
+
+### Playbook 実行例
+
+```bash
+ansible-playbook -i localhost, your_playbook.yml
+```
+
+### エージェントからのインストール指示例
+
+エージェントのチャットに以下のように指示すれば自動でインストールされます：
+
+```
+Ansibleをインストールして、Azure コレクション（azure.azcollection）と依存パッケージも入れて
+```
+

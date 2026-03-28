@@ -48,8 +48,12 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
         target = _resolve_safe_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         write_mode = "a" if mode == "append" else "w"
-        target.write_text(content, encoding="utf-8") if write_mode == "w" else open(target, "a", encoding="utf-8").write(content)
-        return {"message": f"{path} に書き込みました", "path": str(target), "size": len(content)}
+        # ヌルバイト等の不正な制御文字を除去（\n \r \t は保持）
+        clean_content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', content)
+        target.write_text(clean_content, encoding="utf-8") if write_mode == "w" else open(target, "a", encoding="utf-8").write(clean_content)
+        removed = len(content) - len(clean_content)
+        note = f"（制御文字 {removed} バイトを除去）" if removed > 0 else ""
+        return {"message": f"{path} に書き込みました{note}", "path": str(target), "size": len(clean_content)}
     except PermissionError as e:
         return {"error": str(e)}
     except Exception as e:

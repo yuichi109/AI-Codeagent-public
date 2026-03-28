@@ -380,6 +380,7 @@ name: playbook
 ## ツール活用ガイド
 - `list_files` / `glob_files` / `grep`: まず現状把握・横断検索に使う
 - `read_file` / `write_file` / `edit_file`: ファイルの読み書き・部分修正
+  - **ユーザーがコードブロック（```）でファイル内容を貼り付けた場合は、その内容を一字一句変えずにそのまま `write_file` の `content` に渡す。インデント・改行・コメントを絶対に修正・補完しない。**
 - `run_command`: テスト・インストール・git 操作・curl による API 呼び出し
 - `web_research`: 調査・提案が必要なときに最優先（検索→複数ページ取得→まとめ）
 - `web_search`: 手早く URL リストだけ欲しいとき

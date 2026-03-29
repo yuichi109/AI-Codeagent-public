@@ -88,7 +88,7 @@ def _run_bash_sandboxed(args: list) -> dict:
         return {"error": f"サンドボックス実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
 
 
-def run_command(command: str, work_dir: str = None, description: str = "") -> dict:
+def run_command(command: str, work_dir: str = None, description: str = "", env: dict = None) -> dict:
     try:
         args = shlex.split(command)
     except ValueError as e:
@@ -114,8 +114,13 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
 
     # 作業ディレクトリの検証
     # 相対パスは ALLOWED_WORK_DIR 基準で解決（Python プロセスの CWD ではない）
+    # "workspace" や "workspace/foo" が渡された場合の二重パス防止
     if work_dir:
         p = Path(work_dir)
+        if not p.is_absolute():
+            parts = p.parts
+            if parts and parts[0] == ALLOWED_WORK_DIR.name:
+                p = Path(*parts[1:]) if len(parts) > 1 else Path(".")
         resolved_work_dir = (p if p.is_absolute() else ALLOWED_WORK_DIR / p).resolve()
     else:
         resolved_work_dir = ALLOWED_WORK_DIR
@@ -125,6 +130,11 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
     # docker / apt 等は長時間かかるので専用タイムアウトを使う
     effective_timeout = 300 if base_cmd in LONG_RUNNING_CMDS else COMMAND_TIMEOUT_SECONDS
 
+    # 環境変数: 現在の環境をベースに env で指定された値をマージ
+    merged_env = None
+    if env:
+        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+
     try:
         result = subprocess.run(
             args,
@@ -133,6 +143,7 @@ def run_command(command: str, work_dir: str = None, description: str = "") -> di
             timeout=effective_timeout,
             cwd=str(resolved_work_dir),
             shell=False,
+            env=merged_env,
         )
         return {
             "stdout": result.stdout[:8192],

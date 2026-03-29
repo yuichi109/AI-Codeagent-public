@@ -7,7 +7,7 @@ from datetime import datetime
 import httpx
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from openai import AzureOpenAI, OpenAI
 
@@ -30,6 +30,7 @@ from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup
 from tools.manim_tools import render_manim
+from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -143,6 +144,8 @@ TOOL_REGISTRY = {
     "protected_list_replace": protected_list_replace,
     "workspace_cleanup_preview": workspace_cleanup_preview,
     "render_manim": render_manim,
+    "list_ansible_playbooks": list_ansible_playbooks,
+    "run_ansible_playbook": run_ansible_playbook,
 }
 
 TOOLS = [
@@ -220,6 +223,7 @@ TOOLS = [
                     "command": {"type": "string", "description": "実行するコマンド (例: python script.py)"},
                     "work_dir": {"type": "string", "description": "作業ディレクトリ (省略可)"},
                     "description": {"type": "string", "description": "この実行の目的を日本語で一言説明 (例: GitLabへプッシュ、依存パッケージをインストール)"},
+                    "env": {"type": "object", "description": "追加・上書きする環境変数 (例: {\"AZURE_SUBSCRIPTION_ID\": \"xxx\", \"no_proxy\": \"*.azure.com\"})。現在の環境にマージされます。"},
                 },
                 "required": ["command"],
             },
@@ -432,6 +436,32 @@ TOOLS = [
                     "quality": {"type": "string", "enum": ["l", "m", "h"], "description": "画質: l=低/高速(デフォルト), m=中, h=高"},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_ansible_playbooks",
+            "description": "workspace 以下の Ansible プレイブック (.yml) を再帰的に列挙してUIにチェックボックスで表示する。ユーザーが /ansible を実行したときに呼ぶ。このツールを呼んだ後は必ずターンを終了してユーザーの選択を待つこと。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_ansible_playbook",
+            "description": "指定したプレイブックを実行する。workspace/.azure_creds から環境変数（Azureクレデンシャル等）を自動ロードする。ユーザーがチェックボックスでプレイブックを選択して「実行」を押したときに呼ぶ。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playbook": {"type": "string", "description": "実行するプレイブックの workspace 相対パス (例: myproject/site.yml)"},
+                },
+                "required": ["playbook"],
             },
         },
     },
@@ -848,6 +878,15 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                     result_data = json.loads(result)
                     if "to_delete" in result_data:
                         yield f"data: {json.dumps({'type': 'cleanup_preview', 'data': result_data})}\n\n"
+                except Exception:
+                    pass
+
+            # list_ansible_playbooks: プレイブック選択UIをSSEで送信
+            if name == "list_ansible_playbooks":
+                try:
+                    result_data = json.loads(result)
+                    if "playbooks" in result_data:
+                        yield f"data: {json.dumps({'type': 'ansible_chooser', 'playbooks': result_data['playbooks'], 'creds_exists': result_data.get('creds_exists', False), 'creds_filled': result_data.get('creds_filled', False)})}\n\n"
                 except Exception:
                     pass
 
@@ -1748,3 +1787,62 @@ async def setup_save(req: SetupSaveRequest):
         return JSONResponse({"status": "ok"})
     except Exception as e:
         return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+
+
+@app.get("/setup/ansible-creds")
+async def ansible_creds_get():
+    """workspace/.azure_creds を読んでフィールドごとに返す"""
+    from tools.ansible_tools import CREDS_FILE, _parse_creds
+    creds = _parse_creds(CREDS_FILE)
+    # AZURE_SECRET はマスク（存在チェックのみ）
+    if "AZURE_SECRET" in creds:
+        creds["AZURE_SECRET"] = "***"
+    return JSONResponse(creds)
+
+
+@app.post("/setup/ansible-creds/save")
+async def ansible_creds_save(req: Request):
+    """送られてきた値を workspace/.azure_creds に書き込む（再起動不要）"""
+    from tools.ansible_tools import CREDS_FILE, _parse_creds
+    body = await req.json()
+
+    # AZURE_SECRET が *** のみなら既存値を維持
+    existing = _parse_creds(CREDS_FILE)
+    if not body.get("AZURE_SECRET") or body["AZURE_SECRET"] == "***":
+        if "AZURE_SECRET" in existing:
+            body["AZURE_SECRET"] = existing["AZURE_SECRET"]
+        else:
+            body.pop("AZURE_SECRET", None)
+
+    lines = [
+        "# Azure サービスプリンシパル クレデンシャル",
+        "# このファイルは Git 管理外です。",
+        "",
+    ]
+    key_order = ["AZURE_SUBSCRIPTION_ID", "AZURE_TENANT", "AZURE_CLIENT_ID",
+                 "AZURE_SECRET", "AZURE_ENV_NAME"]
+    for k in key_order:
+        if k in body and body[k]:
+            lines.append(f"{k}={body[k]}")
+    # no_proxy / NO_PROXY
+    noproxy = body.get("no_proxy", "")
+    if noproxy:
+        lines += ["", f"no_proxy={noproxy}", f"NO_PROXY={noproxy}"]
+    lines.append("")
+
+    try:
+        CREDS_FILE.write_text("\n".join(lines), encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@app.post("/setup/ansible-creds/clear")
+async def ansible_creds_clear():
+    """workspace/.azure_creds を空にする"""
+    from tools.ansible_tools import CREDS_FILE
+    try:
+        CREDS_FILE.write_text("# Azure サービスプリンシパル クレデンシャル\n# このファイルは Git 管理外です。\n", encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})

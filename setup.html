@@ -118,6 +118,53 @@
     </div>
   </div>
 
+  <!-- Ansible クレデンシャル -->
+  <div class="section" id="sec-ansible">
+    <div class="section-header" onclick="toggleSection('sec-ansible')">
+      🎮 Ansible クレデンシャル <span class="tag">workspace/.azure_creds</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div style="font-size:12px;color:#6c7086;margin-bottom:4px;">このファイルは <code>workspace/.azure_creds</code> に保存されます（.gitignore 対象・サーバー再起動不要）</div>
+      <div class="row">
+        <div class="field">
+          <label>AZURE_SUBSCRIPTION_ID</label>
+          <input id="ans-sub" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+        <div class="field">
+          <label>AZURE_TENANT</label>
+          <input id="ans-tenant" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>AZURE_CLIENT_ID</label>
+          <input id="ans-client" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+        <div class="field">
+          <label>AZURE_SECRET</label>
+          <input id="ans-secret" type="password" placeholder="（未設定）">
+          <span class="hint" id="ans-secret-hint"></span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>AZURE_ENV_NAME</label>
+          <input id="ans-env" type="text" placeholder="SPECUSER005">
+        </div>
+        <div class="field">
+          <label>no_proxy（プロキシ除外ホスト）</label>
+          <input id="ans-noproxy" type="text" placeholder="management.azure.com,login.microsoftonline.com,...">
+        </div>
+      </div>
+      <div style="margin-top:4px;">
+        <button class="save-btn" style="font-size:13px;padding:7px 18px;" onclick="saveAnsibleCreds()">💾 クレデンシャルを保存</button>
+        <button class="save-btn" style="font-size:13px;padding:7px 18px;background:#f38ba8;margin-left:8px;" onclick="clearAnsibleCreds()">🗑 消去</button>
+        <span id="ans-save-status" style="margin-left:10px;font-size:13px;"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- SearXNG -->
   <div class="section" id="sec-searxng">
     <div class="section-header" onclick="toggleSection('sec-searxng')">
@@ -467,7 +514,87 @@ async function saveConfig() {
   }
 }
 
+// ---- Ansible クレデンシャル読み込み ----
+async function loadAnsibleCreds() {
+  try {
+    const d = await fetch('/setup/ansible-creds').then(r => r.json());
+    document.getElementById('ans-sub').value    = d.AZURE_SUBSCRIPTION_ID || '';
+    document.getElementById('ans-tenant').value = d.AZURE_TENANT || '';
+    document.getElementById('ans-client').value = d.AZURE_CLIENT_ID || '';
+    document.getElementById('ans-env').value    = d.AZURE_ENV_NAME || '';
+    document.getElementById('ans-noproxy').value = d.no_proxy || '';
+    if (d.AZURE_SECRET) {
+      document.getElementById('ans-secret').placeholder = '（設定済み — 変更する場合のみ入力）';
+      document.getElementById('ans-secret-hint').textContent = '設定済み';
+    }
+  } catch(e) { /* ファイル未作成は正常 */ }
+}
+
+// ---- Ansible クレデンシャル保存 ----
+async function saveAnsibleCreds() {
+  const status = document.getElementById('ans-save-status');
+  status.textContent = '保存中...';
+  status.style.color = '#6c7086';
+  try {
+    const secret = document.getElementById('ans-secret').value;
+    const payload = {
+      AZURE_SUBSCRIPTION_ID: document.getElementById('ans-sub').value,
+      AZURE_TENANT:          document.getElementById('ans-tenant').value,
+      AZURE_CLIENT_ID:       document.getElementById('ans-client').value,
+      AZURE_ENV_NAME:        document.getElementById('ans-env').value,
+      no_proxy:              document.getElementById('ans-noproxy').value,
+    };
+    if (secret) payload.AZURE_SECRET = secret;
+    const r = await fetch('/setup/ansible-creds/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      status.textContent = '✓ 保存しました';
+      status.style.color = '#a6e3a1';
+      if (secret) {
+        document.getElementById('ans-secret').value = '';
+        document.getElementById('ans-secret').placeholder = '（設定済み — 変更する場合のみ入力）';
+        document.getElementById('ans-secret-hint').textContent = '設定済み';
+      }
+    } else {
+      throw new Error(data.error || '不明なエラー');
+    }
+  } catch(e) {
+    status.textContent = '⚠️ ' + e.message;
+    status.style.color = '#f38ba8';
+  }
+}
+
+async function clearAnsibleCreds() {
+  if (!confirm('workspace/.azure_creds の内容をすべて消去しますか？')) return;
+  const status = document.getElementById('ans-save-status');
+  status.textContent = '消去中...';
+  status.style.color = '#6c7086';
+  try {
+    const r = await fetch('/setup/ansible-creds/clear', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      ['ans-sub','ans-tenant','ans-client','ans-secret','ans-env','ans-noproxy'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('ans-secret').placeholder = '（未設定）';
+      document.getElementById('ans-secret-hint').textContent = '';
+      status.textContent = '✓ 消去しました';
+      status.style.color = '#a6e3a1';
+    } else {
+      throw new Error(data.error || '不明なエラー');
+    }
+  } catch(e) {
+    status.textContent = '⚠️ ' + e.message;
+    status.style.color = '#f38ba8';
+  }
+}
+
 loadConfig();
+loadAnsibleCreds();
 </script>
 </body>
 </html>

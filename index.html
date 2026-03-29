@@ -207,6 +207,16 @@
   #cleanup-exec-btn:hover { background: #eb6f8e; }
   #cleanup-exec-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #cleanup-confirm-msg { font-size: 12px; color: #f38ba8; display: none; }
+  /* ---- Ansible プレイブック選択ウィジェット ---- */
+  .ansible-chooser { background: #181825; border: 1px solid #45475a; border-radius: 10px; padding: 14px 16px; margin: 8px 0; max-width: 520px; }
+  .ansible-chooser-title { font-size: 13px; font-weight: bold; color: #a6e3a1; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .ansible-no-creds { font-size: 12px; color: #f38ba8; margin-bottom: 8px; background: #2a1a1a; border-radius: 6px; padding: 6px 10px; }
+  .ansible-group-label { font-size: 11px; font-weight: bold; color: #6c7086; text-transform: uppercase; letter-spacing: 0.05em; margin: 8px 0 4px; }
+  .ansible-item { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; font-family: monospace; color: #cdd6f4; }
+  .ansible-item input[type=checkbox] { accent-color: #a6e3a1; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
+  .ansible-run-btn { margin-top: 12px; padding: 7px 20px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+  .ansible-run-btn:hover { background: #94e2c8; }
+  .ansible-run-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   /* ---- セッション履歴パネル ---- */
   #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #sessions-btn:hover { background: #89dceb; color: #1e1e2e; }
@@ -1477,6 +1487,91 @@
 
   const ALWAYS_PROTECTED_NAMES = new Set(['.git', '.protected.json', '.agent_todos.json']);
 
+  function renderAnsibleChooser(playbooks, credsExists, credsFilled, afterEl) {
+    const widget = document.createElement('div');
+    widget.className = 'ansible-chooser';
+
+    const title = document.createElement('div');
+    title.className = 'ansible-chooser-title';
+    title.innerHTML = '🎮 Ansible プレイブックを選択して実行';
+    widget.appendChild(title);
+
+    if (!credsExists || !credsFilled) {
+      const warn = document.createElement('div');
+      warn.className = 'ansible-no-creds';
+      warn.textContent = !credsExists
+        ? '⚠ workspace/.azure_creds が見つかりません。/setup ページで設定してください。'
+        : '⚠ クレデンシャルが未設定です。/setup ページの「Ansible クレデンシャル」を入力してください。';
+      widget.appendChild(warn);
+    }
+
+    if (playbooks.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'font-size:13px;color:#6c7086;';
+      empty.textContent = 'workspace に .yml ファイルが見つかりませんでした。';
+      widget.appendChild(empty);
+    } else {
+      // ディレクトリ別にグループ化
+      const groups = {};
+      for (const pb of playbooks) {
+        const parts = pb.split('/');
+        const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '(ルート)';
+        if (!groups[dir]) groups[dir] = [];
+        groups[dir].push(pb);
+      }
+
+      const checkboxes = [];
+      for (const [dir, files] of Object.entries(groups)) {
+        if (Object.keys(groups).length > 1) {
+          const label = document.createElement('div');
+          label.className = 'ansible-group-label';
+          label.textContent = dir;
+          widget.appendChild(label);
+        }
+        for (const pb of files) {
+          const row = document.createElement('label');
+          row.className = 'ansible-item';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.value = pb;
+          checkboxes.push(cb);
+          const fname = pb.split('/').pop();
+          row.appendChild(cb);
+          row.appendChild(document.createTextNode(fname));
+          if (files !== Object.values(groups)[0] || dir !== '(ルート)') {
+            const dimPath = document.createElement('span');
+            dimPath.style.cssText = 'color:#6c7086;font-size:11px;margin-left:4px;';
+            dimPath.textContent = pb;
+            row.appendChild(dimPath);
+          }
+          widget.appendChild(row);
+        }
+      }
+
+      const runBtn = document.createElement('button');
+      runBtn.className = 'ansible-run-btn';
+      runBtn.textContent = '▶ 実行';
+      if (!credsFilled) runBtn.disabled = true;
+      runBtn.onclick = () => {
+        const selected = checkboxes.filter(c => c.checked).map(c => c.value);
+        if (selected.length === 0) { alert('プレイブックを選択してください'); return; }
+        const msg = '以下のプレイブックを実行してください:\n' + selected.map(s => `- ${s}`).join('\n');
+        document.getElementById('input').value = msg;
+        sendMessage();
+      };
+      widget.appendChild(runBtn);
+    }
+
+    // turnEl の末尾に追加
+    const chat = document.getElementById('chat');
+    if (afterEl) {
+      afterEl.appendChild(widget);
+    } else {
+      chat.appendChild(widget);
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+
   function showCleanupModal(data) {
     const overlay = document.getElementById('cleanup-overlay');
     const summaryEl = document.getElementById('cleanup-summary-text');
@@ -2182,6 +2277,7 @@
     let finalAnswer = '';
     let turnMessages = [];  // tool含む完全なメッセージリスト
     let currentModelName = null;
+    let pendingAnsibleChooser = null;
 
     // API履歴は最新 MAX_API_MESSAGES 件のみ送信
     const trimmedHistory = history.slice(-MAX_API_MESSAGES);
@@ -2290,6 +2386,9 @@
             renderTodos(data.todos);
           } else if (data.type === 'cleanup_preview') {
             showCleanupModal(data.data);
+          } else if (data.type === 'ansible_chooser') {
+            // answer_done 後に chat 末尾へ描画するためデータを保持
+            pendingAnsibleChooser = { playbooks: data.playbooks, credsExists: data.creds_exists, credsFilled: data.creds_filled };
           } else if (data.type === 'manim_render') {
             // Manimレンダリング結果をツールグループ内にインライン表示
             const imgWrap = document.createElement('div');
@@ -2336,6 +2435,11 @@
               currentToolGroupEl = null;
               currentToolGroupInnerEl = null;
               currentToolGroupNames = [];
+            }
+            // Ansible プレイブック選択ウィジェットを chat 末尾に描画
+            if (pendingAnsibleChooser) {
+              renderAnsibleChooser(pendingAnsibleChooser.playbooks, pendingAnsibleChooser.credsExists, pendingAnsibleChooser.credsFilled, null);
+              pendingAnsibleChooser = null;
             }
           } else if (data.type === 'answer') {
             // フォールバック (後方互換)

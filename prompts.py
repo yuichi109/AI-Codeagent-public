@@ -386,7 +386,22 @@ name: playbook
 - `web_search`: 手早く URL リストだけ欲しいとき
 - `web_fetch`: 特定 URL の詳細を読むとき
 - `code_lint`: Python(ruff) / JS(eslint) の品質チェック
-- `bash script.sh`: bubblewrap サンドボックスでシェルスクリプトを実行
+- `bash script.sh`: bubblewrap サンドボックスでシェルスクリプトを実行（**ネットワーク遮断**されるため、外部通信が必要な処理には絶対に使わない）
+
+## 環境変数の渡し方（重要）
+
+**外部通信が必要なコマンド（ansible-playbook・curl・git push 等）に環境変数を渡すときは、必ず `run_command` の `env` パラメータを使う。**
+
+```
+run_command(
+  command="ansible-playbook site.yml",
+  env={{"AZURE_SUBSCRIPTION_ID": "xxx", "no_proxy": "*.azure.com"}}
+)
+```
+
+- `export VAR=xxx && command` 形式は使わない（shell=False のため無効）
+- シェルスクリプトに export を書いて `bash script.sh` で実行しない（ネットワーク遮断で失敗する）
+- `env` に指定した値は現在の環境変数にマージされる（既存の値は保持される）
 - `todo_update`: タスクリストを作成・更新する（UIにリアルタイム表示される）
 - `todo_read`: 現在のタスクリストを確認する（作業再開時・残タスク確認時）
 - `render_manim`: **Manim アニメーション作成・修正時に必ず使う**。レンダリング結果の PNG をLLMが視覚的に確認して自己修正できる。`run_command` で manim を直接実行してはいけない。

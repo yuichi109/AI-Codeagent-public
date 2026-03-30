@@ -1369,7 +1369,7 @@ async def workspace_run_shell(path: str):
             "bash", str(resolved),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            cwd=str(ALLOWED_WORK_DIR),
+            cwd=str(resolved.parent),
         )
         yield f"data: {json.dumps({'type': 'start', 'path': path})}\n\n"
         async for line in proc.stdout:

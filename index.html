@@ -234,9 +234,10 @@
   #editor-close-btn:hover { background: #f38ba8; color: #1e1e2e; }
   #editor-body { display: flex; flex: 1; overflow: hidden; }
   #editor-filetree { width: 220px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; overflow-y: auto; padding: 8px 0; }
-  #editor-filetree .ft-dir { padding: 3px 10px 3px 14px; font-size: 12px; color: #6c7086; font-weight: bold; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
-  #editor-filetree .ft-dir:hover { color: #cdd6f4; }
-  #editor-filetree .ft-file { padding: 3px 10px 3px 24px; font-size: 12px; color: #cdd6f4; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #editor-filetree .ft-dir { padding: 3px 10px; font-size: 12px; color: #89b4fa; font-weight: bold; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
+  #editor-filetree .ft-dir:hover { color: #cdd6f4; background: #313244; }
+  #editor-filetree .ft-arrow { font-size: 10px; color: #6c7086; flex-shrink: 0; }
+  #editor-filetree .ft-file { padding: 3px 10px; font-size: 12px; color: #cdd6f4; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #editor-filetree .ft-file:hover { background: #313244; }
   #editor-filetree .ft-file.active { background: #45475a; color: #89b4fa; }
   #editor-container { flex: 1; overflow: hidden; }
@@ -2668,30 +2669,68 @@
     document.body.appendChild(script);
   }
 
+  const ftExpandedDirs = new Set();
+
   async function refreshFileTree() {
     const res = await fetch('/workspace/tree');
     const data = await res.json();
-    const tree = document.getElementById('editor-filetree');
-    tree.innerHTML = '';
-    const dirs = {};
+    // フラットリストからツリー構造を構築
+    const root = {};
     for (const item of data.files || []) {
-      if (item.is_dir) {
-        dirs[item.path] = true;
-        const el = document.createElement('div');
-        el.className = 'ft-dir';
-        el.textContent = '📁 ' + item.path;
-        tree.appendChild(el);
+      const parts = item.path.split('/');
+      let node = root;
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!node[part]) node[part] = { _isDir: false, _path: parts.slice(0, i+1).join('/') };
+        if (i < parts.length - 1) node[part]._isDir = true;
+        if (i < parts.length - 1) node = node[part];
       }
     }
-    for (const item of data.files || []) {
-      if (!item.is_dir) {
+    const tree = document.getElementById('editor-filetree');
+    tree.innerHTML = '';
+    renderFtNode(root, tree, 0);
+  }
+
+  function renderFtNode(node, container, depth) {
+    const entries = Object.entries(node).filter(([k]) => !k.startsWith('_'));
+    entries.sort(([a, av], [b, bv]) => {
+      if (av._isDir !== bv._isDir) return av._isDir ? -1 : 1;
+      return a.localeCompare(b);
+    });
+    for (const [name, child] of entries) {
+      const path = child._path;
+      if (child._isDir) {
+        const el = document.createElement('div');
+        el.className = 'ft-dir';
+        el.style.paddingLeft = (10 + depth * 14) + 'px';
+        const isOpen = ftExpandedDirs.has(path);
+        el.innerHTML = `<span class="ft-arrow">${isOpen ? '▼' : '▶'}</span> 📁 ${name}`;
+        el.dataset.path = path;
+        // 子要素コンテナ
+        const children = document.createElement('div');
+        children.className = 'ft-children';
+        children.style.display = isOpen ? '' : 'none';
+        el.onclick = () => {
+          const open = ftExpandedDirs.has(path);
+          if (open) { ftExpandedDirs.delete(path); children.style.display = 'none'; el.querySelector('.ft-arrow').textContent = '▶'; }
+          else       { ftExpandedDirs.add(path);    children.style.display = '';     el.querySelector('.ft-arrow').textContent = '▼'; }
+        };
+        if (isOpen) renderFtNode(child, children, depth + 1);
+        else el.addEventListener('click', function onFirst() {
+          renderFtNode(child, children, depth + 1);
+          el.removeEventListener('click', onFirst);
+        }, { once: true });
+        container.appendChild(el);
+        container.appendChild(children);
+      } else {
         const el = document.createElement('div');
         el.className = 'ft-file';
-        el.textContent = item.path;
-        el.title = item.path;
-        el.dataset.path = item.path;
-        el.onclick = () => editorOpen(item.path, el);
-        tree.appendChild(el);
+        el.style.paddingLeft = (10 + depth * 14) + 'px';
+        el.textContent = name;
+        el.title = path;
+        el.dataset.path = path;
+        el.onclick = () => editorOpen(path, el);
+        container.appendChild(el);
       }
     }
   }

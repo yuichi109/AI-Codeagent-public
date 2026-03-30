@@ -1382,6 +1382,30 @@ async def workspace_run_shell(path: str):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+class ShellExecRequest(BaseModel):
+    command: str
+
+@app.post("/workspace/exec-shell")
+async def workspace_exec_shell(req: ShellExecRequest):
+    """任意のシェルコマンドをサンドボックスなし・ユーザー権限で実行し、出力をSSEストリームで返す"""
+    async def stream():
+        proc = await asyncio.create_subprocess_exec(
+            "bash", "-c", req.command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(ALLOWED_WORK_DIR),
+        )
+        yield f"data: {json.dumps({'type': 'start', 'command': req.command})}\n\n"
+        async for line in proc.stdout:
+            text = line.decode("utf-8", errors="replace").rstrip("\n")
+            yield f"data: {json.dumps({'type': 'line', 'text': text})}\n\n"
+        await proc.wait()
+        yield f"data: {json.dumps({'type': 'done', 'returncode': proc.returncode})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 class EditorCompleteRequest(BaseModel):
     code_before: str
     code_after: str = ""

@@ -153,6 +153,23 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         ok "bubblewrap をインストールしました"
     fi
 
+    # Ansible + community.vmware コレクション
+    section "Ansible"
+    if command -v ansible &>/dev/null; then
+        ok "Ansible はインストール済みです: $(ansible --version | head -1)"
+    else
+        info "Ansible をインストール中..."
+        sudo apt-get install -y ansible
+        ok "Ansible をインストールしました"
+    fi
+    info "community.vmware コレクションをインストール中..."
+    if ansible-galaxy collection install community.vmware --upgrade 2>&1 | tail -3; then
+        ok "community.vmware コレクションをインストールしました"
+    else
+        warn "community.vmware のインストールに失敗しました（後で手動で実行してください）"
+        warn "  ansible-galaxy collection install community.vmware --upgrade"
+    fi
+
     # systemd サービス（自動登録）
     section "systemd サービス登録"
     if systemctl is-enabled "$SERVICE_NAME" &>/dev/null 2>&1; then

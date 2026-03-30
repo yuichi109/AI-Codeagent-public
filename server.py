@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI
 
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS
@@ -123,6 +124,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 TOOL_REGISTRY = {
     "read_file": read_file,
@@ -1305,6 +1307,35 @@ async def workspace_write_raw(req: RawWriteRequest):
     """LLMを経由せずコンテンツをそのままworkspaceに書き込む"""
     result = write_file(req.path, req.content)
     return JSONResponse({"result": result})
+
+
+@app.get("/workspace/file")
+async def workspace_file_read(path: str):
+    """エディタ用: workspaceのファイル内容を返す"""
+    from tools.file_tools import _resolve_safe_path
+    try:
+        resolved = _resolve_safe_path(path)
+        if not resolved.exists() or not resolved.is_file():
+            return JSONResponse({"error": "File not found"}, status_code=404)
+        content = resolved.read_text(encoding="utf-8", errors="replace")
+        return JSONResponse({"content": content, "path": path})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/workspace/tree")
+async def workspace_tree():
+    """エディタ用: workspaceのファイルツリーをフラットリストで返す"""
+    result = []
+    try:
+        for p in sorted(ALLOWED_WORK_DIR.rglob("*")):
+            if any(part.startswith(".") for part in p.parts[len(ALLOWED_WORK_DIR.parts):]):
+                continue
+            rel = p.relative_to(ALLOWED_WORK_DIR)
+            result.append({"path": str(rel).replace("\\", "/"), "is_dir": p.is_dir()})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"files": result})
 
 
 @app.post("/workspace/cleanup")

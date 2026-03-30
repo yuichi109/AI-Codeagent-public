@@ -219,6 +219,28 @@
   .ansible-run-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   .ansible-force-btn { margin-top: 12px; margin-left: 8px; padding: 7px 20px; background: #f9e2af; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
   .ansible-force-btn:hover { background: #fab387; }
+  /* ---- テキストエディタパネル ---- */
+  #editor-panel { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 200; background: #1e1e2e; display: none; flex-direction: column; }
+  #editor-panel.open { display: flex; }
+  #editor-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; }
+  #editor-toolbar-title { font-size: 14px; font-weight: bold; color: #cdd6f4; }
+  #editor-filename-label { font-size: 13px; color: #a6adc8; font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #editor-save-btn { padding: 4px 14px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+  #editor-save-btn:hover { background: #94e2c8; }
+  #editor-save-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
+  #editor-new-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #editor-new-btn:hover { background: #89b4fa; color: #1e1e2e; }
+  #editor-close-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #editor-close-btn:hover { background: #f38ba8; color: #1e1e2e; }
+  #editor-body { display: flex; flex: 1; overflow: hidden; }
+  #editor-filetree { width: 220px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; overflow-y: auto; padding: 8px 0; }
+  #editor-filetree .ft-dir { padding: 3px 10px 3px 14px; font-size: 12px; color: #6c7086; font-weight: bold; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
+  #editor-filetree .ft-dir:hover { color: #cdd6f4; }
+  #editor-filetree .ft-file { padding: 3px 10px 3px 24px; font-size: 12px; color: #cdd6f4; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #editor-filetree .ft-file:hover { background: #313244; }
+  #editor-filetree .ft-file.active { background: #45475a; color: #89b4fa; }
+  #editor-container { flex: 1; overflow: hidden; }
+  #editor-status { font-size: 12px; color: #a6e3a1; padding: 0 8px; }
   /* ---- セッション履歴パネル ---- */
   #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #sessions-btn:hover { background: #89dceb; color: #1e1e2e; }
@@ -281,6 +303,7 @@
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
     <span id="provider-label"></span>
     <select id="model-select" title="Azureデプロイを切り替え" onchange="switchDeployment(this.value)" style="display:none"></select>
+    <button id="editor-btn" onclick="openEditorPanel()" title="テキストエディタ">📝 エディタ</button>
     <button id="sessions-btn" onclick="toggleSessionsPanel()">🕐 履歴</button>
     <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
@@ -367,6 +390,22 @@
   <input id="gitlab-search" type="text" placeholder="プロジェクトを絞り込み..." oninput="filterProjects(this.value)">
   <div id="gitlab-list">
     <div id="gitlab-status">読み込み中...</div>
+  </div>
+</div>
+
+<!-- テキストエディタパネル -->
+<div id="editor-panel">
+  <div id="editor-toolbar">
+    <span id="editor-toolbar-title">📝 エディタ</span>
+    <span id="editor-filename-label">ファイルを選択してください</span>
+    <span id="editor-status"></span>
+    <button id="editor-new-btn" onclick="editorNewFile()">＋ 新規</button>
+    <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
+    <button id="editor-close-btn" onclick="closeEditorPanel()">✕ 閉じる</button>
+  </div>
+  <div id="editor-body">
+    <div id="editor-filetree"></div>
+    <div id="editor-container"></div>
   </div>
 </div>
 
@@ -2579,6 +2618,130 @@
       }
     };
   })();
+
+  // ===== テキストエディタ =====
+  let monacoEditor = null;
+  let monacoLoaded = false;
+  let editorCurrentPath = null;
+
+  function openEditorPanel() {
+    document.getElementById('editor-panel').classList.add('open');
+    if (!monacoLoaded) {
+      loadMonaco();
+    } else {
+      refreshFileTree();
+    }
+  }
+
+  function closeEditorPanel() {
+    document.getElementById('editor-panel').classList.remove('open');
+  }
+
+  function loadMonaco() {
+    if (document.getElementById('monaco-loader')) return;
+    window.require = { paths: { 'vs': '/static/monaco/vs' } };
+    const script = document.createElement('script');
+    script.id = 'monaco-loader';
+    script.src = '/static/monaco/vs/loader.js';
+    script.onload = () => {
+      require(['vs/editor/editor.main'], () => {
+        monacoLoaded = true;
+        const container = document.getElementById('editor-container');
+        monacoEditor = monaco.editor.create(container, {
+          value: '',
+          language: 'plaintext',
+          theme: 'vs-dark',
+          fontSize: 14,
+          minimap: { enabled: false },
+          automaticLayout: true,
+          wordWrap: 'on',
+          scrollBeyondLastLine: false,
+        });
+        monacoEditor.onDidChangeModelContent(() => {
+          if (editorCurrentPath) {
+            document.getElementById('editor-save-btn').disabled = false;
+          }
+        });
+        refreshFileTree();
+      });
+    };
+    document.body.appendChild(script);
+  }
+
+  async function refreshFileTree() {
+    const res = await fetch('/workspace/tree');
+    const data = await res.json();
+    const tree = document.getElementById('editor-filetree');
+    tree.innerHTML = '';
+    const dirs = {};
+    for (const item of data.files || []) {
+      if (item.is_dir) {
+        dirs[item.path] = true;
+        const el = document.createElement('div');
+        el.className = 'ft-dir';
+        el.textContent = '📁 ' + item.path;
+        tree.appendChild(el);
+      }
+    }
+    for (const item of data.files || []) {
+      if (!item.is_dir) {
+        const el = document.createElement('div');
+        el.className = 'ft-file';
+        el.textContent = item.path;
+        el.title = item.path;
+        el.dataset.path = item.path;
+        el.onclick = () => editorOpen(item.path, el);
+        tree.appendChild(el);
+      }
+    }
+  }
+
+  async function editorOpen(path, el) {
+    const res = await fetch('/workspace/file?path=' + encodeURIComponent(path));
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    editorCurrentPath = path;
+    document.getElementById('editor-filename-label').textContent = path;
+    document.getElementById('editor-status').textContent = '';
+    document.getElementById('editor-save-btn').disabled = true;
+    const ext = path.split('.').pop().toLowerCase();
+    const langMap = { py:'python', js:'javascript', ts:'typescript', json:'json', yaml:'yaml', yml:'yaml', sh:'shell', md:'markdown', html:'html', css:'css', xml:'xml', toml:'ini', ini:'ini' };
+    const lang = langMap[ext] || 'plaintext';
+    const model = monaco.editor.createModel(data.content, lang);
+    monacoEditor.setModel(model);
+    document.querySelectorAll('#editor-filetree .ft-file').forEach(e => e.classList.remove('active'));
+    if (el) el.classList.add('active');
+  }
+
+  async function editorSave() {
+    if (!editorCurrentPath) return;
+    const content = monacoEditor.getValue();
+    const res = await fetch('/workspace/write-raw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: editorCurrentPath, content }),
+    });
+    const data = await res.json();
+    const status = document.getElementById('editor-status');
+    status.textContent = '✓ 保存しました';
+    status.style.color = '#a6e3a1';
+    document.getElementById('editor-save-btn').disabled = true;
+    setTimeout(() => { status.textContent = ''; }, 2000);
+  }
+
+  function editorNewFile() {
+    const name = prompt('ファイル名（workspace相対パス）:', 'new_file.txt');
+    if (!name) return;
+    editorCurrentPath = name;
+    document.getElementById('editor-filename-label').textContent = name + ' (新規)';
+    document.getElementById('editor-save-btn').disabled = false;
+    const ext = name.split('.').pop().toLowerCase();
+    const langMap = { py:'python', js:'javascript', ts:'typescript', json:'json', yaml:'yaml', yml:'yaml', sh:'shell', md:'markdown', html:'html', css:'css', xml:'xml', toml:'ini', ini:'ini' };
+    const lang = langMap[ext] || 'plaintext';
+    const model = monaco.editor.createModel('', lang);
+    monacoEditor.setModel(model);
+    document.querySelectorAll('#editor-filetree .ft-file').forEach(e => e.classList.remove('active'));
+  }
 </script>
 </body>
 </html>

@@ -153,31 +153,6 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         ok "bubblewrap をインストールしました"
     fi
 
-    # Monaco Editor（テキストエディタ用・オフライン配信）
-    section "Monaco Editor（テキストエディタ）"
-    MONACO_DIR="$SCRIPT_DIR/static/monaco/vs"
-    MONACO_VERSION="0.55.1"
-    if [ -d "$MONACO_DIR" ]; then
-        ok "Monaco Editor はすでに配置済みです（スキップ）"
-    else
-        info "Monaco Editor $MONACO_VERSION をダウンロード中..."
-        mkdir -p "$SCRIPT_DIR/static/monaco"
-        TMP_MONACO="$(mktemp -d)"
-        if curl -fsSL "https://registry.npmjs.org/monaco-editor/-/monaco-editor-${MONACO_VERSION}.tgz" \
-               -o "$TMP_MONACO/monaco.tgz"; then
-            mkdir -p "$TMP_MONACO/extract"
-            tar -xzf "$TMP_MONACO/monaco.tgz" -C "$TMP_MONACO/extract" --strip-components=1 'package/min/vs'
-            cp -r "$TMP_MONACO/extract/min/vs" "$SCRIPT_DIR/static/monaco/"
-            rm -rf "$TMP_MONACO"
-            ok "Monaco Editor を配置しました（static/monaco/vs/）"
-        else
-            rm -rf "$TMP_MONACO"
-            warn "Monaco Editor のダウンロードに失敗しました（ネットワーク確認後、手動で再実行してください）"
-            warn "  curl -fsSL https://registry.npmjs.org/monaco-editor/-/monaco-editor-${MONACO_VERSION}.tgz -o /tmp/monaco.tgz"
-            warn "  mkdir -p $SCRIPT_DIR/static/monaco && tar -xzf /tmp/monaco.tgz -C /tmp/mx --strip-components=1 'package/min/vs' && cp -r /tmp/mx/min/vs $SCRIPT_DIR/static/monaco/"
-        fi
-    fi
-
     # systemd サービス（自動登録）
     section "systemd サービス登録"
     if systemctl is-enabled "$SERVICE_NAME" &>/dev/null 2>&1; then

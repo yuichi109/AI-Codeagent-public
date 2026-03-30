@@ -217,6 +217,8 @@
   .ansible-run-btn { margin-top: 12px; padding: 7px 20px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
   .ansible-run-btn:hover { background: #94e2c8; }
   .ansible-run-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
+  .ansible-force-btn { margin-top: 12px; margin-left: 8px; padding: 7px 20px; background: #f9e2af; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+  .ansible-force-btn:hover { background: #fab387; }
   /* ---- セッション履歴パネル ---- */
   #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #sessions-btn:hover { background: #89dceb; color: #1e1e2e; }
@@ -1552,14 +1554,24 @@
       runBtn.className = 'ansible-run-btn';
       runBtn.textContent = '▶ 実行';
       if (!credsFilled) runBtn.disabled = true;
-      runBtn.onclick = () => {
+      const doRun = () => {
         const selected = checkboxes.filter(c => c.checked).map(c => c.value);
         if (selected.length === 0) { alert('プレイブックを選択してください'); return; }
         const msg = '以下のプレイブックを実行してください:\n' + selected.map(s => `- ${s}`).join('\n');
         document.getElementById('input').value = msg;
         sendMessage();
       };
+      runBtn.onclick = doRun;
       widget.appendChild(runBtn);
+
+      if (!credsFilled) {
+        const forceBtn = document.createElement('button');
+        forceBtn.className = 'ansible-force-btn';
+        forceBtn.textContent = '⚡ 強制実行';
+        forceBtn.title = 'Azureクレデンシャル未設定でも実行（vSphere等のオンプレ環境向け）';
+        forceBtn.onclick = doRun;
+        widget.appendChild(forceBtn);
+      }
     }
 
     // turnEl の末尾に追加

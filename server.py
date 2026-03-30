@@ -1351,6 +1351,31 @@ async def workspace_shells():
     return JSONResponse({"scripts": result})
 
 
+@app.get("/workspace/ls")
+async def workspace_ls(path: str = ""):
+    """指定パス直下のディレクトリ・ファイルを1階層だけ返す（シェルパネルのディレクトリナビ用）"""
+    from tools.file_tools import _resolve_safe_path
+    try:
+        base = _resolve_safe_path(path) if path else ALLOWED_WORK_DIR
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    if not base.is_dir():
+        return JSONResponse({"error": "not a directory"}, status_code=400)
+    entries = []
+    for p in sorted(base.iterdir()):
+        if p.name.startswith("."):
+            continue
+        rel = p.relative_to(ALLOWED_WORK_DIR)
+        entries.append({"name": p.name, "path": str(rel).replace("\\", "/"), "is_dir": p.is_dir()})
+    # 親ディレクトリへのパス（workspace ルートより上には出ない）
+    parent = None
+    if base != ALLOWED_WORK_DIR:
+        parent = str(base.parent.relative_to(ALLOWED_WORK_DIR)).replace("\\", "/")
+        if parent == ".":
+            parent = ""
+    return JSONResponse({"entries": entries, "current": str(base.relative_to(ALLOWED_WORK_DIR)).replace("\\", "/"), "parent": parent})
+
+
 @app.get("/workspace/run-shell")
 async def workspace_run_shell(path: str):
     """指定した .sh スクリプトをサンドボックスなし・ユーザー権限で実行し、出力をSSEストリームで返す"""
@@ -1384,16 +1409,25 @@ async def workspace_run_shell(path: str):
 
 class ShellExecRequest(BaseModel):
     command: str
+    cwd: str = ""
 
 @app.post("/workspace/exec-shell")
 async def workspace_exec_shell(req: ShellExecRequest):
     """任意のシェルコマンドをサンドボックスなし・ユーザー権限で実行し、出力をSSEストリームで返す"""
+    from tools.file_tools import _resolve_safe_path
+    if req.cwd:
+        try:
+            exec_cwd = str(_resolve_safe_path(req.cwd))
+        except Exception:
+            exec_cwd = str(ALLOWED_WORK_DIR)
+    else:
+        exec_cwd = str(ALLOWED_WORK_DIR)
     async def stream():
         proc = await asyncio.create_subprocess_exec(
             "bash", "-c", req.command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            cwd=str(ALLOWED_WORK_DIR),
+            cwd=exec_cwd,
         )
         yield f"data: {json.dumps({'type': 'start', 'command': req.command})}\n\n"
         async for line in proc.stdout:

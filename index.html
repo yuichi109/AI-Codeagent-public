@@ -239,6 +239,14 @@
   #shell-output-label { flex: 1; }
   #shell-output-abort { padding: 2px 10px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; display: none; }
   #shell-output { flex: 1; overflow-y: auto; padding: 10px 16px; font-family: monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; background: #11111b; }
+  #shell-dirnav { padding: 6px 12px; border-top: 1px solid #313244; background: #181825; flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; }
+  #shell-dirnav-path { color: #6c7086; font-family: monospace; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+  .shell-nav-seg { color: #89b4fa; cursor: pointer; padding: 1px 4px; border-radius: 3px; }
+  .shell-nav-seg:hover { background: #313244; }
+  .shell-nav-sep { color: #45475a; }
+  #shell-dirnav-entries { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; width: 100%; }
+  .shell-dir-chip { padding: 2px 8px; background: #313244; color: #89b4fa; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: monospace; }
+  .shell-dir-chip:hover { background: #45475a; }
   #shell-input-area { display: flex; align-items: flex-end; gap: 6px; padding: 8px 12px; border-top: 1px solid #313244; background: #181825; flex-shrink: 0; }
   #shell-input { flex: 1; background: #11111b; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 6px 10px; font-family: monospace; font-size: 12px; resize: none; min-height: 36px; max-height: 120px; outline: none; }
   #shell-input:focus { border-color: #89b4fa; }
@@ -434,6 +442,10 @@
       <button id="shell-output-abort" onclick="shellAbort()">■ 中断</button>
     </div>
     <div id="shell-output"></div>
+  </div>
+  <div id="shell-dirnav">
+    <div id="shell-dirnav-path"></div>
+    <div id="shell-dirnav-entries"></div>
   </div>
   <div id="shell-input-area">
     <textarea id="shell-input" placeholder="コマンドを入力（Shift+Enter で改行、Enter で実行）" rows="1"></textarea>
@@ -2669,11 +2681,57 @@
 
   // ===== シェル実行パネル =====
   let shellAbortController = null;
+  let shellCwd = '';  // workspace相対パス（空 = ルート）
 
   async function toggleShellPanel() {
     const panel = document.getElementById('shell-panel');
     const isOpen = panel.classList.toggle('open');
-    if (isOpen) await loadShellList();
+    if (isOpen) { await shellNavTo(''); await loadShellList(); }
+  }
+
+  async function shellNavTo(path) {
+    shellCwd = path;
+    const res = await fetch('/workspace/ls?path=' + encodeURIComponent(path));
+    const data = await res.json();
+    // パンくず
+    const pathEl = document.getElementById('shell-dirnav-path');
+    pathEl.innerHTML = '';
+    const root = document.createElement('span');
+    root.className = 'shell-nav-seg';
+    root.textContent = 'workspace';
+    root.onclick = () => shellNavTo('');
+    pathEl.appendChild(root);
+    if (data.current && data.current !== '.') {
+      const parts = data.current.split('/');
+      parts.forEach((seg, i) => {
+        const sep = document.createElement('span');
+        sep.className = 'shell-nav-sep'; sep.textContent = '/';
+        pathEl.appendChild(sep);
+        const el = document.createElement('span');
+        el.className = 'shell-nav-seg';
+        el.textContent = seg;
+        const targetPath = parts.slice(0, i + 1).join('/');
+        el.onclick = () => shellNavTo(targetPath);
+        pathEl.appendChild(el);
+      });
+    }
+    // サブディレクトリチップ
+    const entriesEl = document.getElementById('shell-dirnav-entries');
+    entriesEl.innerHTML = '';
+    if (data.parent !== null && data.parent !== undefined) {
+      const up = document.createElement('button');
+      up.className = 'shell-dir-chip';
+      up.textContent = '📁 ..';
+      up.onclick = () => shellNavTo(data.parent);
+      entriesEl.appendChild(up);
+    }
+    for (const e of (data.entries || []).filter(e => e.is_dir)) {
+      const btn = document.createElement('button');
+      btn.className = 'shell-dir-chip';
+      btn.textContent = '📁 ' + e.name;
+      btn.onclick = () => shellNavTo(e.path);
+      entriesEl.appendChild(btn);
+    }
   }
 
   async function loadShellList() {
@@ -2795,7 +2853,7 @@
       const res = await fetch('/workspace/exec-shell', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command }),
+        body: JSON.stringify({ command, cwd: shellCwd }),
         signal: shellAbortController.signal,
       });
       const reader = res.body.getReader();

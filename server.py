@@ -1338,6 +1338,50 @@ async def workspace_tree():
     return JSONResponse({"files": result})
 
 
+@app.get("/workspace/shells")
+async def workspace_shells():
+    """workspace内の .sh ファイルを再帰的に列挙する"""
+    result = []
+    try:
+        for p in sorted(ALLOWED_WORK_DIR.rglob("*.sh")):
+            rel = p.relative_to(ALLOWED_WORK_DIR)
+            result.append(str(rel).replace("\\", "/"))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"scripts": result})
+
+
+@app.get("/workspace/run-shell")
+async def workspace_run_shell(path: str):
+    """指定した .sh スクリプトをサンドボックスなし・ユーザー権限で実行し、出力をSSEストリームで返す"""
+    from tools.file_tools import _resolve_safe_path
+    try:
+        resolved = _resolve_safe_path(path)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    if not resolved.exists() or not resolved.is_file():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    if resolved.suffix != ".sh":
+        return JSONResponse({"error": ".sh ファイルのみ実行できます"}, status_code=400)
+
+    async def stream():
+        proc = await asyncio.create_subprocess_exec(
+            "bash", str(resolved),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(ALLOWED_WORK_DIR),
+        )
+        yield f"data: {json.dumps({'type': 'start', 'path': path})}\n\n"
+        async for line in proc.stdout:
+            text = line.decode("utf-8", errors="replace").rstrip("\n")
+            yield f"data: {json.dumps({'type': 'line', 'text': text})}\n\n"
+        await proc.wait()
+        yield f"data: {json.dumps({'type': 'done', 'returncode': proc.returncode})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 class EditorCompleteRequest(BaseModel):
     code_before: str
     code_after: str = ""

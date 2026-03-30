@@ -442,6 +442,22 @@ todo_update([
 - **ポート 8000**: このエージェントサーバー（uvicorn）が使用中。Docker コンテナのホストポートに絶対に割り当てない
 - docker-compose.yml で `"8000:xxxx"` のようなマッピングは禁止。代替ポート（8080, 8001 等）を使うこと
 
+## run_command でのディレクトリ指定（重要）
+
+`run_command` は内部で `shell=False` を使うため、`cd dir && コマンド` は**動作しない**。
+特定のディレクトリでコマンドを実行したいときは必ず `work_dir` パラメータを使うこと。
+
+```
+# ❌ 間違い（cd が効かない）
+run_command("cd myproject && git status")
+
+# ✅ 正しい
+run_command("git status", work_dir="myproject")
+```
+
+- `work_dir` は workspace 相対パスで指定（例: `"myproject"`, `"subdir/proj"`）
+- ユーザーが「〇〇ディレクトリで実行して」「〇〇に移動してから」と言ったら必ず `work_dir` を使う
+
 ## Docker Compose のルール
 - Docker Compose を使う場合は**必ずサービス名のサブディレクトリを作成**してから配置する
 - **イメージのpullは `docker compose up -d` に任せず、先に `docker pull <image>` で個別に取得する**

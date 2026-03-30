@@ -1338,6 +1338,47 @@ async def workspace_tree():
     return JSONResponse({"files": result})
 
 
+class EditorCompleteRequest(BaseModel):
+    code_before: str
+    code_after: str = ""
+    language: str = "plaintext"
+    filename: str = ""
+
+@app.post("/editor/complete")
+async def editor_complete(req: EditorCompleteRequest):
+    """Monaco エディタ用AI補完。カーソル前後のコードを渡すと補完候補を返す。"""
+    prompt = (
+        f"あなたはコード補完アシスタントです。カーソル位置に続く補完候補を提案してください。\n"
+        f"ファイル名: {req.filename or '(不明)'}\n"
+        f"言語: {req.language}\n\n"
+        f"【カーソル前のコード】\n{req.code_before[-2000:]}\n\n"
+        f"【カーソル後のコード】\n{req.code_after[:500]}\n\n"
+        "カーソル位置に挿入する補完候補を3〜5個、以下のJSON配列形式のみで返してください。\n"
+        '例: [{"label":"関数名()","insertText":"関数名()","detail":"説明"}]\n'
+        "JSONのみ返すこと。説明文・マークダウン・コードブロック記号は不要。"
+    )
+    try:
+        client = _make_client()
+        resp = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=_provider_config["model"],
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=512,
+                temperature=0.2,
+            )
+        )
+        text = resp.choices[0].message.content.strip()
+        # JSONブロック記号を除去
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:])
+        if text.endswith("```"):
+            text = "\n".join(text.split("\n")[:-1])
+        items = json.loads(text)
+        return JSONResponse({"items": items})
+    except Exception as e:
+        return JSONResponse({"error": str(e), "items": []}, status_code=500)
+
+
 @app.post("/workspace/cleanup")
 async def workspace_cleanup(req: CleanupRequest):
     """保護リストにないファイル・ディレクトリを削除する"""

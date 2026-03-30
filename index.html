@@ -2663,6 +2663,42 @@
             document.getElementById('editor-save-btn').disabled = false;
           }
         });
+
+        // AI補完プロバイダー登録（全言語対象、Ctrl+Spaceで発火）
+        monaco.languages.registerCompletionItemProvider('*', {
+          triggerCharacters: [],
+          provideCompletionItems: async (model, position) => {
+            const code_before = model.getValueInRange({
+              startLineNumber: 1, startColumn: 1,
+              endLineNumber: position.lineNumber, endColumn: position.column,
+            });
+            const code_after = model.getValueInRange({
+              startLineNumber: position.lineNumber, startColumn: position.column,
+              endLineNumber: model.getLineCount(), endColumn: model.getLineMaxColumn(model.getLineCount()),
+            });
+            const language = model.getLanguageId();
+            const filename = editorCurrentPath || '';
+            try {
+              const res = await fetch('/editor/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code_before, code_after, language, filename }),
+              });
+              const data = await res.json();
+              const suggestions = (data.items || []).map(item => ({
+                label: item.label,
+                kind: monaco.languages.CompletionItemKind.Text,
+                insertText: item.insertText,
+                detail: item.detail || '',
+                range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+              }));
+              return { suggestions };
+            } catch (e) {
+              return { suggestions: [] };
+            }
+          },
+        });
+
         refreshFileTree();
       });
     };

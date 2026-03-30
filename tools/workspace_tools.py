@@ -10,7 +10,7 @@ BACKUP_DIR = Path.home() / "Backups"
 PROTECTED_LIST_FILE = ALLOWED_WORK_DIR / ".protected.json"
 
 # 常に保護するエントリ（ユーザーが保護リストに書かなくても削除されない）
-ALWAYS_PROTECTED = {".protected.json", ".git", ".agent_todos.json"}
+ALWAYS_PROTECTED = {".protected.json", ".git", ".agent_todos.json", ".azure_creds"}
 
 
 def protected_list_read() -> dict:

@@ -1449,15 +1449,18 @@ class EditorCompleteRequest(BaseModel):
 @app.post("/editor/complete")
 async def editor_complete(req: EditorCompleteRequest):
     """Monaco エディタ用AI補完。カーソル前後のコードを渡すと補完候補を返す。"""
+    # カーソル前の現在行内容を取得（インデント量の参考用）
+    current_line = req.code_before.split('\n')[-1] if req.code_before else ''
     prompt = (
-        f"あなたはコード補完アシスタントです。カーソル位置に続く補完候補を提案してください。\n"
-        f"ファイル名: {req.filename or '(不明)'}\n"
-        f"言語: {req.language}\n\n"
-        f"【カーソル前のコード】\n{req.code_before[-2000:]}\n\n"
-        f"【カーソル後のコード】\n{req.code_after[:500]}\n\n"
-        "カーソル位置に挿入する補完候補を3〜5個、以下のJSON配列形式のみで返してください。\n"
-        '例: [{"label":"関数名()","insertText":"関数名()","detail":"説明"}]\n'
-        "JSONのみ返すこと。説明文・マークダウン・コードブロック記号は不要。"
+        f"コード補完アシスタント。<CURSOR>の位置に挿入するテキストを1つ提案してください。\n"
+        f"言語: {req.language}  ファイル: {req.filename or '(不明)'}\n\n"
+        f"【コード】\n{req.code_before[-1000:]}<CURSOR>{req.code_after[:200]}\n\n"
+        "ルール:\n"
+        "- <CURSOR>の直後から始まるテキストのみを insertText に入れること\n"
+        "- 新しい行が必要なら \\n を使うこと（カーソルが行末にある場合など）\n"
+        f"- 現在行: {repr(current_line)}  （この行の続きか、改行してから次の行を補完）\n"
+        "- カーソル前のインデントは含めない（カーソルは既にその位置にある）\n"
+        'JSON配列1件のみ: [{"insertText":"..."}]  JSONのみ返すこと。'
     )
     try:
         client = _make_client()
@@ -1465,8 +1468,7 @@ async def editor_complete(req: EditorCompleteRequest):
             lambda: client.chat.completions.create(
                 model=_provider_config["model"],
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=512,
-                temperature=0.2,
+                max_completion_tokens=800,
             )
         )
         text = resp.choices[0].message.content.strip()

@@ -264,6 +264,9 @@
   #editor-save-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #editor-new-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   #editor-new-btn:hover { background: #89b4fa; color: #1e1e2e; }
+  #editor-ai-btn { padding: 4px 12px; background: #45475a; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #editor-ai-btn.on { background: #cba6f7; color: #1e1e2e; font-weight: bold; }
+  #editor-ai-btn:hover { opacity: 0.85; }
   #editor-close-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   #editor-close-btn:hover { background: #f38ba8; color: #1e1e2e; }
   #editor-body { display: flex; flex: 1; overflow: hidden; }
@@ -461,6 +464,7 @@
     <span id="editor-status"></span>
     <button id="editor-new-btn" onclick="editorNewFile()">＋ 新規</button>
     <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
+    <button id="editor-ai-btn" onclick="toggleEditorAI()" title="AI補完（Tabで確定）">🤖 AI補完: OFF</button>
     <button id="editor-close-btn" onclick="closeEditorPanel()">✕ 閉じる</button>
   </div>
   <div id="editor-body">
@@ -2919,9 +2923,28 @@
   let monacoEditor = null;
   let monacoLoaded = false;
   let editorCurrentPath = null;
+  let editorAIEnabled = localStorage.getItem('editorAIEnabled') === 'true';
+
+  function toggleEditorAI() {
+    editorAIEnabled = !editorAIEnabled;
+    localStorage.setItem('editorAIEnabled', editorAIEnabled);
+    updateEditorAIBtn();
+  }
+  function updateEditorAIBtn() {
+    const btn = document.getElementById('editor-ai-btn');
+    if (!btn) return;
+    if (editorAIEnabled) {
+      btn.textContent = '🤖 AI補完: ON';
+      btn.classList.add('on');
+    } else {
+      btn.textContent = '🤖 AI補完: OFF';
+      btn.classList.remove('on');
+    }
+  }
 
   function openEditorPanel() {
     document.getElementById('editor-panel').classList.add('open');
+    updateEditorAIBtn();
     if (!monacoLoaded) {
       loadMonaco();
     } else {
@@ -2952,6 +2975,8 @@
           automaticLayout: true,
           wordWrap: 'on',
           scrollBeyondLastLine: false,
+          inlineSuggest: { enabled: true },
+          autoIndent: 'keep',
         });
         monacoEditor.onDidChangeModelContent(() => {
           if (editorCurrentPath) {
@@ -2959,10 +2984,72 @@
           }
         });
 
-        // AI補完プロバイダー登録（全言語対象、Ctrl+Spaceで発火）
-        monaco.languages.registerCompletionItemProvider('*', {
-          triggerCharacters: [],
-          provideCompletionItems: async (model, position) => {
+        // Enter キーの全行インデント制御
+        // addCommand で Monaco の内部 Enter 処理を上書き（onKeyDown では preventDefault が効かない）
+        // YAML リストアイテム Enter 後インデント修正（前後の行を参照）
+        let _fixingIndent = false;
+        monacoEditor.onDidChangeModelContent((e) => {
+          if (_fixingIndent) return;
+          const model = monacoEditor.getModel();
+          if (!model || model.getLanguageId() !== 'yaml') return;
+          for (const change of e.changes) {
+            if (!change.text.startsWith('\n') && !change.text.startsWith('\r\n')) continue;
+            const prevLineNum = change.range.startLineNumber;
+            const newLineNum = prevLineNum + 1;
+            if (newLineNum > model.getLineCount()) continue;
+            const prevLine = model.getLineContent(prevLineNum);
+            const listMatch = prevLine.match(/^(\s*)- /);
+            if (!listMatch) continue;
+            if (change.range.startColumn < prevLine.length + 1) continue;
+            const baseIndent = listMatch[1];
+            let correctIndent = baseIndent + '  '; // デフォルト: - の位置 + 2スペース
+            // 1. 後続行（新しい行の次）のインデントを参照
+            const nextLineNum = newLineNum + 1;
+            if (nextLineNum <= model.getLineCount()) {
+              const nextLine = model.getLineContent(nextLineNum).trimEnd();
+              if (nextLine.length > 0) {
+                const nextIndent = nextLine.match(/^(\s*)/)[1];
+                if (nextIndent.length > baseIndent.length) {
+                  correctIndent = nextIndent;
+                }
+              }
+            }
+            // 2. 後続行で決まらない場合、上にある同レベルのリストアイテムの次行を参照
+            if (correctIndent === baseIndent + '  ') {
+              for (let i = prevLineNum - 1; i >= 1; i--) {
+                const line = model.getLineContent(i);
+                const m = line.match(/^(\s*)- /);
+                if (m && m[1] === baseIndent && i + 1 < prevLineNum) {
+                  const afterLine = model.getLineContent(i + 1).trimEnd();
+                  if (afterLine.length > 0) {
+                    const afterIndent = afterLine.match(/^(\s*)/)[1];
+                    if (afterIndent.length > baseIndent.length) {
+                      correctIndent = afterIndent;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            const newLineContent = model.getLineContent(newLineNum);
+            const currentIndent = newLineContent.match(/^(\s*)/)[1];
+            if (currentIndent === correctIndent) continue;
+            _fixingIndent = true;
+            model.pushEditOperations([], [{
+              range: new monaco.Range(newLineNum, 1, newLineNum, currentIndent.length + 1),
+              text: correctIndent,
+            }], () => null);
+            monacoEditor.setPosition({ lineNumber: newLineNum, column: correctIndent.length + 1 });
+            _fixingIndent = false;
+            break;
+          }
+        });
+
+        // AI補完プロバイダー登録（インライン補完・ゴーストテキスト方式）
+        monaco.languages.registerInlineCompletionsProvider('*', {
+          provideInlineCompletions: (model, position, context, token) => {
+            if (!editorAIEnabled) return Promise.resolve({ items: [] });
+
             const code_before = model.getValueInRange({
               startLineNumber: 1, startColumn: 1,
               endLineNumber: position.lineNumber, endColumn: position.column,
@@ -2973,25 +3060,38 @@
             });
             const language = model.getLanguageId();
             const filename = editorCurrentPath || '';
-            try {
-              const res = await fetch('/editor/complete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code_before, code_after, language, filename }),
-              });
-              const data = await res.json();
-              const suggestions = (data.items || []).map(item => ({
-                label: item.label,
-                kind: monaco.languages.CompletionItemKind.Text,
-                insertText: item.insertText,
-                detail: item.detail || '',
-                range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
-              }));
-              return { suggestions };
-            } catch (e) {
-              return { suggestions: [] };
-            }
+
+            return new Promise((resolve) => {
+              const timer = setTimeout(async () => {
+                if (token.isCancellationRequested) { resolve({ items: [] }); return; }
+                try {
+                  const res = await fetch('/editor/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code_before, code_after, language, filename }),
+                  });
+                  if (token.isCancellationRequested) { resolve({ items: [] }); return; }
+                  const data = await res.json();
+                  // 1行目の先頭空白のみトリム（カーソルは既にインデント済み位置にある）
+                  // 2行目以降はLLMのインデントをそのまま使う
+                  const fixFirstLine = (s) => {
+                    const idx = s.indexOf('\n');
+                    if (idx === -1) return s.trimStart();
+                    return s.slice(0, idx).trimStart() + s.slice(idx);
+                  };
+                  const items = (data.items || []).map(item => ({
+                    insertText: fixFirstLine(item.insertText),
+                    range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                  }));
+                  resolve({ items });
+                } catch (e) {
+                  resolve({ items: [] });
+                }
+              }, 800);
+              token.onCancellationRequested(() => { clearTimeout(timer); resolve({ items: [] }); });
+            });
           },
+          freeInlineCompletions: (_completions) => {},
         });
 
         refreshFileTree();

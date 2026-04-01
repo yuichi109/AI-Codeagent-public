@@ -226,6 +226,7 @@ TOOLS = [
                     "work_dir": {"type": "string", "description": "作業ディレクトリ (省略可)"},
                     "description": {"type": "string", "description": "この実行の目的を日本語で一言説明 (例: GitLabへプッシュ、依存パッケージをインストール)"},
                     "env": {"type": "object", "description": "追加・上書きする環境変数 (例: {\"AZURE_SUBSCRIPTION_ID\": \"xxx\", \"no_proxy\": \"*.azure.com\"})。現在の環境にマージされます。"},
+                    "timeout_minutes": {"type": "number", "description": "タイムアウト時間（分）。省略時はデフォルト（通常30秒、apt/docker等は5分）。0で無制限。Ansible・長時間処理は明示的に指定すること（例: 30）。"},
                 },
                 "required": ["command"],
             },

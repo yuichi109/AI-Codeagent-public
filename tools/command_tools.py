@@ -13,7 +13,7 @@ BLOCKED_COMMANDS = {
     "init",
 }
 
-LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy"}
+LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy", "ansible-playbook", "ansible"}
 
 
 def _split_shell_chain(command: str) -> list[str]:
@@ -131,7 +131,7 @@ def _run_bash_sandboxed(args: list) -> dict:
         return {"error": f"サンドボックス実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
 
 
-def run_command(command: str, work_dir: str = None, description: str = "", env: dict = None) -> dict:
+def run_command(command: str, work_dir: str = None, description: str = "", env: dict = None, timeout_minutes: float = None) -> dict:
     # shell=False では && が使えないため、自動分割して順次実行する
     if '&&' in command:
         sub_commands = _split_shell_chain(command)
@@ -139,7 +139,7 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
             combined_stdout = []
             combined_stderr = []
             for sub_cmd in sub_commands:
-                result = run_command(sub_cmd, work_dir=work_dir, description=description, env=env)
+                result = run_command(sub_cmd, work_dir=work_dir, description=description, env=env, timeout_minutes=timeout_minutes)
                 if result.get('stdout'):
                     combined_stdout.append(result['stdout'])
                 if result.get('stderr'):
@@ -196,8 +196,13 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
     if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
         return {"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1}
 
-    # docker / apt 等は長時間かかるので専用タイムアウトを使う
-    effective_timeout = 300 if base_cmd in LONG_RUNNING_CMDS else COMMAND_TIMEOUT_SECONDS
+    # タイムアウト決定: timeout_minutes > LONG_RUNNING_CMDS > デフォルト の優先順
+    if timeout_minutes is not None:
+        effective_timeout = int(timeout_minutes * 60) if timeout_minutes > 0 else None  # 0 = 無制限
+    elif base_cmd in LONG_RUNNING_CMDS:
+        effective_timeout = 300
+    else:
+        effective_timeout = COMMAND_TIMEOUT_SECONDS
 
     # 環境変数: 現在の環境をベースに env で指定された値をマージ
     merged_env = None
@@ -234,7 +239,8 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
             "error": None,
         }
     except subprocess.TimeoutExpired:
-        return {"error": f"{effective_timeout}秒のタイムアウトを超えました（コマンド: {base_cmd}）。処理がまだ進行中の可能性があります。`docker ps` 等で状態を確認してください。", "stdout": "", "stderr": "", "returncode": -1}
+        timeout_label = f"{effective_timeout // 60}分" if effective_timeout and effective_timeout >= 60 else f"{effective_timeout}秒"
+        return {"error": f"{timeout_label}のタイムアウトを超えました（コマンド: {base_cmd}）。処理がまだ進行中の可能性があります。タイムアウトを延長して再実行しますか？", "stdout": "", "stderr": "", "returncode": -1}
     except FileNotFoundError:
         return {"error": f"コマンド '{args[0]}' が見つかりません", "stdout": "", "stderr": "", "returncode": -1}
     except Exception as e:

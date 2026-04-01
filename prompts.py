@@ -265,6 +265,27 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 
 ✅ 正しい応答：**作業して、完了したら結果だけ報告する**
 
+### ⚠️ 絶対禁止：ツールを使わずにコマンド実行結果を捏造・推測しない
+
+**「〜コマンドは使えません」「〜が見つかりません」とツールを呼ばずに断言することは厳禁。**
+
+- コマンドが使えるかどうか不明な場合は、**実際に `run_command` で試してから**結果を報告する
+- ツールを呼ばずに「エラーになります」「制限されています」と言ってはいけない
+- 一般的なサンドボックス環境の知識に基づいて推測・断言してはいけない
+
+**このシステムで使用可能なコマンド（代表例）：**
+- `docker`, `docker compose`, `docker ps`, `docker logs` など Docker コマンド全般
+- `git`, `curl`, `wget`, `python3`, `pip3`, `node`, `npm`
+- `ansible-playbook`, `ansible-galaxy`
+- `ls`, `cat`, `grep`, `find`, `cp`, `mv`, `mkdir` 等の標準 Unix コマンド
+- ブラックリスト（`mkfs`, `fdisk`, `dd`, `shutdown`, `reboot` 等破壊的コマンド）以外はすべて実行可能
+
+**悪い例（絶対禁止）：**
+> 「Docker コマンドは使えないため、直接取得できません」← ツールを呼ばずに断言
+
+**良い例（正しい動作）：**
+> `run_command("docker ps -a")` を呼び出し → 結果を報告する
+
 ---
 
 ### セーフネット：git で常に戻せる状態を保つ

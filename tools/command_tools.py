@@ -16,6 +16,49 @@ BLOCKED_COMMANDS = {
 LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy"}
 
 
+def _split_shell_chain(command: str) -> list[str]:
+    """&& で連結されたコマンドを分割する（クォート内の && は無視）"""
+    parts = []
+    current = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(command):
+        c = command[i]
+        if c == "'" and not in_double:
+            in_single = not in_single
+            current.append(c)
+        elif c == '"' and not in_single:
+            in_double = not in_double
+            current.append(c)
+        elif (c == '&' and not in_single and not in_double
+              and i + 1 < len(command) and command[i + 1] == '&'):
+            parts.append(''.join(current).strip())
+            current = []
+            i += 2
+            continue
+        else:
+            current.append(c)
+        i += 1
+    if current:
+        parts.append(''.join(current).strip())
+    return [p for p in parts if p]
+
+
+def _is_permission_error(stderr: str) -> bool:
+    """標準エラー出力から権限エラーを判定する"""
+    keywords = [
+        "permission denied",
+        "could not open lock file",
+        "unable to lock",
+        "are you root",
+        "operation not permitted",
+        "E: Could not",
+    ]
+    stderr_lower = stderr.lower()
+    return any(kw.lower() in stderr_lower for kw in keywords)
+
+
 def _run_bash_sandboxed(args: list) -> dict:
     """
     bubblewrap (bwrap) を使ってシェルスクリプトをサンドボックス内で実行する。
@@ -89,6 +132,32 @@ def _run_bash_sandboxed(args: list) -> dict:
 
 
 def run_command(command: str, work_dir: str = None, description: str = "", env: dict = None) -> dict:
+    # shell=False では && が使えないため、自動分割して順次実行する
+    if '&&' in command:
+        sub_commands = _split_shell_chain(command)
+        if len(sub_commands) > 1:
+            combined_stdout = []
+            combined_stderr = []
+            for sub_cmd in sub_commands:
+                result = run_command(sub_cmd, work_dir=work_dir, description=description, env=env)
+                if result.get('stdout'):
+                    combined_stdout.append(result['stdout'])
+                if result.get('stderr'):
+                    combined_stderr.append(result['stderr'])
+                if result.get('error') or result.get('returncode', 0) != 0:
+                    return {
+                        'stdout': '\n'.join(combined_stdout),
+                        'stderr': '\n'.join(combined_stderr),
+                        'returncode': result.get('returncode', -1),
+                        'error': result.get('error'),
+                    }
+            return {
+                'stdout': '\n'.join(combined_stdout),
+                'stderr': '\n'.join(combined_stderr),
+                'returncode': 0,
+                'error': None,
+            }
+
     try:
         args = shlex.split(command)
     except ValueError as e:
@@ -145,6 +214,19 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
             shell=False,
             env=merged_env,
         )
+
+        # 権限エラーで失敗した場合、AIにユーザー確認を促すヒントを付与する
+        if (result.returncode != 0
+                and args[0] != "sudo"
+                and _is_permission_error(result.stderr)):
+            return {
+                "stdout": result.stdout[:8192],
+                "stderr": result.stderr[:4096],
+                "returncode": result.returncode,
+                "error": None,
+                "hint": f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。",
+            }
+
         return {
             "stdout": result.stdout[:8192],
             "stderr": result.stderr[:4096],

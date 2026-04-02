@@ -32,6 +32,7 @@ from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup
 from tools.manim_tools import render_manim
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
+from tools.windows_tools import run_powershell
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -148,6 +149,7 @@ TOOL_REGISTRY = {
     "render_manim": render_manim,
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
+    "run_powershell": run_powershell,
 }
 
 TOOLS = [
@@ -465,6 +467,27 @@ TOOLS = [
                     "playbook": {"type": "string", "description": "実行するプレイブックの workspace 相対パス (例: myproject/site.yml)"},
                 },
                 "required": ["playbook"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_powershell",
+            "description": "WSL2 から Windows の PowerShell コマンドを実行します。Windowsファイル操作・アプリ起動・クリップボード・通知・WinGet・レジストリ・サービス管理・システム情報取得など Windows 固有の操作に使います。Linux コマンドで代替できる場合は run_command を使ってください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "実行する PowerShell コマンド（例: Get-ComputerInfo | Select-Object WindowsProductName,TotalPhysicalMemory）。複数行・複数コマンドも可。",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "タイムアウト秒数（デフォルト: 30秒）。WinGet など時間がかかる操作は大きく設定する（例: 120）。",
+                    },
+                },
+                "required": ["command"],
             },
         },
     },

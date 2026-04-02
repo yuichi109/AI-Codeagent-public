@@ -337,6 +337,7 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 | エラー | 判別方法 | 対処 |
 |---|---|---|
 | ModuleNotFoundError | error_type: ModuleNotFoundError | `run_command("pip install <pkg>")` → 再実行 |
+| コマンドが存在しない | "コマンドが見つかりません" / "not found" / "command not found" | **ユーザーに確認せず** `run_command("sudo apt-get install -y <pkg>")` でインストールしてから再実行する。nmap, curl, jq, git, python3 等すべて同様。 |
 | FileNotFoundError | error_type: FileNotFoundError | `glob_files` / `list_files` で正しいパスを特定 → 再実行 |
 | SyntaxError | error_type: SyntaxError | `read_file` で確認 → `edit_file` で修正 → 再実行 |
 | edit_file ミスマッチ | "一致なし" / "occurrences" | `read_file` で実文字列確認 → old_str 修正 → 再試行 |
@@ -426,6 +427,9 @@ run_command(
 - `todo_update`: タスクリストを作成・更新する（UIにリアルタイム表示される）
 - `todo_read`: 現在のタスクリストを確認する（作業再開時・残タスク確認時）
 - `render_manim`: **Manim アニメーション作成・修正時に必ず使う**。レンダリング結果の PNG をLLMが視覚的に確認して自己修正できる。`run_command` で manim を直接実行してはいけない。
+- `run_powershell`: **このエージェントは必ず WSL2 (Ubuntu) 上で動作しており、`powershell.exe` 経由で Windows を直接操作できる。** Windows固有の操作（GUIアプリ起動・ファイルエクスプローラー・ディスク管理・タスクマネージャー・レジストリ・WinGet・クリップボード等）はこのツールを使う。「Linux環境だからできない」「WSL2ではない」と判断してはいけない。
+  - **重要: `Start-Process` は GUI アプリを起動した後すぐに returncode=0・stdout 空で返る。これは正常動作。stdout が空でも「起動しました」と報告してよい。**
+  - 例: `Start-Process diskmgmt.msc`（ディスクの管理）、`Start-Process taskmgr`（タスクマネージャー）、`Get-Clipboard`（クリップボード取得）、`winget install VLC`（アプリインストール）
 
 ## タスク管理ルール（複数ステップの作業時は必須）
 

@@ -165,25 +165,30 @@
     </div>
   </div>
 
-  <!-- SearXNG -->
+  <!-- SearXNG / 検索 -->
   <div class="section" id="sec-searxng">
     <div class="section-header" onclick="toggleSection('sec-searxng')">
-      🔍 SearXNG 検索バックエンド <span class="tag">省略可</span>
+      🔍 検索バックエンド <span class="tag">省略可</span>
       <span class="chevron">▾</span>
     </div>
     <div class="section-body">
       <div class="row">
         <div class="field">
-          <label>ベース URL</label>
+          <label>SearXNG ベース URL</label>
           <input id="sx-url" type="text" placeholder="http://localhost:8888">
         </div>
         <div class="field">
-          <label>有効化</label>
+          <label>SearXNG 有効化</label>
           <select id="sx-enabled">
             <option value="false">無効</option>
             <option value="true">有効</option>
           </select>
         </div>
+      </div>
+      <div class="field">
+        <label>Tavily Search API キー <span class="tag">推奨・無料1000クエリ/月・カード不要</span></label>
+        <input id="sx-tavily-key" type="password" placeholder="tvly-...（未設定）" autocomplete="off">
+        <span class="hint" id="sx-tavily-hint">未設定 — <a href="https://tavily.com" target="_blank" style="color:#89b4fa">tavily.com</a> で取得（無料・カード不要）</span>
       </div>
     </div>
   </div>
@@ -444,9 +449,11 @@ async function loadConfig() {
     document.getElementById('gl-email').value = d.gitlab.email || '';
     document.getElementById('gl-email-hint').textContent = d.gitlab.email ? `現在の git config: ${d.gitlab.email}` : '未設定（保存時に git config --global user.email を更新）';
 
-    // SearXNG
+    // SearXNG / 検索
     document.getElementById('sx-url').value     = d.searxng.url;
     document.getElementById('sx-enabled').value = d.searxng.enabled;
+    document.getElementById('sx-tavily-key').placeholder = d.searxng.tavily_api_key_set ? '（設定済み — 変更する場合のみ入力）' : 'tvly-...（未設定）';
+    document.getElementById('sx-tavily-hint').textContent = d.searxng.tavily_api_key_set ? '現在: 設定済み' : '未設定 — tavily.com で取得（無料・カード不要）';
   } catch(e) {
     document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
   }
@@ -485,8 +492,9 @@ async function saveConfig() {
       email: document.getElementById('gl-email').value,
     },
     searxng: {
-      url:     document.getElementById('sx-url').value,
-      enabled: document.getElementById('sx-enabled').value,
+      url:            document.getElementById('sx-url').value,
+      enabled:        document.getElementById('sx-enabled').value,
+      tavily_api_key: document.getElementById('sx-tavily-key').value,
     },
   };
 

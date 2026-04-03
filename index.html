@@ -1461,7 +1461,27 @@
       const stdout = parsed.stdout || '';
       if (isDiff(stdout)) { renderDiff(el, stdout); return; }
       const text = parsed.result ?? parsed.output ?? parsed.content ?? stdout;
-      if (typeof text === 'string') { showPre(text); return; }
+      if (typeof text === 'string' && text) { showPre(text); return; }
+      // web_search / web_research の results/sources 配列
+      const resultItems = parsed.results ?? parsed.sources;
+      if (Array.isArray(resultItems) && resultItems.length > 0) {
+        const src = parsed.source || parsed.search_backend || 'search';
+        const cnt = parsed.count ?? parsed.source_count ?? resultItems.length;
+        const header = `[${src}] ${cnt}件`;
+        // <details> の summary にもソース名を反映
+        const details = el.closest('details');
+        if (details) {
+          const summary = details.querySelector('summary');
+          if (summary) summary.textContent = `結果を展開 · ${src} · ${cnt}件`;
+        }
+        const lines = resultItems.map((r, i) =>
+          `[${i+1}] ${r.title || ''}\n${r.url || ''}\n${(r.snippet || r.content || '').slice(0, 200)}`
+        ).join('\n\n');
+        showPre(`${header}\n\n${lines}`);
+        return;
+      }
+      // エラー
+      if (parsed.error) { showPre(`エラー: ${parsed.error}`); return; }
     } catch(_) {}
     // JSON でない通常テキスト
     showPre(resultText);

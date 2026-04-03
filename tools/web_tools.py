@@ -5,9 +5,21 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from config import SEARXNG_BASE_URL, SEARXNG_ENABLED
+from config import SEARXNG_BASE_URL, SEARXNG_ENABLED, TAVILY_API_KEY
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CodeAgent/1.0)"}
+
+try:
+    from ddgs import DDGS as _DDGS
+    _DDGS_AVAILABLE = True
+except ImportError:
+    _DDGS_AVAILABLE = False
+
+try:
+    from tavily import TavilyClient as _TavilyClient
+    _TAVILY_AVAILABLE = True
+except ImportError:
+    _TAVILY_AVAILABLE = False
 
 
 def _is_safe_url(url: str) -> tuple[bool, str]:
@@ -35,6 +47,48 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _search_tavily(query: str, max_results: int = 5) -> dict | None:
+    """Tavily Search API を使った検索。AIエージェント向け設計で高精度。"""
+    if not TAVILY_API_KEY or not _TAVILY_AVAILABLE:
+        return None
+    try:
+        client = _TavilyClient(api_key=TAVILY_API_KEY)
+        resp = client.search(query, max_results=min(max_results, 10))
+        results = []
+        for item in resp.get("results", []):
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", "")[:500],
+            })
+        if results:
+            return {"results": results, "query": query, "source": "tavily", "count": len(results)}
+    except Exception:
+        pass
+    return None
+
+
+def _search_ddgs(query: str, max_results: int = 5) -> dict | None:
+    """ddgs ライブラリを使った DuckDuckGo 検索。CAPTCHA を回避できる場合が多い。"""
+    if not _DDGS_AVAILABLE:
+        return None
+    try:
+        with _DDGS() as ddgs:
+            raw = list(ddgs.text(query, region="jp-jp", max_results=max_results))
+        results = []
+        for item in raw:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("href", ""),
+                "snippet": item.get("body", "")[:500],
+            })
+        if results:
+            return {"results": results, "query": query, "source": "ddgs", "count": len(results)}
+    except Exception:
+        pass
+    return None
+
+
 def _search_searxng(query: str, max_results: int = 5) -> dict | None:
     """SearXNG JSON API を使った検索。失敗時は None を返す。"""
     try:
@@ -52,7 +106,7 @@ def _search_searxng(query: str, max_results: int = 5) -> dict | None:
             results.append({
                 "title": item.get("title", ""),
                 "url": item.get("url", ""),
-                "snippet": item.get("content", "")[:300],
+                "snippet": item.get("content", "")[:500],
             })
 
         if results:
@@ -62,16 +116,48 @@ def _search_searxng(query: str, max_results: int = 5) -> dict | None:
     return None
 
 
+def _has_japanese(text: str) -> bool:
+    """テキストに日本語文字が含まれるかチェック。"""
+    return any('\u3000' <= c <= '\u9fff' or '\uff00' <= c <= '\uffef' for c in text)
+
+
+def _results_look_relevant(results: list, query: str) -> bool:
+    """検索結果がクエリに関連していそうか簡易チェック。"""
+    if not results:
+        return False
+    # クエリが日本語を含む場合、最低1件は日本語コンテンツを期待
+    if _has_japanese(query):
+        return any(
+            _has_japanese(r.get("title", "") + r.get("snippet", ""))
+            for r in results[:3]
+        )
+    return True
+
+
 def web_search(query: str, max_results: int = 5) -> dict:
     max_results = min(max_results, 10)
 
-    # --- 一次手段: SearXNG (有効時) ---
+    # --- 一次手段: Tavily Search API (設定時のみ・AIエージェント向け高精度) ---
+    result = _search_tavily(query, max_results)
+    if result:
+        return result
+
+    # --- 二次手段: ddgs ライブラリ (安定・CAPTCHA回避・スニペット充実) ---
+    result = _search_ddgs(query, max_results)
+    if result and _results_look_relevant(result.get("results", []), query):
+        return result
+
+    # --- 四次手段: SearXNG (有効時・関連性チェック付き) ---
     if SEARXNG_ENABLED:
         result = _search_searxng(query, max_results)
-        if result:
+        if result and _results_look_relevant(result.get("results", []), query):
             return result
 
-    # --- 二次手段: DuckDuckGo Instant Answer API ---
+    # ddgs か SearXNG がとりあえず何か返していたら使う（関連性不問）
+    if result:
+        return result
+
+    # --- 五次手段: DuckDuckGo Instant Answer API ---
     try:
         resp = requests.get(
             "https://api.duckduckgo.com/",
@@ -87,7 +173,7 @@ def web_search(query: str, max_results: int = 5) -> dict:
             results.append({
                 "title": data.get("Heading", ""),
                 "url": data["AbstractURL"],
-                "snippet": data["AbstractText"][:300],
+                "snippet": data["AbstractText"][:500],
             })
         for topic in data.get("RelatedTopics", []):
             if len(results) >= max_results:
@@ -96,7 +182,7 @@ def web_search(query: str, max_results: int = 5) -> dict:
                 results.append({
                     "title": topic.get("Text", "")[:100],
                     "url": topic["FirstURL"],
-                    "snippet": topic.get("Text", "")[:300],
+                    "snippet": topic.get("Text", "")[:500],
                 })
 
         if results:

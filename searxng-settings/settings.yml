@@ -7,6 +7,7 @@ server:
 
 search:
   safe_search: 0
+  default_lang: "ja"
   formats:
     - html
     - json
@@ -21,6 +22,16 @@ engines:
   - name: duckduckgo
     engine: duckduckgo
     disabled: false
+  - name: yahoo
+    engine: yahoo
+    disabled: false
+  - name: brave
+    engine: brave
+    disabled: false
+  - name: qwant
+    engine: qwant
+    disabled: false
   - name: wikipedia
     engine: wikipedia
     disabled: false
+    language: ja

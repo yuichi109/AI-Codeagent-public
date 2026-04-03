@@ -535,6 +535,15 @@ def execute_tool(name: str, arguments: dict) -> str:
         return json.dumps({"error": f"未知のツール: {name}"}, ensure_ascii=False)
     try:
         result = TOOL_REGISTRY[name](**arguments)
+        # 検索系ツールで結果が空の場合、LLMがハルシネーションしないよう明示的な警告を付与
+        if name in ("web_search", "web_research") and isinstance(result, dict):
+            items = result.get("results") or result.get("sources") or []
+            if not items or "error" in result:
+                result["_warning"] = (
+                    "【重要】検索結果が見つかりませんでした。"
+                    "この情報に基づいた回答はできません。"
+                    "「情報が見つかりませんでした」と正直にユーザーに伝えてください。推測や作り話は絶対にしないこと。"
+                )
         return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         error_type = type(e).__name__
@@ -1771,6 +1780,8 @@ async def setup_current():
         "searxng": {
             "url":     raw.get("SEARXNG_BASE_URL", "http://localhost:8888"),
             "enabled": raw.get("SEARXNG_ENABLED", "false"),
+            "tavily_api_key": mask(raw.get("TAVILY_API_KEY", "")),
+            "tavily_api_key_set": bool(raw.get("TAVILY_API_KEY")),
         },
     })
 
@@ -1868,7 +1879,7 @@ async def setup_save(req: SetupSaveRequest):
     existing_lines = []
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
-        "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "no_proxy", "NO_PROXY",
+        "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
         for line in env_path.read_text().splitlines():
@@ -1965,14 +1976,18 @@ async def setup_save(req: SetupSaveRequest):
         repo_dir = str(Path(__file__).parent)
         subprocess.run(["git", "-C", repo_dir, "config", "--unset", "user.email"], check=False)
 
-    # SearXNG
+    # SearXNG / 検索バックエンド
     sx = req.searxng
+    tavily_key = api_key_val(sx.get("tavily_api_key", ""), "TAVILY_API_KEY")
     lines += [
         "# SearXNG 検索バックエンド",
         f"SEARXNG_BASE_URL={sx.get('url','http://localhost:8888')}",
         f"SEARXNG_ENABLED={sx.get('enabled','false')}",
-        "",
+        "# Tavily Search API (省略可・無料1000クエリ/月・カード不要)",
     ]
+    if tavily_key:
+        lines.append(f"TAVILY_API_KEY={tavily_key}")
+    lines.append("")
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

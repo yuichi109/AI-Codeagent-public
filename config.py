@@ -93,3 +93,6 @@ GITLAB_PAT: str  = os.getenv("GITLAB_PAT", "")
 # SearXNG 検索バックエンド (省略可)
 SEARXNG_BASE_URL: str = os.getenv("SEARXNG_BASE_URL", "http://localhost:8888")
 SEARXNG_ENABLED: bool = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"
+
+# Tavily Search API (省略可・無料1000クエリ/月・カード不要)
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")

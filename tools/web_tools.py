@@ -99,6 +99,7 @@ def _search_searxng(query: str, max_results: int = 5) -> dict | None:
             timeout=10,
         )
         resp.raise_for_status()
+        resp.encoding = "utf-8"
         data = resp.json()
 
         results = []

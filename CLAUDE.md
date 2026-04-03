@@ -99,7 +99,7 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **`grep`**（正規表現・行番号付き横断検索、case_sensitive / max_results オプション）
 - [x] `run_command`（ブラックリスト方式 + work_dir をworkspace相対で解決）
 - [x] `bash script.sh`（bubblewrap サンドボックス経由）
-- [x] `web_search`（SearXNG優先 → DuckDuckGo API → Wikipedia API フォールバック）
+- [x] `web_search`（Tavily優先 → ddgs → SearXNG → DuckDuckGo API → Wikipedia フォールバック）（2026-04-03）
 - [x] `web_fetch`（BeautifulSoup テキスト抽出、SSRF 対策）
 - [x] `web_research`（検索→複数ページ自動取得→まとめて返す高レベルツール）
 - [x] `code_lint`（Python: ruff、JS/TS: eslint）
@@ -241,6 +241,18 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **AGENT_NAME 設定**（2026-03-26）: `.env` の `AGENT_NAME` をシステムプロンプトに注入。自己紹介時に任意の名前を名乗らせる（現在: SPEC-AI）
 - [x] **セットアップウィザード `/setup`**（2026-03-26）: `setup.html` + server.py の `/setup/current`・`/setup/save` エンドポイント。ブラウザから `.env` を GUI 編集して保存・サービス自動再起動。⚙️パネル下部にリンクを追加
 - [x] **Foundry api_version バグ修正**（2026-03-26）: `cognitiveservices.azure.com` URL を `openai_compatible` に誤分類していた問題を修正。正しく `foundry` タイプ・`FOUNDRY_API_VERSION` を使用
+- [x] **検索エンジン刷新**（2026-04-03）: SearXNG が主要エンジンすべてブロックされていた問題を解決
+  - `ddgs` ライブラリ追加（CAPTCHA回避・日本語検索安定）
+  - Tavily Search API 対応（AIエージェント向け・無料1000クエリ/月・カード不要）
+  - 検索優先順位: Tavily → ddgs → SearXNG → DDG API → Wikipedia
+  - 日本語クエリの関連性チェック追加（ゴミ結果スキップ）
+  - SearXNG に Yahoo・Brave・Qwant エンジン追加
+  - SearXNG レスポンスの文字化けバグ修正（encoding=utf-8 明示）
+  - `requirements.txt` に ddgs・tavily-python 追加（別PCセットアップ対応）
+- [x] **検索ハルシネーション抑制**（2026-04-03）: 検索結果が空のとき `_warning` を付与し「作り話禁止」を強制
+- [x] **検索クエリ改善**（2026-04-03）: prompts.py に検索クエリ作成ガイドを追加（日本語クエリ・空結果時の正直報告）
+- [x] **検索結果 UI 表示バグ修正**（2026-04-03）: web_search/web_research の results/sources 配列が展開表示されなかった問題を修正。「結果を展開 · tavily · N件」形式でバックエンド名を常時表示
+- [x] **セットアップ画面に Tavily キー入力欄追加**（2026-04-03）: `/setup` の検索バックエンドセクションから GUI 設定可能
 
 ### 品質・テスト
 - [ ] 各ツールの単体テスト（pytest）を書く
@@ -385,4 +397,4 @@ TAVILY_API_KEY=tvly-dev-...
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-03-26（複数Foundryインスタンス対応・AGENT_NAME・セットアップウィザード）
+- **最終更新**: 2026-04-03（検索エンジン刷新・Tavily対応・ハルシネーション抑制・UI検索結果表示修正）

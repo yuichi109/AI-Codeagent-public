@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from openai import AzureOpenAI, OpenAI
+from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS
 from prompts import get_system_prompt
@@ -100,6 +100,31 @@ def _make_client():
             api_key=_provider_config["api_key"] or "dummy",
             http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
         )
+
+def _make_async_client():
+    """_make_client の非同期版"""
+    if not _provider_config.get("url") and not _provider_config.get("api_key") and _provider_config["type"] in ("azure", "foundry"):
+        raise ValueError("LLMプロバイダーが未設定です。")
+    if _provider_config["type"] in ("azure", "foundry"):
+        return AsyncAzureOpenAI(
+            azure_endpoint=_provider_config["url"],
+            api_key=_provider_config["api_key"],
+            api_version=_provider_config["api_version"] or (FOUNDRY_API_VERSION if _provider_config["type"] == "foundry" else AZURE_OPENAI_API_VERSION),
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    elif _provider_config["type"] == "gemini":
+        return AsyncOpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=_provider_config["api_key"],
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    else:
+        return AsyncOpenAI(
+            base_url=_provider_config["url"].rstrip("/") + "/v1",
+            api_key=_provider_config["api_key"] or "dummy",
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -558,7 +583,17 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
-    return await asyncio.to_thread(execute_tool, name, arguments)
+    timeout = 60 if name == "web_research" else 20
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(execute_tool, name, arguments),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        return json.dumps(
+            {"error": f"ツールがタイムアウトしました ({timeout}秒): {name}"},
+            ensure_ascii=False,
+        )
 
 
 class ChatRequest(BaseModel):
@@ -764,7 +799,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         while _is_recent_head_unsafe(recent_part) and old_part:
             recent_part = [old_part[-1]] + recent_part
             old_part = old_part[:-1]
-        summary = _summarize_history(old_part)
+        summary = await asyncio.to_thread(_summarize_history, old_part)
         if summary:
             compressed_history = [
                 {"role": "user", "content": f"[これまでの作業サマリー]\n{summary}"},
@@ -802,7 +837,10 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     is_local = _provider_config["type"] not in ("azure", "foundry", "gemini")
     tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
-    while True:
+    max_iterations = 15
+    iteration = 0
+    while iteration < max_iterations:
+        iteration += 1
         # ローカルモデルは role:tool を Jinja テンプレートで処理できない場合があるため変換
         send_messages = _convert_messages_for_local(messages) if (is_local and not tools_enabled) else messages
         # tools_enabled=False 時はツールを渡さない（ローカルモデルのデフォルト）
@@ -813,12 +851,12 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
         create_kwargs["stream_options"] = {"include_usage": True}
-        stream = _make_client().chat.completions.create(**create_kwargs)
+        stream = await _make_async_client().chat.completions.create(**create_kwargs)
 
         content_parts = []
         tool_calls_map = {}  # index -> {id, name, arguments}
 
-        for chunk in stream:
+        async for chunk in stream:
             # トークン使用量（最終chunk）
             if chunk.usage:
                 yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens})}\n\n"
@@ -973,6 +1011,14 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             vision_msg = {"role": "user", "content": vision_content}
             messages.append(vision_msg)
             turn_messages.append(vision_msg)
+
+    # ループ上限超過（無限ループ防止）
+    if iteration >= max_iterations:
+        msg = f"[ツール呼び出しが{max_iterations}回に達したため停止しました]"
+        turn_messages.append({"role": "assistant", "content": msg})
+        yield f"data: {json.dumps({'type': 'answer_chunk', 'content': msg})}\n\n"
+        yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
+        yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
 
 
 @app.post("/chat")
@@ -1588,7 +1634,7 @@ async def compact_history_endpoint(req: CompactRequest):
     while _is_recent_head_unsafe(recent_part) and old_part:
         recent_part = [old_part[-1]] + recent_part
         old_part = old_part[:-1]
-    summary = _summarize_history(old_part)
+    summary = await asyncio.to_thread(_summarize_history, old_part)
     if not summary:
         return JSONResponse({"messages": messages, "compressed": False})
     compressed = [

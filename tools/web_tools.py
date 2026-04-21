@@ -73,7 +73,7 @@ def _search_ddgs(query: str, max_results: int = 5) -> dict | None:
     if not _DDGS_AVAILABLE:
         return None
     try:
-        with _DDGS() as ddgs:
+        with _DDGS(timeout=8) as ddgs:
             raw = list(ddgs.text(query, region="jp-jp", max_results=max_results))
         results = []
         for item in raw:
@@ -258,7 +258,7 @@ def web_fetch(url: str, extract_text: bool = True, max_chars: int = 8000) -> dic
         return {"error": err, "url": url}
 
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15, stream=True)
+        resp = requests.get(url, headers=HEADERS, timeout=(10, 20))
         resp.raise_for_status()
 
         content_type = resp.headers.get("Content-Type", "")

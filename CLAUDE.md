@@ -155,6 +155,17 @@ searxng-settings/   ← SearXNG 設定 (JSON形式有効化)
 - [x] **SSE done:true バッファ修正**（index.html）: ストリーム終端でbuf残留データを処理してから break
 - [x] **`stripThink()` ヘルパー**（index.html）: localStorage復元時にも `<think>` タグを除去
 
+### バグ修正（2026-04-21）
+- [x] **LLMストリーミングの同期ブロッキング修正**（server.py）: `for chunk in stream:` が asyncio イベントループを完全にブロックしていた問題を修正
+  - `AsyncAzureOpenAI` / `AsyncOpenAI` を導入、`_make_async_client()` を新設
+  - `async for chunk in stream:` に変更してノンブロッキング化
+  - 症状: 1リクエストが詰まると後続リクエストも全て無応答になっていた
+- [x] **`_summarize_history` の同期ブロッキング修正**（server.py）: `asyncio.to_thread` でラップしてイベントループをブロックしないよう修正（2箇所）
+- [x] **`web_fetch` の `stream=True` タイムアウトバグ修正**（tools/web_tools.py）: `stream=True` はHTTP本文読み込み中タイムアウトが効かない → `timeout=(10, 20)` に変更（接続10秒/読み込み20秒）
+- [x] **`execute_tool_async` にタイムアウト追加**（server.py）: `asyncio.wait_for` で各ツールに上限を設定（`web_research`: 60秒、それ以外: 20秒）。タイムアウト時はエラーを返してループ継続
+- [x] **エージェントループに上限追加**（server.py）: `max_iterations=15` で無限ツール呼び出しループを防止。上限到達時はメッセージを返して終了
+- [x] **`gpt-5.4-mini` 互換性メモ**: このモデルは `web_search` 後に `web_fetch` を積極的に追加呼び出しする傾向あり（`gpt-4.1-mini` より多ツール呼び出し）。上記修正で対応済み
+
 ### バグ修正
 - [x] `list_files("workspace")` → `_normalize_path()` で workspace二重問題を解決
 - [x] `work_dir` の相対パス解決: Python CWD 基準 → ALLOWED_WORK_DIR 基準に修正
@@ -397,4 +408,4 @@ TAVILY_API_KEY=tvly-dev-...
 
 - **このプロジェクト**: https://gitlab.com/yuichi.matsuo/AI-Codeagent
 - **ブランチ**: main
-- **最終更新**: 2026-04-03（検索エンジン刷新・Tavily対応・ハルシネーション抑制・UI検索結果表示修正）
+- **最終更新**: 2026-04-21（LLMストリーミング同期ブロッキング修正・web_fetchタイムアウトバグ修正・ツールタイムアウト追加・エージェントループ上限追加）

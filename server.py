@@ -827,7 +827,10 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             user_content = [{"type": "text", "text": auto_ctx}] + user_content
         else:
             user_content = f"{auto_ctx}\n\n{user_content}"
-    messages = [{"role": "system", "content": get_system_prompt(bypass_approval)}] + trimmed + [{"role": "user", "content": user_content}]
+    system_prompt = get_system_prompt(bypass_approval)
+    if "5.4-mini" in _provider_config.get("model", ""):
+        system_prompt += "\n\n絶対に同じ文章・段落を繰り返すな。一度出力した内容は再出力禁止。"
+    messages = [{"role": "system", "content": system_prompt}] + trimmed + [{"role": "user", "content": user_content}]
     turn_messages = []  # このターンで追加されたメッセージ (tool関連)
 
     # サマリー圧縮が発生した場合はクライアントに通知（localStorage 更新のため）
@@ -851,6 +854,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
         create_kwargs["stream_options"] = {"include_usage": True}
+        if _provider_config.get("model", "") == "gpt-5-mini":
+            create_kwargs["reasoning_effort"] = "low"
         stream = await _make_async_client().chat.completions.create(**create_kwargs)
 
         content_parts = []

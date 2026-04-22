@@ -325,6 +325,26 @@ skills/
 - [ ] **Ansibleプレイブック**（`setup.yml`）: 未着手（setup.sh で代替中）
 - [ ] **Docker化オプション**（WSL2なし環境向け）: bubblewrapをオプション化し `SANDBOX=none` で無効化可能に
 
+### Windows ネイティブ版（#35）`for_windows` ブランチ
+- [x] **ブランチ構成**（2026-04-22）: `main`=Linux/WSL2、`for_windows`=Windows ネイティブ
+  - `git clone -b for_windows` で WSL・Docker 不要の Windows 版を取得可能
+  - ポート 8001 で WSL 版（8000）と並列稼働可能
+- [x] **`setup.bat`**: ダブルクリック一発で venv 作成→パッケージインストール→サーバー起動
+  - 設定保存後に自動再起動ループ実装
+  - `.env` エンコーディング破損を自動検出して `.env.example` から再作成
+- [x] **`tools/command_tools.py`**: Windows 対応
+  - `IS_WINDOWS` フラグで Linux/Windows を自動判定
+  - bash 実行: Windows では `bash.exe`（Git for Windows）でサンドボックスなし実行
+  - Windows 固有ブラックリスト追加（`format` / `diskpart`）
+- [x] **`server.py`**: SearXNG 自動起動を Linux/WSL2 のみに限定
+- [x] **`config.py`**: `load_dotenv(encoding='utf-8')` で Windows エンコーディング問題を解消
+- [x] **エンコーディング全般修正**: `read_text()` / `write_text()` に `encoding='utf-8'` を明示
+- [x] **README.md**: ブランチ構成・Windows/Linux セットアップ手順を明記
+- [ ] **cmd 組み込みコマンド対応**（`dir`/`copy`/`del` 等）: `shell=True` or `cmd /c` 対応（未着手）
+- [ ] **Officeファイルツール**（`tools/office_tools.py`）: Word/Excel/PowerPoint の読み書き・誤字脱字チェック（`for_windows` ブランチ優先・次セッションで実装予定）
+  - `python-docx` / `openpyxl` / `python-pptx` を requirements に追加
+  - 大きな Word ファイルはセクション単位で分割して処理
+
 ### ドキュメント
 - [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記
 - [ ] `docs/design.md` を現在の実装に合わせて更新

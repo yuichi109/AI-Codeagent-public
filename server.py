@@ -34,6 +34,11 @@ from tools.workspace_tools import protected_list_read, protected_list_update, pr
 from tools.manim_tools import render_manim
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
+from tools.office_tools import (
+    read_docx, write_docx, edit_docx,
+    read_xlsx, write_xlsx, edit_xlsx,
+    read_pptx, write_pptx, edit_pptx,
+)
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -176,6 +181,15 @@ TOOL_REGISTRY = {
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
+    "read_docx": read_docx,
+    "write_docx": write_docx,
+    "edit_docx": edit_docx,
+    "read_xlsx": read_xlsx,
+    "write_xlsx": write_xlsx,
+    "edit_xlsx": edit_xlsx,
+    "read_pptx": read_pptx,
+    "write_pptx": write_pptx,
+    "edit_pptx": edit_pptx,
 }
 
 TOOLS = [
@@ -514,6 +528,156 @@ TOOLS = [
                     },
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    # ---- Office tools ----
+    {
+        "type": "function",
+        "function": {
+            "name": "read_docx",
+            "description": "Word ファイル (.docx) を読み込み、テキスト・段落構造を返します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (例: docs/report.docx)"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_docx",
+            "description": "Word ファイル (.docx) を作成・上書きします。content は Markdown 風テキスト（# 見出し対応）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (例: output/report.docx)"},
+                    "content": {"type": "string", "description": "Markdown 風テキスト。# / ## / ### を見出しとして解釈します。"},
+                    "title": {"type": "string", "description": "ドキュメントタイトル（省略可）"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_docx",
+            "description": "Word ファイル内の指定テキストを置換します（段落内の run 単位で一致）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス"},
+                    "old_text": {"type": "string", "description": "置換前のテキスト"},
+                    "new_text": {"type": "string", "description": "置換後のテキスト"},
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_xlsx",
+            "description": "Excel ファイル (.xlsx) を読み込み、シートのデータを返します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (例: data/sales.xlsx)"},
+                    "sheet": {"type": "string", "description": "シート名（省略時は最初のシート）"},
+                    "max_rows": {"type": "integer", "description": "最大読み込み行数（デフォルト200）"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_xlsx",
+            "description": "Excel ファイル (.xlsx) を作成・上書きします。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (例: output/result.xlsx)"},
+                    "data": {"type": "array", "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）", "items": {"type": "array"}},
+                    "sheet": {"type": "string", "description": "シート名（デフォルト: Sheet1）"},
+                    "headers": {"type": "array", "description": "ヘッダー行（省略可）", "items": {"type": "string"}},
+                },
+                "required": ["path", "data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_xlsx",
+            "description": "Excel ファイルの特定セルを編集します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス"},
+                    "sheet": {"type": "string", "description": "シート名（省略時は最初のシート）"},
+                    "cell": {"type": "string", "description": "セルアドレス（例: B3）"},
+                    "row": {"type": "integer", "description": "行番号（1始まり）。cell 指定時は不要"},
+                    "col": {"type": "integer", "description": "列番号（1始まり）。cell 指定時は不要"},
+                    "value": {"type": "string", "description": "設定する値"},
+                },
+                "required": ["path", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pptx",
+            "description": "PowerPoint ファイル (.pptx) を読み込み、スライドのテキストを返します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (例: slides/deck.pptx)"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_pptx",
+            "description": "PowerPoint ファイル (.pptx) を作成・上書きします。slides は [{title, content}] のリスト。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (例: output/deck.pptx)"},
+                    "slides": {
+                        "type": "array",
+                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\"}",
+                        "items": {"type": "object"},
+                    },
+                    "title": {"type": "string", "description": "プレゼンテーション全体のタイトル（最初のスライドに使用、省略可）"},
+                },
+                "required": ["path", "slides"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_pptx",
+            "description": "PowerPoint の特定スライドのテキストを置換します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス"},
+                    "slide_number": {"type": "integer", "description": "スライド番号（1始まり）"},
+                    "old_text": {"type": "string", "description": "置換前のテキスト"},
+                    "new_text": {"type": "string", "description": "置換後のテキスト"},
+                },
+                "required": ["path", "slide_number", "old_text", "new_text"],
             },
         },
     },

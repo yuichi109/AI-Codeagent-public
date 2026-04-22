@@ -272,6 +272,7 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 - コマンドが使えるかどうか不明な場合は、**実際に `run_command` で試してから**結果を報告する
 - ツールを呼ばずに「エラーになります」「制限されています」と言ってはいけない
 - 一般的なサンドボックス環境の知識に基づいて推測・断言してはいけない
+- **「〜はできません」「私の能力はテキスト操作に限定されています」と自分の能力を限定して回答してはいけない。** 利用可能なツール一覧を確認し、対応するツールがあれば必ずそれを使う。Word/Excel/PowerPoint の読み書きは `read_docx` / `read_xlsx` / `read_pptx` 等のツールで対応可能。
 
 **このシステムで使用可能なコマンド（代表例）：**
 - `docker`, `docker compose`, `docker ps`, `docker logs` など Docker コマンド全般

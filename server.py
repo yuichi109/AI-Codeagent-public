@@ -2046,14 +2046,24 @@ async def setup_save(req: SetupSaveRequest):
     if proxy_lines:
         lines += ["# プロキシバイパス"] + proxy_lines + [""]
 
-    env_path.write_text("\n".join(lines))
+    env_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # systemd サービスを再起動
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
-        return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+    # サービス再起動
+    if sys.platform == "win32":
+        # Windows: systemctl 非対応のため、プロセスを自己終了して setup.bat に再起動させる
+        import threading
+        def _restart():
+            import time, os
+            time.sleep(1)
+            os._exit(0)
+        threading.Thread(target=_restart, daemon=True).start()
+        return JSONResponse({"status": "ok", "warning": "設定を保存しました。サーバーを再起動しています..."})
+    else:
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+            return JSONResponse({"status": "ok"})
+        except Exception as e:
+            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
 
 
 @app.get("/setup/ansible-creds")

@@ -40,7 +40,7 @@ if not exist ".env" (
     echo [3/4] .env already exists.
 )
 
-:: Start server
+:: Start server (auto-restart on settings save)
 echo [4/4] Starting server on port 8001...
 echo.
 echo   Chat UI : http://localhost:8001
@@ -49,6 +49,12 @@ echo.
 echo   Press Ctrl+C to stop.
 echo ============================================================
 echo.
-venv\Scripts\python.exe -m uvicorn server:app --host 0.0.0.0 --port 8001
 
+:start_server
+venv\Scripts\python.exe -m uvicorn server:app --host 0.0.0.0 --port 8001
+if errorlevel 1 goto end
+echo Restarting server...
+goto start_server
+
+:end
 pause

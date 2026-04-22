@@ -603,7 +603,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "workspace 相対パス (例: output/result.xlsx)"},
-                    "data": {"type": "array", "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）", "items": {"type": "array"}},
+                    "data": {"type": "array", "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）", "items": {"type": "array", "items": {}}},
                     "sheet": {"type": "string", "description": "シート名（デフォルト: Sheet1）"},
                     "headers": {"type": "array", "description": "ヘッダー行（省略可）", "items": {"type": "string"}},
                 },

@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 > nul
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
@@ -7,46 +8,45 @@ echo  AI Code Agent - Windows Setup
 echo ============================================================
 echo.
 
-:: Python チェック
+:: Python check
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python が見つかりません。
-    echo         https://www.python.org/ からインストールしてください。
+    echo [ERROR] Python not found. Install from https://www.python.org/
     pause
     exit /b 1
 )
 
-:: venv 作成
+:: Create venv
 if not exist "venv\Scripts\activate.bat" (
-    echo [1/4] 仮想環境を作成中...
+    echo [1/4] Creating virtual environment...
     python -m venv venv
-    if errorlevel 1 ( echo [ERROR] venv の作成に失敗しました。 & pause & exit /b 1 )
+    if errorlevel 1 ( echo [ERROR] Failed to create venv. & pause & exit /b 1 )
 ) else (
-    echo [1/4] 仮想環境は作成済みです。
+    echo [1/4] Virtual environment already exists.
 )
 
-:: 依存パッケージインストール
-echo [2/4] パッケージをインストール中...
+:: Install packages
+echo [2/4] Installing packages...
 call venv\Scripts\activate.bat
 pip install -r requirements.txt --quiet
-if errorlevel 1 ( echo [ERROR] pip install に失敗しました。 & pause & exit /b 1 )
+if errorlevel 1 ( echo [ERROR] pip install failed. & pause & exit /b 1 )
 
-:: .env 作成
+:: Create .env
 if not exist ".env" (
-    echo [3/4] .env を作成中...
+    echo [3/4] Creating .env...
     copy ".env.example" ".env" >nul
-    echo       .env を作成しました。http://localhost:8001/setup で設定してください。
+    echo       .env created. Configure at http://localhost:8001/setup
 ) else (
-    echo [3/4] .env は作成済みです。
+    echo [3/4] .env already exists.
 )
 
-:: サーバー起動
-echo [4/4] サーバーを起動中... (ポート 8001)
+:: Start server
+echo [4/4] Starting server on port 8001...
 echo.
-echo  チャット UI: http://localhost:8001
-echo  設定画面  : http://localhost:8001/setup
+echo   Chat UI : http://localhost:8001
+echo   Setup   : http://localhost:8001/setup
 echo.
-echo  停止するには Ctrl+C を押してください。
+echo   Press Ctrl+C to stop.
 echo ============================================================
 echo.
 venv\Scripts\python.exe -m uvicorn server:app --host 0.0.0.0 --port 8001

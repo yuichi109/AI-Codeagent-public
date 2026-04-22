@@ -8,7 +8,7 @@ from datetime import datetime
 import httpx
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
@@ -1550,6 +1550,25 @@ async def workspace_protected_update(req: ProtectedUpdateRequest):
 class RawWriteRequest(BaseModel):
     path: str
     content: str
+
+@app.post("/workspace/upload")
+async def workspace_upload(file: UploadFile = FastAPIFile(...)):
+    """ファイルをworkspaceにアップロードして保存する。Office/バイナリファイル対応。"""
+    from tools.file_tools import _resolve_safe_path
+    try:
+        filename = Path(file.filename).name  # パストラバーサル防止
+        target = _resolve_safe_path(filename)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = await file.read()
+        target.write_bytes(content)
+        return JSONResponse({
+            "path": filename,
+            "size": len(content),
+            "error": None,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
 
 @app.post("/workspace/write-raw")
 async def workspace_write_raw(req: RawWriteRequest):

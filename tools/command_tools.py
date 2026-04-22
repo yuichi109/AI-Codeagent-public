@@ -2,8 +2,11 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from config import ALLOWED_WORK_DIR, COMMAND_TIMEOUT_SECONDS
+
+IS_WINDOWS = sys.platform == "win32"
 
 # 危険コマンドのブラックリスト（ホワイトリスト廃止 → ブラックリスト方式に移行）
 # rm -rf / や dd if=/dev/zero 等のシステム破壊コマンドのみ拒否
@@ -11,6 +14,11 @@ BLOCKED_COMMANDS = {
     "mkfs", "fdisk", "parted", "dd",
     "shutdown", "reboot", "halt", "poweroff",
     "init",
+}
+
+# Windows 固有の危険コマンド
+BLOCKED_COMMANDS_WINDOWS = {
+    "format", "diskpart",
 }
 
 LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy", "ansible-playbook", "ansible"}
@@ -61,21 +69,10 @@ def _is_permission_error(stderr: str) -> bool:
 
 def _run_bash_sandboxed(args: list) -> dict:
     """
-    bubblewrap (bwrap) を使ってシェルスクリプトをサンドボックス内で実行する。
-    Claude Code と同じ方式 (Linux/WSL2)。
-
-    セキュリティ境界:
-      - ファイルシステム全体を読み取り専用にマウント
-      - ALLOWED_WORK_DIR のみ書き込み可
-      - ネットワーク遮断 (--unshare-net)
-      - 新しいセッション・PID namespace で隔離
+    bash スクリプトを実行する。
+    Linux/WSL2: bubblewrap サンドボックス経由（ネットワーク遮断・FS 読み取り専用）
+    Windows: サンドボックスなしで bash.exe を直接実行（Git for Windows / WSL bash）
     """
-    if not shutil.which("bwrap"):
-        return {
-            "error": "bubblewrap がインストールされていません。'sudo apt install bubblewrap' を実行してください。",
-            "stdout": "", "stderr": "", "returncode": -1,
-        }
-
     # bash script.sh の形式のみ許可（-c や複数引数は禁止）
     if len(args) != 2 or not args[1].endswith(".sh"):
         return {
@@ -97,23 +94,51 @@ def _run_bash_sandboxed(args: list) -> dict:
             "stdout": "", "stderr": "", "returncode": -1,
         }
 
-    bwrap_cmd = [
-        "bwrap",
-        "--ro-bind", "/", "/",                               # FS 全体を読み取り専用
-        "--dev", "/dev",                                     # デバイスファイル
-        "--proc", "/proc",                                   # プロセス情報
-        "--tmpfs", "/tmp",                                   # 一時領域（書き込み可）
-        "--bind", str(ALLOWED_WORK_DIR), str(ALLOWED_WORK_DIR),  # workspace のみ書き込み可
-        "--chdir", str(ALLOWED_WORK_DIR),                   # 作業ディレクトリを workspace に
-        "--unshare-net",                                     # ネットワーク遮断
-        "--new-session",                                     # 新しいセッション
-        "--die-with-parent",                                 # 親プロセス終了時に子も終了
-        "bash", str(script_path),
-    ]
+    if IS_WINDOWS:
+        # Windows: bash.exe を探して直接実行（サンドボックスなし）
+        bash_candidates = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Windows\System32\bash.exe",  # WSL
+        ]
+        bash_exe = shutil.which("bash")
+        if not bash_exe:
+            for candidate in bash_candidates:
+                if Path(candidate).exists():
+                    bash_exe = candidate
+                    break
+        if not bash_exe:
+            return {
+                "error": "bash.exe が見つかりません。Git for Windows をインストールしてください。",
+                "stdout": "", "stderr": "", "returncode": -1,
+            }
+        run_cmd = [bash_exe, str(script_path)]
+        sandbox_label = "none (Windows)"
+    else:
+        # Linux/WSL2: bubblewrap サンドボックス
+        if not shutil.which("bwrap"):
+            return {
+                "error": "bubblewrap がインストールされていません。'sudo apt install bubblewrap' を実行してください。",
+                "stdout": "", "stderr": "", "returncode": -1,
+            }
+        run_cmd = [
+            "bwrap",
+            "--ro-bind", "/", "/",
+            "--dev", "/dev",
+            "--proc", "/proc",
+            "--tmpfs", "/tmp",
+            "--bind", str(ALLOWED_WORK_DIR), str(ALLOWED_WORK_DIR),
+            "--chdir", str(ALLOWED_WORK_DIR),
+            "--unshare-net",
+            "--new-session",
+            "--die-with-parent",
+            "bash", str(script_path),
+        ]
+        sandbox_label = "bubblewrap"
 
     try:
         result = subprocess.run(
-            bwrap_cmd,
+            run_cmd,
             capture_output=True,
             text=True,
             timeout=COMMAND_TIMEOUT_SECONDS,
@@ -123,12 +148,12 @@ def _run_bash_sandboxed(args: list) -> dict:
             "stderr": result.stderr[:4096],
             "returncode": result.returncode,
             "error": None,
-            "sandbox": "bubblewrap",
+            "sandbox": sandbox_label,
         }
     except subprocess.TimeoutExpired:
         return {"error": f"{COMMAND_TIMEOUT_SECONDS}秒のタイムアウトを超えました", "stdout": "", "stderr": "", "returncode": -1}
     except Exception as e:
-        return {"error": f"サンドボックス実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
+        return {"error": f"スクリプト実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
 
 
 def run_command(command: str, work_dir: str = None, description: str = "", env: dict = None, timeout_minutes: float = None) -> dict:
@@ -175,7 +200,8 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
     if base_cmd == "bash":
         return _run_bash_sandboxed(args)
 
-    if base_cmd in BLOCKED_COMMANDS:
+    all_blocked = BLOCKED_COMMANDS | (BLOCKED_COMMANDS_WINDOWS if IS_WINDOWS else set())
+    if base_cmd in all_blocked:
         return {
             "error": f"'{base_cmd}' はシステム破壊の恐れがあるため実行できません。",
             "stdout": "", "stderr": "", "returncode": -1,

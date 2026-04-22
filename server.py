@@ -2,6 +2,7 @@ import asyncio
 import json
 import shutil
 import subprocess
+import sys
 import requests
 from datetime import datetime
 import httpx
@@ -136,8 +137,8 @@ async def lifespan(app: FastAPI):
             shutil.rmtree(tmp_path, ignore_errors=True)
             print(f"[INFO] 起動時クリーンアップ: {tmp_path} を削除しました")
 
-    # SearXNG を自動起動
-    if SEARXNG_ENABLED:
+    # SearXNG を自動起動（Linux/WSL2 のみ。Windows では Docker 依存のためスキップ）
+    if SEARXNG_ENABLED and sys.platform != "win32":
         compose_file = Path(__file__).parent / "docker-compose.searxng.yml"
         if compose_file.exists():
             result = subprocess.run(

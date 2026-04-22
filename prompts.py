@@ -485,6 +485,22 @@ todo_update([
 - **ポート 8000**: このエージェントサーバー（uvicorn）が使用中。Docker コンテナのホストポートに絶対に割り当てない
 - docker-compose.yml で `"8000:xxxx"` のようなマッピングは禁止。代替ポート（8080, 8001 等）を使うこと
 
+## シェルスクリプトを作らない（重要）
+
+単純なコマンド実行のためだけに `write_file` でシェルスクリプト（.sh）を作成してはいけない。
+`run_command` を直接使えば1ステップで済む。
+
+```
+# ❌ 間違い（無駄にスクリプトを作っている）
+write_file("download.sh", "curl -o app.zip https://example.com/app.zip")
+run_command("bash download.sh")
+
+# ✅ 正しい
+run_command("curl -o app.zip https://example.com/app.zip")
+```
+
+シェルスクリプトを作ってよいのは、**ユーザーが明示的にスクリプトファイルの作成を求めた場合のみ**。
+
 ## run_command でのディレクトリ指定（重要）
 
 `run_command` は内部で `shell=False` を使うため、`cd dir && コマンド` は**動作しない**。

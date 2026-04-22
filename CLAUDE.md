@@ -341,9 +341,10 @@ skills/
 - [x] **エンコーディング全般修正**: `read_text()` / `write_text()` に `encoding='utf-8'` を明示
 - [x] **README.md**: ブランチ構成・Windows/Linux セットアップ手順を明記
 - [ ] **cmd 組み込みコマンド対応**（`dir`/`copy`/`del` 等）: `shell=True` or `cmd /c` 対応（未着手）
-- [ ] **Officeファイルツール**（`tools/office_tools.py`）: Word/Excel/PowerPoint の読み書き・誤字脱字チェック（`for_windows` ブランチ優先・次セッションで実装予定）
-  - `python-docx` / `openpyxl` / `python-pptx` を requirements に追加
-  - 大きな Word ファイルはセクション単位で分割して処理
+- [x] **Officeファイルツール**（`tools/office_tools.py`）: Word/Excel/PowerPoint の読み書き（2026-04-22）
+  - `read_docx` / `write_docx` / `edit_docx` / `read_xlsx` / `write_xlsx` / `edit_xlsx` / `read_pptx` / `write_pptx` / `edit_pptx`
+  - Markdown 風見出し対応（write_docx/write_pptx）
+  - `python-docx` / `openpyxl` / `python-pptx` を requirements に追加、TOOL_REGISTRY・TOOLS に登録済み
 
 ### ドキュメント
 - [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記

@@ -140,12 +140,14 @@ def _run_bash_sandboxed(args: list) -> dict:
         result = subprocess.run(
             run_cmd,
             capture_output=True,
-            text=True,
+            text=False,
             timeout=COMMAND_TIMEOUT_SECONDS,
         )
+        stdout = result.stdout.decode("utf-8", errors="replace")
+        stderr = result.stderr.decode("utf-8", errors="replace")
         return {
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": stdout[:8192],
+            "stderr": stderr[:4096],
             "returncode": result.returncode,
             "error": None,
             "sandbox": sandbox_label,
@@ -239,28 +241,30 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
         result = subprocess.run(
             args,
             capture_output=True,
-            text=True,
+            text=False,
             timeout=effective_timeout,
             cwd=str(resolved_work_dir),
             shell=False,
             env=merged_env,
         )
+        stdout = result.stdout.decode("utf-8", errors="replace")
+        stderr = result.stderr.decode("utf-8", errors="replace")
 
         # 権限エラーで失敗した場合、AIにユーザー確認を促すヒントを付与する
         if (result.returncode != 0
                 and args[0] != "sudo"
-                and _is_permission_error(result.stderr)):
+                and _is_permission_error(stderr)):
             return {
-                "stdout": result.stdout[:8192],
-                "stderr": result.stderr[:4096],
+                "stdout": stdout[:8192],
+                "stderr": stderr[:4096],
                 "returncode": result.returncode,
                 "error": None,
                 "hint": f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。",
             }
 
         return {
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": stdout[:8192],
+            "stderr": stderr[:4096],
             "returncode": result.returncode,
             "error": None,
         }

@@ -79,26 +79,29 @@ def run_powershell(command: str, timeout_seconds: int = None) -> dict:
 
     effective_timeout = timeout_seconds if timeout_seconds is not None else COMMAND_TIMEOUT_SECONDS
 
-    # powershell.exe -Command で実行（-NonInteractive でプロンプト抑制）
+    # UTF-8 出力を強制してから実行（cp932 UnicodeDecodeError 対策）
+    utf8_prefix = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; "
     args = [
         ps_exe,
         "-NonInteractive",
         "-NoProfile",
         "-Command",
-        command,
+        utf8_prefix + command,
     ]
 
     try:
         result = subprocess.run(
             args,
             capture_output=True,
-            text=True,
+            text=False,  # バイト列で受け取り Python 側で UTF-8 デコード
             timeout=effective_timeout,
             shell=False,
         )
+        stdout = result.stdout.decode("utf-8", errors="replace")
+        stderr = result.stderr.decode("utf-8", errors="replace")
         return {
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": stdout[:8192],
+            "stderr": stderr[:4096],
             "returncode": result.returncode,
             "error": None,
         }

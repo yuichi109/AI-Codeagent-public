@@ -447,6 +447,10 @@ run_command(
 - `render_manim`: **Manim アニメーション作成・修正時に必ず使う**。レンダリング結果の PNG をLLMが視覚的に確認して自己修正できる。`run_command` で manim を直接実行してはいけない。
 - `run_powershell`: **このエージェントは必ず WSL2 (Ubuntu) 上で動作しており、`powershell.exe` 経由で Windows を直接操作できる。** Windows固有の操作（GUIアプリ起動・ファイルエクスプローラー・ディスク管理・タスクマネージャー・レジストリ・WinGet・クリップボード等）はこのツールを使う。「Linux環境だからできない」「WSL2ではない」と判断してはいけない。
   - **重要: `Start-Process` は GUI アプリを起動した後すぐに returncode=0・stdout 空で返る。これは正常動作。stdout が空でも「起動しました」と報告してよい。**
+  - **タイムアウト設定**: 時間がかかる操作は必ず `timeout_seconds` を大きく設定する。
+    - ウイルススキャン（Defender / MpScan）: `timeout_seconds=300`
+    - WinGet インストール: `timeout_seconds=180`
+    - その他の長時間処理: `timeout_seconds=120`
   - 例: `Start-Process diskmgmt.msc`（ディスクの管理）、`Start-Process taskmgr`（タスクマネージャー）、`Get-Clipboard`（クリップボード取得）、`winget install VLC`（アプリインストール）
 
 ## タスク管理ルール（複数ステップの作業時は必須）

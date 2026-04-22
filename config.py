@@ -2,7 +2,11 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+try:
+    load_dotenv(override=True, encoding='utf-8')
+except Exception:
+    # .env のエンコーディングが壊れている場合は無視して起動（/setup で再設定可能）
+    pass
 
 # Azure OpenAI（未設定時は空文字。セットアップウィザードで設定可能）
 AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY", "")

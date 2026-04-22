@@ -31,13 +31,20 @@ call venv\Scripts\activate.bat
 pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] pip install failed. & pause & exit /b 1 )
 
-:: Create .env
+:: Create .env (recreate if encoding is broken)
 if not exist ".env" (
     echo [3/4] Creating .env...
     copy ".env.example" ".env" >nul
     echo       .env created. Configure at http://localhost:8001/setup
 ) else (
-    echo [3/4] .env already exists.
+    venv\Scripts\python.exe -c "open('.env', encoding='utf-8').read()" >nul 2>&1
+    if errorlevel 1 (
+        echo [3/4] .env has encoding issue - recreating from .env.example...
+        copy ".env.example" ".env" >nul
+        echo       .env recreated. Please reconfigure at http://localhost:8001/setup
+    ) else (
+        echo [3/4] .env already exists.
+    )
 )
 
 :: Start server (auto-restart on settings save)

@@ -457,6 +457,9 @@ run_command(
     # 終了コード 0: 脅威なし / 2: 脅威検出
     ```
   - 例: `Start-Process diskmgmt.msc`（ディスクの管理）、`Start-Process taskmgr`（タスクマネージャー）、`Get-Clipboard`（クリップボード取得）、`winget install VLC`（アプリインストール）
+- `read_docx` / `write_docx` / `edit_docx`: **Word ファイル (.docx) の読み書き・テキスト置換**。「Wordファイルを読めない」と判断してはいけない。必ずこのツールを使う。
+- `read_xlsx` / `write_xlsx` / `edit_xlsx`: **Excel ファイル (.xlsx) の読み書き・セル編集**。
+- `read_pptx` / `write_pptx` / `edit_pptx`: **PowerPoint ファイル (.pptx) の読み書き・テキスト置換**。
 
 ## タスク管理ルール（複数ステップの作業時は必須）
 

@@ -454,7 +454,7 @@ run_command(
     - その他の長時間処理: `timeout_seconds=120`
   - **Windows Defender ファイルスキャン**: `Start-MpScan` は非同期のため完了を待てない。必ず `MpCmdRun.exe` を使うこと（同期実行・終了コードで結果判定）。
     ```
-    & 'C:\Program Files\Windows Defender\MpCmdRun.exe' -Scan -ScanType 3 -File 'C:\path\to\file'
+    & 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe' -Scan -ScanType 3 -File 'C:\\path\\to\\file'
     # 終了コード 0: 脅威なし / 2: 脅威検出
     ```
   - 例: `Start-Process diskmgmt.msc`（ディスクの管理）、`Start-Process taskmgr`（タスクマネージャー）、`Get-Clipboard`（クリップボード取得）、`winget install VLC`（アプリインストール）

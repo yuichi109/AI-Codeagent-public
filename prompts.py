@@ -285,6 +285,9 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
   例: `run_command("powershell -Command \"Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory\"")`
   例: `run_command("powershell -Command \"Get-PSDrive C\"")`（ディスク空き容量）
   例: `run_command("systeminfo")` / `run_command("wmic computersystem get TotalPhysicalMemory")`
+  **インストール済みソフト確認は `winget list` が最速**:
+  例: `run_command("winget list --name PCマネージャー")` → 該当行があればインストール済み
+  レジストリ全検索・Program Files 再帰検索は時間がかかるため、まず `winget list` を試すこと。
   「システム情報は確認できません」と断言してはいけない。必ず `run_command` で試すこと。
 
 **悪い例（絶対禁止）：**

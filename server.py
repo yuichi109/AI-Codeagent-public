@@ -34,6 +34,7 @@ from tools.workspace_tools import protected_list_read, protected_list_update, pr
 from tools.manim_tools import render_manim
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
+from tools.browser_tools import browser_search
 from tools.office_tools import (
     read_docx, write_docx, edit_docx,
     read_xlsx, write_xlsx, edit_xlsx,
@@ -181,6 +182,7 @@ TOOL_REGISTRY = {
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
+    "browser_search": browser_search,
     "read_docx": read_docx,
     "write_docx": write_docx,
     "edit_docx": edit_docx,
@@ -271,6 +273,21 @@ TOOLS = [
                     "timeout_minutes": {"type": "number", "description": "タイムアウト時間（分）。省略時はデフォルト（通常30秒、apt/docker等は5分）。0で無制限。Ansible・長時間処理は明示的に指定すること（例: 30）。"},
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_search",
+            "description": "システムの Edge/Chrome ブラウザを使って Google を検索します。bot 検出を受けにくく API キー不要。通常の web_search より信頼性が高い場合に使用してください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "検索クエリ"},
+                    "max_results": {"type": "integer", "description": "最大結果数（デフォルト: 8）"},
+                },
+                "required": ["query"],
             },
         },
     },

@@ -1,5 +1,104 @@
 # セットアップ手順
 
+## ブランチ構成
+
+| ブランチ | 対象環境 | 特徴 |
+|---|---|---|
+| `main` | Linux / WSL2 | systemd サービス・bubblewrap サンドボックス・SearXNG 対応 |
+| `for_windows` | Windows ネイティブ | WSL・Docker 不要。`setup.bat` で起動。サンドボックスなし |
+
+---
+
+## Windows ネイティブ版（for_windows ブランチ）
+
+WSL・Docker・管理者権限なしで動作します。
+
+### 動作確認済み環境
+
+| 項目 | バージョン |
+|---|---|
+| OS | Windows 10 / 11 |
+| Python | 3.10 以上（未インストールでも自動導入） |
+| Git | 任意（未インストールでも自動導入） |
+| ブラウザ | Chrome / Edge / Firefox (最新版) |
+
+### インストール手順
+
+**Step 1: リポジトリをクローン**
+
+```powershell
+git clone -b for_windows https://gitlab.com/yuichi.matsuo/AI-Codeagent.git
+cd AI-Codeagent
+```
+
+Git が未インストールの場合は ZIP でダウンロードしても可（GitLab → Code → Download ZIP）。
+
+**Step 2: setup.bat をダブルクリック**
+
+`setup.bat` が以下を自動で行います:
+
+1. Python / Git が未インストールなら **winget** で自動インストール
+2. Python 仮想環境（venv）を作成
+3. `requirements.txt` のパッケージをインストール
+4. `.env` を `.env.example` から生成
+5. サーバーを起動（ポート 8001）
+
+> **winget** は Windows 10 1709 以降 / Windows 11 に標準搭載されています。
+> Python や Git が既にインストール済みの場合はスキップされます。
+
+**Step 3: ブラウザで設定**
+
+```
+http://localhost:8001/setup
+```
+
+Azure OpenAI の API キー・エンドポイント・デプロイ名を入力して保存。
+保存後にサーバーが自動再起動して設定が反映されます。
+
+**Step 4: チャット画面を開く**
+
+```
+http://localhost:8001
+```
+
+### Windows 版の制限事項
+
+| 機能 | 状況 |
+|---|---|
+| bash スクリプトのサンドボックス実行（bubblewrap） | 非対応 |
+| SearXNG（Docker依存） | 非対応 → ddgs / Tavily で代替 |
+| systemd 自動起動 | 非対応 → setup.bat を手動起動 |
+
+### サーバーの停止・再起動
+
+- 停止: setup.bat のウィンドウで `Ctrl+C`
+- 再起動: setup.bat を再度ダブルクリック（venv 再作成はスキップ）
+
+### よくあるエラー（Windows版）
+
+**「Python not found」が表示されてインストールが始まらない**
+
+winget が使えない環境（古いWindows 10）の場合:
+- https://www.python.org/downloads/ から手動インストール
+- インストール時に「Add Python to PATH」にチェック
+- インストール後に setup.bat を再実行
+
+**インストール後に「再実行してください」と表示される**
+
+winget でインストール直後は PATH が反映されないことがあります。
+setup.bat のウィンドウを閉じて再度ダブルクリックしてください。
+
+**ポート 8001 が使用中**
+
+```powershell
+netstat -ano | findstr :8001   # PID を確認
+taskkill /PID <PID> /F         # プロセスを終了
+```
+
+---
+
+## Linux / WSL2 版（main ブランチ）
+
 ## 動作確認済み環境
 
 | 項目 | バージョン |

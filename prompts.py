@@ -280,11 +280,19 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 - `ansible-playbook`, `ansible-galaxy`
 - `ls`, `cat`, `grep`, `find`, `cp`, `mv`, `mkdir` 等の標準 Unix コマンド
 - ブラックリスト（`mkfs`, `fdisk`, `dd`, `shutdown`, `reboot` 等破壊的コマンド）以外はすべて実行可能
+- **Windows 環境では `powershell` / `powershell -Command "..."` も `run_command` で直接実行可能。**
+  システム情報・メモリ・CPU・ディスク・プロセス・レジストリ等は PowerShell コマンドで取得できる。
+  例: `run_command("powershell -Command \"Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory\"")`
+  例: `run_command("powershell -Command \"Get-PSDrive C\"")`（ディスク空き容量）
+  例: `run_command("systeminfo")` / `run_command("wmic computersystem get TotalPhysicalMemory")`
+  「システム情報は確認できません」と断言してはいけない。必ず `run_command` で試すこと。
 
 **悪い例（絶対禁止）：**
+> 「システムのメモリ容量は確認できません」← ツールを呼ばずに断言
 > 「Docker コマンドは使えないため、直接取得できません」← ツールを呼ばずに断言
 
 **良い例（正しい動作）：**
+> `run_command("powershell -Command \"Get-CimInstance Win32_ComputerSystem\"")` を呼び出し → 結果を報告する
 > `run_command("docker ps -a")` を呼び出し → 結果を報告する
 
 ---

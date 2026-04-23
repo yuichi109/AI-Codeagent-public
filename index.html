@@ -2916,6 +2916,7 @@
     const input = document.getElementById('shell-input');
     const command = input.value.trim();
     if (!command) return;
+    input.value = '';
     if (shellAbortController) shellAbortController.abort();
     shellAbortController = new AbortController();
 

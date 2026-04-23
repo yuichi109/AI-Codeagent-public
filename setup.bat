@@ -121,7 +121,7 @@ goto :eof
 :install_python
 if %HAVE_WINGET%==0 goto :eof
 echo [--] Python not found. Installing Python 3.12 via winget...
-winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+winget install -e --id Python.Python.3.12 --source winget --silent --accept-package-agreements --accept-source-agreements
 goto :eof
 
 :find_git
@@ -141,5 +141,5 @@ if %HAVE_WINGET%==0 (
     pause & exit /b 1
 )
 echo [--] Git not found. Installing Git via winget...
-winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements
+winget install -e --id Git.Git --source winget --silent --accept-package-agreements --accept-source-agreements
 goto :eof

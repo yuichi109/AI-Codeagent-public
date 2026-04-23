@@ -19,7 +19,12 @@ def browser_search(query: str, max_results: int = 8) -> str:
             browser = None
             for channel in ("msedge", "chrome"):
                 try:
-                    browser = p.chromium.launch(channel=channel, headless=True)
+                    # headless=False でウィンドウを表示して起動（bot 判定回避）
+                    browser = p.chromium.launch(
+                        channel=channel,
+                        headless=False,
+                        args=["--window-position=-32000,-32000"],  # 画面外に配置
+                    )
                     break
                 except Exception:
                     continue
@@ -29,6 +34,12 @@ def browser_search(query: str, max_results: int = 8) -> str:
             page = browser.new_page(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
             )
+            # webdriver フラグを消して bot 判定を回避
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+                window.chrome = {runtime: {}};
+            """)
             page.set_extra_http_headers({"Accept-Language": "ja,en;q=0.9"})
             page.goto(f"https://www.google.com/search?q={query}&hl=ja&num={max_results}", timeout=20000)
             page.wait_for_load_state("domcontentloaded")

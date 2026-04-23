@@ -348,7 +348,12 @@ skills/
 - [x] **`config.py`**: `load_dotenv(encoding='utf-8')` で Windows エンコーディング問題を解消
 - [x] **エンコーディング全般修正**: `read_text()` / `write_text()` に `encoding='utf-8'` を明示
 - [x] **README.md**: ブランチ構成・Windows/Linux セットアップ手順を明記
-- [ ] **cmd 組み込みコマンド対応**（`dir`/`copy`/`del` 等）: `shell=True` or `cmd /c` 対応（未着手）
+- [x] **cmd 組み込みコマンド対応**（2026-04-23）: `run_command` で `["cmd", "/c", command]` を使用。`&&` はcmdが処理するため手動分割をスキップ
+- [x] **シェルパネルをPowerShell化**（2026-04-23）: `/workspace/exec-shell` エンドポイントをWindows では `powershell -NoProfile -Command` に変更（bash -c から変更）
+- [x] **シェルパネル入力欄クリア**（2026-04-23）: コマンド実行後に入力欄を自動クリア
+- [x] **setup.bat 英語化**（2026-04-23）: 日本語echo文がShift-JISで特殊文字に化けてcmdが誤実行する問題を修正。全文を英語に置換
+- [x] **setup.bat winget --source winget 追加**（2026-04-23）: msstore証明書エラー回避のため `--source winget` を明示
+- [x] **setup.bat CRLF化**（2026-04-23）: LF改行のままだとWindowsのcmdがラベルを認識できない問題を修正。`.gitattributes` に `*.bat eol=crlf` を追加
 - [x] **Officeファイルツール**（`tools/office_tools.py`）: Word/Excel/PowerPoint の読み書き（2026-04-22）
   - `read_docx` / `write_docx` / `edit_docx` / `read_xlsx` / `write_xlsx` / `edit_xlsx` / `read_pptx` / `write_pptx` / `edit_pptx`
   - Markdown 風見出し対応（write_docx/write_pptx）
@@ -356,6 +361,12 @@ skills/
 
 ### Windows 版追加予定
 - [ ] **PDF 読み取りツール `read_pdf`**（★★）（#38）: `pdfplumber` を使用。`requirements.txt` + `tools/office_tools.py` + `server.py` 登録
+
+### メッセージングアプリ連携（検討中）
+- [ ] **LINE Bot連携**（★）: スマホのLINEからエージェントを遠隔操作
+  - LINE Messaging API（webhook）→ `server.py` に転送 → 返答をLINEに送信
+  - `/setup` 画面にLINE Bot設定セクション追加（Channel Access Token / Channel Secret / 許可ユーザーID）
+  - 接続するPCは1台固定（webhook URLは1つのみ設定可能）
 
 ### ドキュメント
 - [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記

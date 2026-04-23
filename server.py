@@ -280,7 +280,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "browser_search",
-            "description": "システムの Edge/Chrome ブラウザを使って Google を検索します。bot 検出を受けにくく API キー不要。通常の web_search より信頼性が高い場合に使用してください。",
+            "description": "システムの Edge/Chrome ブラウザを起動して Google を検索します。ユーザーが「ブラウザで調べて」と明示した場合のみ使用。web_search と同時に呼ばないこと（ブラウザ起動に数秒かかるため単独で呼ぶ）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -773,6 +773,8 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
         tm = arguments.get("timeout_minutes") or 0
         tool_timeout = int(ts) + int(tm) * 60
         timeout = min(tool_timeout, 300) if tool_timeout > 0 else 60
+    elif name == "browser_search":
+        timeout = 40  # ブラウザ起動 + 検索に時間がかかる
     else:
         timeout = 20
     try:

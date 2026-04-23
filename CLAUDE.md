@@ -332,6 +332,14 @@ skills/
 - [x] **`setup.bat`**: ダブルクリック一発で venv 作成→パッケージインストール→サーバー起動
   - 設定保存後に自動再起動ループ実装
   - `.env` エンコーディング破損を自動検出して `.env.example` から再作成
+  - **Python / Git 自動インストール**（2026-04-23）: winget で自動インストール。PATH でなく既知パスを直接検索して無限ループを解消（`find_python` / `find_git` サブルーチン）
+- [x] **`docs/setup.md`**（2026-04-23）: Windows ネイティブ版セットアップ手順を追加（ブランチ構成・Step 1〜4・制限事項・よくあるエラー）
+- [x] **`prompts.py` Windows 対応強化**（2026-04-23）:
+  - `run_command` で PowerShell / systeminfo / wmic 実行可能であることを明記
+  - インストール済みソフト確認は `winget list` が最速と明記
+  - `SyntaxWarning` 修正（`\Program Files` の `\P` を `\\P` に修正）
+- [x] **`server.py` タイムアウト修正**（2026-04-23）: `run_command` / `run_powershell` がツール側の `timeout_seconds` を尊重するよう修正（上限300秒）
+- [x] **`/boost` スキル**（2026-04-23）: PC Manager ブースト相当。一時ファイル削除・ごみ箱クリア・DNS キャッシュクリア・メモリ解放を順次実行して結果を報告
 - [x] **`tools/command_tools.py`**: Windows 対応
   - `IS_WINDOWS` フラグで Linux/Windows を自動判定
   - bash 実行: Windows では `bash.exe`（Git for Windows）でサンドボックスなし実行
@@ -345,6 +353,9 @@ skills/
   - `read_docx` / `write_docx` / `edit_docx` / `read_xlsx` / `write_xlsx` / `edit_xlsx` / `read_pptx` / `write_pptx` / `edit_pptx`
   - Markdown 風見出し対応（write_docx/write_pptx）
   - `python-docx` / `openpyxl` / `python-pptx` を requirements に追加、TOOL_REGISTRY・TOOLS に登録済み
+
+### Windows 版追加予定
+- [ ] **PDF 読み取りツール `read_pdf`**（★★）（#38）: `pdfplumber` を使用。`requirements.txt` + `tools/office_tools.py` + `server.py` 登録
 
 ### ドキュメント
 - [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記

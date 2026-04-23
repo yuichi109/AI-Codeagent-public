@@ -1704,7 +1704,7 @@ async def workspace_exec_shell(req: ShellExecRequest):
     async def stream():
         import sys
         if sys.platform == "win32":
-            shell_args = ["cmd", "/c", req.command]
+            shell_args = ["powershell", "-NoProfile", "-Command", req.command]
         else:
             shell_args = ["bash", "-c", req.command]
         proc = await asyncio.create_subprocess_exec(

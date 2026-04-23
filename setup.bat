@@ -8,95 +8,56 @@ echo  AI Code Agent - Windows Setup
 echo ============================================================
 echo.
 
-:: ─── winget チェック ──────────────────────────────────────
-set HAVE_WINGET=0
+set "PY_EXE="
+set "HAVE_WINGET=0"
+
 winget --version >nul 2>&1
-if not errorlevel 1 set HAVE_WINGET=1
+if not errorlevel 1 set "HAVE_WINGET=1"
 
-:: ─── Python チェック / 自動インストール ──────────────────
-python --version >nul 2>&1
-if errorlevel 1 (
-    :: py ランチャーも試す
-    py --version >nul 2>&1
-    if not errorlevel 1 (
-        doskey python=py $*
-        set "PYTHON_CMD=py"
-        goto python_ok
-    )
-    echo [--] Python が見つかりません。
-    if %HAVE_WINGET%==1 (
-        echo      winget で Python 3.12 をインストール中...
-        winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-        if errorlevel 1 (
-            echo [ERROR] winget インストール失敗。手動でインストールしてください:
-            echo         https://www.python.org/downloads/
-            echo         ※ "Add Python to PATH" にチェックを入れてください。
-            pause & exit /b 1
-        )
-        :: 既知のインストール先を PATH に追加してリトライ
-        set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312"
-        set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312\Scripts"
-        set "PATH=%PATH%;C:\Program Files\Python312"
-        set "PATH=%PATH%;C:\Program Files\Python312\Scripts"
-        python --version >nul 2>&1
-        if errorlevel 1 (
-            echo [INFO] インストール完了。このウィンドウを閉じて setup.bat を再実行してください。
-            pause & exit /b 0
-        )
-    ) else (
-        echo [ERROR] winget が使えません。Python を手動でインストールしてください:
-        echo         https://www.python.org/downloads/
-        echo         ※ "Add Python to PATH" にチェックを入れてください。
-        pause & exit /b 1
-    )
+:: ─── Python 検索 / インストール ──────────────────────────────
+call :find_python
+if not defined PY_EXE (
+    call :install_python
+    call :find_python
 )
-:python_ok
-for /f "tokens=*" %%v in ('python --version 2^>^&1') do echo [OK] %%v
+if not defined PY_EXE (
+    echo [ERROR] Python が見つかりません。手動でインストールしてください:
+    echo         https://www.python.org/downloads/
+    echo         インストール時に "Add Python to PATH" にチェックを入れてください。
+    pause & exit /b 1
+)
+for /f "tokens=*" %%v in ('"%PY_EXE%" --version 2^>^&1') do echo [OK] %%v
 
-:: ─── Git チェック / 自動インストール ─────────────────────
-git --version >nul 2>&1
-if errorlevel 1 (
-    echo [--] Git が見つかりません。
-    if %HAVE_WINGET%==1 (
-        echo      winget で Git をインストール中...
-        winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements
-        if errorlevel 1 (
-            echo [ERROR] winget インストール失敗。手動でインストールしてください:
-            echo         https://git-scm.com/download/win
-            pause & exit /b 1
-        )
-        set "PATH=%PATH%;C:\Program Files\Git\cmd;C:\Program Files\Git\bin"
-        git --version >nul 2>&1
-        if errorlevel 1 (
-            echo [INFO] インストール完了。このウィンドウを閉じて setup.bat を再実行してください。
-            pause & exit /b 0
-        )
-    ) else (
-        echo [ERROR] winget が使えません。Git を手動でインストールしてください:
-        echo         https://git-scm.com/download/win
-        pause & exit /b 1
+:: ─── Git 検索 / インストール ─────────────────────────────────
+call :find_git
+if not defined GIT_FOUND (
+    call :install_git
+    call :find_git
+    if not defined GIT_FOUND (
+        echo [INFO] Git のインストール完了。このウィンドウを閉じて setup.bat を再実行してください。
+        pause & exit /b 0
     )
 )
 for /f "tokens=*" %%v in ('git --version 2^>^&1') do echo [OK] %%v
 
 echo.
 
-:: ─── venv 作成 ────────────────────────────────────────────
+:: ─── venv 作成 ────────────────────────────────────────────────
 if not exist "venv\Scripts\activate.bat" (
     echo [1/4] Creating virtual environment...
-    python -m venv venv
+    "%PY_EXE%" -m venv venv
     if errorlevel 1 ( echo [ERROR] venv の作成に失敗しました。 & pause & exit /b 1 )
 ) else (
     echo [1/4] Virtual environment already exists.
 )
 
-:: ─── パッケージインストール ───────────────────────────────
+:: ─── パッケージインストール ───────────────────────────────────
 echo [2/4] Installing packages...
 call venv\Scripts\activate.bat
 pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] pip install に失敗しました。 & pause & exit /b 1 )
 
-:: ─── .env 作成 ────────────────────────────────────────────
+:: ─── .env 作成 ────────────────────────────────────────────────
 if not exist ".env" (
     echo [3/4] Creating .env...
     copy ".env.example" ".env" >nul
@@ -112,7 +73,7 @@ if not exist ".env" (
     )
 )
 
-:: ─── サーバー起動（設定保存後に自動再起動）────────────────
+:: ─── サーバー起動（設定保存後に自動再起動）────────────────────
 echo [4/4] Starting server on port 8001...
 echo.
 echo   Chat UI : http://localhost:8001
@@ -130,3 +91,55 @@ goto start_server
 
 :end
 pause
+goto :eof
+
+:: =============================================================
+:: サブルーチン
+:: =============================================================
+
+:find_python
+:: 1. PATH 上の python / py
+python --version >nul 2>&1
+if not errorlevel 1 ( set "PY_EXE=python" & goto :eof )
+py --version >nul 2>&1
+if not errorlevel 1 ( set "PY_EXE=py" & goto :eof )
+:: 2. 既知のインストール先を直接確認（バージョン 313〜310）
+for %%v in (313 312 311 310) do (
+    if exist "%LOCALAPPDATA%\Programs\Python\Python%%v\python.exe" (
+        set "PY_EXE=%LOCALAPPDATA%\Programs\Python\Python%%v\python.exe"
+        set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python%%v;%LOCALAPPDATA%\Programs\Python\Python%%v\Scripts"
+        goto :eof
+    )
+    if exist "C:\Program Files\Python%%v\python.exe" (
+        set "PY_EXE=C:\Program Files\Python%%v\python.exe"
+        set "PATH=%PATH%;C:\Program Files\Python%%v;C:\Program Files\Python%%v\Scripts"
+        goto :eof
+    )
+)
+goto :eof
+
+:install_python
+if %HAVE_WINGET%==0 goto :eof
+echo [--] Python が見つかりません。winget で Python 3.12 をインストール中...
+winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+goto :eof
+
+:find_git
+set "GIT_FOUND="
+git --version >nul 2>&1
+if not errorlevel 1 ( set "GIT_FOUND=1" & goto :eof )
+if exist "C:\Program Files\Git\cmd\git.exe" (
+    set "PATH=%PATH%;C:\Program Files\Git\cmd;C:\Program Files\Git\bin"
+    set "GIT_FOUND=1"
+)
+goto :eof
+
+:install_git
+if %HAVE_WINGET%==0 (
+    echo [ERROR] Git が見つかりません。手動でインストールしてください:
+    echo         https://git-scm.com/download/win
+    pause & exit /b 1
+)
+echo [--] Git が見つかりません。winget で Git をインストール中...
+winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements
+goto :eof

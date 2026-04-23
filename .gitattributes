@@ -12,3 +12,4 @@
 *.env text eol=lf
 *.example text eol=lf
 *.service text eol=lf
+*.bat text eol=crlf

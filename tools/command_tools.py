@@ -159,8 +159,8 @@ def _run_bash_sandboxed(args: list) -> dict:
 
 
 def run_command(command: str, work_dir: str = None, description: str = "", env: dict = None, timeout_minutes: float = None) -> dict:
-    # shell=False では && が使えないため、自動分割して順次実行する
-    if '&&' in command:
+    # Windows は shell=True のため && はシェルが処理する。Linux のみ手動分割
+    if not IS_WINDOWS and '&&' in command:
         sub_commands = _split_shell_chain(command)
         if len(sub_commands) > 1:
             combined_stdout = []
@@ -239,7 +239,7 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
 
     try:
         result = subprocess.run(
-            args,
+            ["cmd", "/c", command] if IS_WINDOWS else args,
             capture_output=True,
             text=False,
             timeout=effective_timeout,

@@ -1702,8 +1702,13 @@ async def workspace_exec_shell(req: ShellExecRequest):
     else:
         exec_cwd = str(ALLOWED_WORK_DIR)
     async def stream():
+        import sys
+        if sys.platform == "win32":
+            shell_args = ["cmd", "/c", req.command]
+        else:
+            shell_args = ["bash", "-c", req.command]
         proc = await asyncio.create_subprocess_exec(
-            "bash", "-c", req.command,
+            *shell_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=exec_cwd,

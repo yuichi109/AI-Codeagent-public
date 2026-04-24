@@ -54,6 +54,7 @@ if not exist "venv\Scripts\activate.bat" (
 :: --- Install packages ---
 echo [2/4] Installing packages...
 call venv\Scripts\activate.bat
+python.exe -m pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] pip install failed. & pause & exit /b 1 )
 

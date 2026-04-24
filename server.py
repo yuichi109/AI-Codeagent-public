@@ -783,7 +783,7 @@ class ChatRequest(BaseModel):
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
 MAX_HISTORY_MESSAGES = 20
 # ローリングサマリーの設定
-SUMMARY_TRIGGER = 16   # 履歴がこの件数を超えたら圧縮
+SUMMARY_TRIGGER = 25   # 履歴がこの件数を超えたら圧縮
 SUMMARY_KEEP_RECENT = 4  # 圧縮後に詳細を残す直近のメッセージ数
 
 

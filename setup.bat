@@ -3,6 +3,9 @@ chcp 65001 > nul
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
+:: Fix git CRLF conflict (core.autocrlf=true causes setup.bat to always appear modified)
+git config core.autocrlf false >nul 2>&1
+
 echo ============================================================
 echo  AI Code Agent - Windows Setup
 echo ============================================================

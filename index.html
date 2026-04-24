@@ -2418,7 +2418,7 @@
     if (filesToSend.length > 0) {
       const uploadedBlocks = filesToSend
         .filter(f => f.isUploaded)
-        .map(f => `アップロード済みファイル「${f.name}」をworkspaceに保存しました（パス: ${f.uploadedPath}）。read_docx / read_xlsx / read_pptx 等の適切なツールで読み込んで処理してください。`)
+        .map(f => `アップロード済みファイル「${f.name}」をworkspaceに保存しました（パス: ${f.uploadedPath}）。read_pdf / read_docx / read_xlsx / read_pptx 等の適切なツールで読み込んで処理してください。`)
         .join('\n');
       const textBlocks = filesToSend
         .filter(f => !f.isUploaded)

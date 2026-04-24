@@ -325,6 +325,55 @@ skills/
 - [ ] **Ansibleプレイブック**（`setup.yml`）: 未着手（setup.sh で代替中）
 - [ ] **Docker化オプション**（WSL2なし環境向け）: bubblewrapをオプション化し `SANDBOX=none` で無効化可能に
 
+### Windows ネイティブ版（#35）`for_windows` ブランチ
+- [x] **ブランチ構成**（2026-04-22）: `main`=Linux/WSL2、`for_windows`=Windows ネイティブ
+  - `git clone -b for_windows` で WSL・Docker 不要の Windows 版を取得可能
+  - ポート 8001 で WSL 版（8000）と並列稼働可能
+- [x] **`setup.bat`**: ダブルクリック一発で venv 作成→パッケージインストール→サーバー起動
+  - 設定保存後に自動再起動ループ実装
+  - `.env` エンコーディング破損を自動検出して `.env.example` から再作成
+  - **Python / Git 自動インストール**（2026-04-23）: winget で自動インストール。PATH でなく既知パスを直接検索して無限ループを解消（`find_python` / `find_git` サブルーチン）
+- [x] **`docs/setup.md`**（2026-04-23）: Windows ネイティブ版セットアップ手順を追加（ブランチ構成・Step 1〜4・制限事項・よくあるエラー）
+- [x] **`prompts.py` Windows 対応強化**（2026-04-23）:
+  - `run_command` で PowerShell / systeminfo / wmic 実行可能であることを明記
+  - インストール済みソフト確認は `winget list` が最速と明記
+  - `SyntaxWarning` 修正（`\Program Files` の `\P` を `\\P` に修正）
+- [x] **`server.py` タイムアウト修正**（2026-04-23）: `run_command` / `run_powershell` がツール側の `timeout_seconds` を尊重するよう修正（上限300秒）
+- [x] **`/boost` スキル**（2026-04-23）: PC Manager ブースト相当。一時ファイル削除・ごみ箱クリア・DNS キャッシュクリア・メモリ解放を順次実行して結果を報告
+- [x] **`tools/command_tools.py`**: Windows 対応
+  - `IS_WINDOWS` フラグで Linux/Windows を自動判定
+  - bash 実行: Windows では `bash.exe`（Git for Windows）でサンドボックスなし実行
+  - Windows 固有ブラックリスト追加（`format` / `diskpart`）
+- [x] **`server.py`**: SearXNG 自動起動を Linux/WSL2 のみに限定
+- [x] **`config.py`**: `load_dotenv(encoding='utf-8')` で Windows エンコーディング問題を解消
+- [x] **エンコーディング全般修正**: `read_text()` / `write_text()` に `encoding='utf-8'` を明示
+- [x] **README.md**: ブランチ構成・Windows/Linux セットアップ手順を明記
+- [x] **cmd 組み込みコマンド対応**（2026-04-23）: `run_command` で `["cmd", "/c", command]` を使用。`&&` はcmdが処理するため手動分割をスキップ
+- [x] **シェルパネルをPowerShell化**（2026-04-23）: `/workspace/exec-shell` エンドポイントをWindows では `powershell -NoProfile -Command` に変更（bash -c から変更）
+- [x] **シェルパネル入力欄クリア**（2026-04-23）: コマンド実行後に入力欄を自動クリア
+- [x] **setup.bat 英語化**（2026-04-23）: 日本語echo文がShift-JISで特殊文字に化けてcmdが誤実行する問題を修正。全文を英語に置換
+- [x] **setup.bat winget --source winget 追加**（2026-04-23）: msstore証明書エラー回避のため `--source winget` を明示
+- [x] **setup.bat CRLF化**（2026-04-23）: LF改行のままだとWindowsのcmdがラベルを認識できない問題を修正。`.gitattributes` に `*.bat eol=crlf` を追加
+- [x] **公開用ミラーリポジトリ作成**（2026-04-24）: `AI-Codeagent-public`（public）を GitLab API で作成。private → public への push ミラーを自動設定。全ブランチ同期
+- [x] **`/compact` バグ修正**（2026-04-24）: `localStorage.getItem('chatHistory')` のキー名ズレを修正。`history` グローバル変数を直接参照・`saveHistory()` で保存するよう変更（main・for_windows 両ブランチ）
+- [x] **自動圧縮トリガー変更**（2026-04-24）: `SUMMARY_TRIGGER` を 16 → 25 に変更（ツール呼び出しが多いセッションで早期圧縮されていた問題を緩和）（main・for_windows 両ブランチ）
+- [x] **ZIPからGit管理への切り替え手順追加**（2026-04-24）: `docs/setup.md` に手順を追記。`git checkout -b for_windows origin/for_windows` を使う方式
+- [x] **setup.bat CRLF問題修正**（2026-04-24）: `core.autocrlf=true`（Windows Git デフォルト）と `.gitattributes eol=crlf` の競合で `git pull` が毎回止まる問題を修正。setup.bat 起動時に `git config core.autocrlf false` を自動実行
+- [x] **pip バージョン通知抑制**（2026-04-24）: setup.bat に `PIP_DISABLE_PIP_VERSION_CHECK=1` を設定
+- [x] **Officeファイルツール**（`tools/office_tools.py`）: Word/Excel/PowerPoint の読み書き（2026-04-22）
+  - `read_docx` / `write_docx` / `edit_docx` / `read_xlsx` / `write_xlsx` / `edit_xlsx` / `read_pptx` / `write_pptx` / `edit_pptx`
+  - Markdown 風見出し対応（write_docx/write_pptx）
+  - `python-docx` / `openpyxl` / `python-pptx` を requirements に追加、TOOL_REGISTRY・TOOLS に登録済み
+
+### Windows 版追加予定
+- [ ] **PDF 読み取りツール `read_pdf`**（★★）（#38）: `pdfplumber` を使用。`requirements.txt` + `tools/office_tools.py` + `server.py` 登録
+
+### メッセージングアプリ連携（検討中）
+- [ ] **LINE Bot連携**（★）: スマホのLINEからエージェントを遠隔操作
+  - LINE Messaging API（webhook）→ `server.py` に転送 → 返答をLINEに送信
+  - `/setup` 画面にLINE Bot設定セクション追加（Channel Access Token / Channel Secret / 許可ユーザーID）
+  - 接続するPCは1台固定（webhook URLは1つのみ設定可能）
+
 ### ドキュメント
 - [ ] `docs/setup.md` の移行チェックリストに bubblewrap を追記
 - [ ] `docs/design.md` を現在の実装に合わせて更新

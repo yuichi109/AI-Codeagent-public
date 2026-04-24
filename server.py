@@ -31,6 +31,7 @@ from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup
 from tools.manim_tools import render_manim
+from tools.pdf_tools import read_pdf
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
 from pydantic import BaseModel
@@ -172,6 +173,7 @@ TOOL_REGISTRY = {
     "protected_list_replace": protected_list_replace,
     "workspace_cleanup_preview": workspace_cleanup_preview,
     "render_manim": render_manim,
+    "read_pdf": read_pdf,
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
@@ -466,6 +468,22 @@ TOOLS = [
                     "quality": {"type": "string", "enum": ["l", "m", "h"], "description": "画質: l=低/高速(デフォルト), m=中, h=高"},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pdf",
+            "description": "PDF ファイルのテキストを抽出します。仕様書・マニュアル・レポートなど PDF を読み取るときに使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.pdf)"},
+                    "pages": {"type": "string", "description": "抽出するページ範囲 (例: \"1\", \"1-3\", \"2,4,6\")。省略時は全ページ"},
+                    "extract_tables": {"type": "boolean", "description": "テーブルを Markdown 形式で抽出するか (デフォルト: false)"},
+                },
+                "required": ["path"],
             },
         },
     },

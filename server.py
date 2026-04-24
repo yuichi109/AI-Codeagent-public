@@ -858,7 +858,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     is_local = _provider_config["type"] not in ("azure", "foundry", "gemini")
     tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
-    max_iterations = 15
+    max_iterations = 30
     iteration = 0
     while iteration < max_iterations:
         iteration += 1

@@ -93,8 +93,12 @@ git checkout -b for_windows origin/for_windows
 **以降の更新方法：**
 
 ```powershell
-git pull
+git fetch origin
+git reset --hard origin/for_windows
 ```
+
+> ℹ️ `setup.bat` の CRLF 問題により `git pull` が止まることがあるため、上記コマンドを使ってください。
+> 更新後は `setup.bat` を再実行してパッケージを最新化してください。
 
 ### よくあるエラー（Windows版）
 

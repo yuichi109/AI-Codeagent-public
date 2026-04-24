@@ -74,6 +74,30 @@ http://localhost:8001
 - 停止: setup.bat のウィンドウで `Ctrl+C`
 - 再起動: setup.bat を再度ダブルクリック（venv 再作成はスキップ）
 
+### ZIPで入れた場合のGit管理への切り替え
+
+ZIP でダウンロードした場合、`git pull` で更新できません。以下の手順で Git 管理に切り替えると以降は `git pull` 一発で更新できます。
+
+**PowerShell でフォルダ内に移動して実行：**
+
+```powershell
+git init
+git remote add origin https://gitlab.com/yuichi.matsuo/AI-Codeagent-public.git
+git fetch origin
+git branch -m master for_windows
+git branch --set-upstream-to=origin/for_windows for_windows
+git reset --hard origin/for_windows
+```
+
+> ⚠️ `git reset --hard` を実行すると `.env` 以外のファイルがリポジトリの内容で上書きされます。
+> `.env` は Git 管理外のため上書きされません。
+
+**以降の更新方法：**
+
+```powershell
+git pull
+```
+
 ### よくあるエラー（Windows版）
 
 **「Python not found」が表示されてインストールが始まらない**

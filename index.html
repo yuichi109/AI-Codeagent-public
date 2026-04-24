@@ -115,6 +115,8 @@
   .file-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-chip-del { position: absolute; top: 2px; right: 4px; background: transparent; border: none; color: #6c7086; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
   .file-chip-del:hover { color: #f38ba8; }
+  .file-chip.uploaded { border-color: #a6e3a1; }
+  body.drag-over::after { content: 'ファイルをドロップして添付'; position: fixed; inset: 0; background: rgba(30,30,46,0.85); color: #cba6f7; font-size: 24px; display: flex; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; }
   #codeblock-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: monospace; font-weight: bold; line-height: 1; }
   #codeblock-btn:hover, #attach-btn:hover { color: #cdd6f4; background: #45475a; }
   /* ---- プロバイダー設定 ---- */
@@ -972,14 +974,38 @@
     return (ext in map) ? map[ext] : ext;
   }
 
-  async function handleFileSelect(event) {
-    for (const file of event.target.files) {
+  const OFFICE_EXTS = new Set(['docx','xlsx','xls','pptx','ppt','doc','pdf','zip','tar','gz','exe','msi','dmg']);
+
+  function isOfficeFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    return OFFICE_EXTS.has(ext) || (!file.type.startsWith('image/') && !file.type.startsWith('text/') && file.type !== 'application/json');
+  }
+
+  async function uploadToWorkspace(file) {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/workspace/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data.path;
+  }
+
+  async function handleFiles(files) {
+    for (const file of files) {
       if (file.type.startsWith('image/')) {
         const img = await fileToBase64(file);
         pendingImages.push(img);
         addImagePreview(img);
+      } else if (isOfficeFile(file)) {
+        try {
+          const path = await uploadToWorkspace(file);
+          const entry = { name: file.name, uploadedPath: path, isUploaded: true };
+          pendingFiles.push(entry);
+          addFileChip(entry);
+        } catch(e) {
+          alert(`アップロード失敗: ${e.message}`);
+        }
       } else {
-        // テキストファイルとして読み込む
         const content = await file.text();
         const lang = getLang(file.name);
         const entry = { name: file.name, content, lang };
@@ -987,16 +1013,20 @@
         addFileChip(entry);
       }
     }
+  }
+
+  async function handleFileSelect(event) {
+    await handleFiles(Array.from(event.target.files));
     event.target.value = '';
   }
 
   function addFileChip(entry) {
     const area = document.getElementById('image-preview-area');
     const wrap = document.createElement('div');
-    wrap.className = 'file-chip';
+    wrap.className = 'file-chip' + (entry.isUploaded ? ' uploaded' : '');
     const icon = document.createElement('span');
     icon.className = 'file-chip-icon';
-    icon.textContent = '📄';
+    icon.textContent = entry.isUploaded ? '📎' : '📄';
     const name = document.createElement('span');
     name.className = 'file-chip-name';
     name.textContent = entry.name;
@@ -1083,6 +1113,17 @@
     wrap.appendChild(del);
     area.appendChild(wrap);
   }
+
+  // ---- ドラッグアンドドロップでファイル添付 ----
+  window.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); document.body.classList.add('drag-over'); }, true);
+  window.addEventListener('dragleave', e => { e.stopPropagation(); if (e.relatedTarget === null) document.body.classList.remove('drag-over'); }, true);
+  window.addEventListener('drop', async e => {
+    e.preventDefault();
+    e.stopPropagation();
+    document.body.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) await handleFiles(files);
+  }, true);
 
   // Ctrl+V でクリップボードから画像をペースト
   document.addEventListener('paste', async e => {
@@ -2367,17 +2408,28 @@
     pendingFiles  = [];
     document.getElementById('image-preview-area').innerHTML = '';
 
-    // テキストファイルの内容をメッセージに追記（コードブロック形式）
+    // ファイルの内容をメッセージに追記
     let messageText = text;
     if (filesToSend.length > 0) {
-      const fileBlocks = filesToSend.map(f => {
-        const hint = f.lang ? f.lang : '';
-        return `\`\`\`${hint} ${f.name}\n${f.content}\n\`\`\``;
-      }).join('\n\n');
-      const fileNote = filesToSend.length === 1
-        ? `添付ファイル「${filesToSend[0].name}」の内容（変更せずそのままworkspaceに書き込む場合はファイル名をそのまま使用）:`
-        : `添付ファイル（${filesToSend.length}件）:`;
-      messageText = (messageText ? messageText + '\n\n' : '') + fileNote + '\n\n' + fileBlocks;
+      const uploadedBlocks = filesToSend
+        .filter(f => f.isUploaded)
+        .map(f => `アップロード済みファイル「${f.name}」をworkspaceに保存しました（パス: ${f.uploadedPath}）。read_pdf / read_docx / read_xlsx / read_pptx 等の適切なツールで読み込んで処理してください。`)
+        .join('\n');
+      const textBlocks = filesToSend
+        .filter(f => !f.isUploaded)
+        .map(f => {
+          const hint = f.lang ? f.lang : '';
+          return `\`\`\`${hint} ${f.name}\n${f.content}\n\`\`\``;
+        }).join('\n\n');
+      const parts = [];
+      if (uploadedBlocks) parts.push(uploadedBlocks);
+      if (textBlocks) {
+        const note = filesToSend.filter(f => !f.isUploaded).length === 1
+          ? `添付ファイル「${filesToSend.filter(f => !f.isUploaded)[0].name}」の内容:`
+          : `添付ファイル（${filesToSend.filter(f => !f.isUploaded).length}件）:`;
+        parts.push(note + '\n\n' + textBlocks);
+      }
+      messageText = (messageText ? messageText + '\n\n' : '') + parts.join('\n\n');
     }
 
     // 新しいターンを開始

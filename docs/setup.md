@@ -90,15 +90,20 @@ git checkout -b for_windows origin/for_windows
 > ⚠️ `git checkout` を実行すると `.env` 以外のファイルがリポジトリの内容で上書きされます。
 > `.env` は Git 管理外のため上書きされません。
 
-**以降の更新方法：**
+**初回のみ（setup.bat を取得して実行）：**
 
 ```powershell
 git fetch origin
 git reset --hard origin/for_windows
+setup.bat
 ```
 
-> ℹ️ `setup.bat` の CRLF 問題により `git pull` が止まることがあるため、上記コマンドを使ってください。
-> 更新後は `setup.bat` を再実行してパッケージを最新化してください。
+**以降の更新方法：**
+
+```powershell
+git pull
+setup.bat
+```
 
 ### よくあるエラー（Windows版）
 

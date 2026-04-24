@@ -366,7 +366,7 @@ skills/
   - `python-docx` / `openpyxl` / `python-pptx` を requirements に追加、TOOL_REGISTRY・TOOLS に登録済み
 
 ### Windows 版追加予定
-- [ ] **PDF 読み取りツール `read_pdf`**（★★）（#38）: `pdfplumber` を使用。`requirements.txt` + `tools/office_tools.py` + `server.py` 登録
+- [x] **PDF 読み取りツール `read_pdf`**（★★）（#38）: `pdfplumber` を使用。`tools/pdf_tools.py` + `requirements.txt` + `server.py` 登録。main・for_windows 両ブランチに反映済み（2026-04-24）
 
 ### メッセージングアプリ連携（検討中）
 - [ ] **LINE Bot連携**（★）: スマホのLINEからエージェントを遠隔操作

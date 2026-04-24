@@ -758,7 +758,6 @@
   }
 
   async function _cmdCompact() {
-    const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
     if (!history.length) { _showCmdFeedback('圧縮する履歴がありません'); return; }
     _showCmdFeedback('履歴を圧縮中...');
     try {
@@ -769,8 +768,10 @@
       });
       const data = await res.json();
       if (data.compressed) {
-        localStorage.setItem('chatHistory', JSON.stringify(data.messages));
-        _showCmdFeedback(`圧縮完了: ${history.length} → ${data.messages.length} メッセージ`);
+        const before = history.length;
+        history = data.messages;
+        saveHistory();
+        _showCmdFeedback(`圧縮完了: ${before} → ${history.length} メッセージ`);
       } else {
         _showCmdFeedback('圧縮不要（履歴が少ない）');
       }

@@ -354,6 +354,12 @@ skills/
 - [x] **setup.bat 英語化**（2026-04-23）: 日本語echo文がShift-JISで特殊文字に化けてcmdが誤実行する問題を修正。全文を英語に置換
 - [x] **setup.bat winget --source winget 追加**（2026-04-23）: msstore証明書エラー回避のため `--source winget` を明示
 - [x] **setup.bat CRLF化**（2026-04-23）: LF改行のままだとWindowsのcmdがラベルを認識できない問題を修正。`.gitattributes` に `*.bat eol=crlf` を追加
+- [x] **公開用ミラーリポジトリ作成**（2026-04-24）: `AI-Codeagent-public`（public）を GitLab API で作成。private → public への push ミラーを自動設定。全ブランチ同期
+- [x] **`/compact` バグ修正**（2026-04-24）: `localStorage.getItem('chatHistory')` のキー名ズレを修正。`history` グローバル変数を直接参照・`saveHistory()` で保存するよう変更（main・for_windows 両ブランチ）
+- [x] **自動圧縮トリガー変更**（2026-04-24）: `SUMMARY_TRIGGER` を 16 → 25 に変更（ツール呼び出しが多いセッションで早期圧縮されていた問題を緩和）（main・for_windows 両ブランチ）
+- [x] **ZIPからGit管理への切り替え手順追加**（2026-04-24）: `docs/setup.md` に手順を追記。`git checkout -b for_windows origin/for_windows` を使う方式
+- [x] **setup.bat CRLF問題修正**（2026-04-24）: `core.autocrlf=true`（Windows Git デフォルト）と `.gitattributes eol=crlf` の競合で `git pull` が毎回止まる問題を修正。setup.bat 起動時に `git config core.autocrlf false` を自動実行
+- [x] **pip バージョン通知抑制**（2026-04-24）: setup.bat に `PIP_DISABLE_PIP_VERSION_CHECK=1` を設定
 - [x] **Officeファイルツール**（`tools/office_tools.py`）: Word/Excel/PowerPoint の読み書き（2026-04-22）
   - `read_docx` / `write_docx` / `edit_docx` / `read_xlsx` / `write_xlsx` / `edit_xlsx` / `read_pptx` / `write_pptx` / `edit_pptx`
   - Markdown 風見出し対応（write_docx/write_pptx）

@@ -117,7 +117,6 @@
   .file-chip-del:hover { color: #f38ba8; }
   .file-chip.uploaded { border-color: #a6e3a1; }
   body.drag-over::after { content: 'ファイルをドロップして添付'; position: fixed; inset: 0; background: rgba(30,30,46,0.85); color: #cba6f7; font-size: 24px; display: flex; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; }
-  body.drag-over::after { display: flex; }
   #codeblock-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: monospace; font-weight: bold; line-height: 1; }
   #codeblock-btn:hover, #attach-btn:hover { color: #cdd6f4; background: #45475a; }
   /* ---- プロバイダー設定 ---- */
@@ -975,7 +974,6 @@
     return (ext in map) ? map[ext] : ext;
   }
 
-  // Office/バイナリファイルの拡張子
   const OFFICE_EXTS = new Set(['docx','xlsx','xls','pptx','ppt','doc','pdf','zip','tar','gz','exe','msi','dmg']);
 
   function isOfficeFile(file) {
@@ -989,7 +987,7 @@
     const res = await fetch('/workspace/upload', { method: 'POST', body: form });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    return data.path;  // workspace 相対パス
+    return data.path;
   }
 
   async function handleFiles(files) {
@@ -999,7 +997,6 @@
         pendingImages.push(img);
         addImagePreview(img);
       } else if (isOfficeFile(file)) {
-        // Officeファイルはサーバーにアップロードしてパスを保持
         try {
           const path = await uploadToWorkspace(file);
           const entry = { name: file.name, uploadedPath: path, isUploaded: true };
@@ -1009,7 +1006,6 @@
           alert(`アップロード失敗: ${e.message}`);
         }
       } else {
-        // テキストファイルとして読み込む
         const content = await file.text();
         const lang = getLang(file.name);
         const entry = { name: file.name, content, lang };
@@ -1118,6 +1114,17 @@
     area.appendChild(wrap);
   }
 
+  // ---- ドラッグアンドドロップでファイル添付 ----
+  window.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); document.body.classList.add('drag-over'); }, true);
+  window.addEventListener('dragleave', e => { e.stopPropagation(); if (e.relatedTarget === null) document.body.classList.remove('drag-over'); }, true);
+  window.addEventListener('drop', async e => {
+    e.preventDefault();
+    e.stopPropagation();
+    document.body.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) await handleFiles(files);
+  }, true);
+
   // Ctrl+V でクリップボードから画像をペースト
   document.addEventListener('paste', async e => {
     const items = e.clipboardData?.items || [];
@@ -1130,18 +1137,6 @@
       addImagePreview(img);
     }
   });
-
-  // ---- ドラッグアンドドロップでファイル添付 ----
-  // キャプチャフェーズで確実にブラウザのデフォルト動作（ページ遷移・DL）を止める
-  window.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); document.body.classList.add('drag-over'); }, true);
-  window.addEventListener('dragleave', e => { e.stopPropagation(); if (e.relatedTarget === null) document.body.classList.remove('drag-over'); }, true);
-  window.addEventListener('drop', async e => {
-    e.preventDefault();
-    e.stopPropagation();
-    document.body.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) await handleFiles(files);
-  }, true);
 
   // ---- プロバイダーSVGアイコン ----
   const PROVIDER_SVG = {
@@ -2429,9 +2424,9 @@
       const parts = [];
       if (uploadedBlocks) parts.push(uploadedBlocks);
       if (textBlocks) {
-        const note = filesToSend.filter(f=>!f.isUploaded).length === 1
-          ? `添付ファイル「${filesToSend.filter(f=>!f.isUploaded)[0].name}」の内容:`
-          : `添付ファイル（${filesToSend.filter(f=>!f.isUploaded).length}件）:`;
+        const note = filesToSend.filter(f => !f.isUploaded).length === 1
+          ? `添付ファイル「${filesToSend.filter(f => !f.isUploaded)[0].name}」の内容:`
+          : `添付ファイル（${filesToSend.filter(f => !f.isUploaded).length}件）:`;
         parts.push(note + '\n\n' + textBlocks);
       }
       messageText = (messageText ? messageText + '\n\n' : '') + parts.join('\n\n');
@@ -2563,8 +2558,27 @@
               currentToolGroupEl.querySelector('summary').textContent =
                 `⚙️ ${currentToolGroupNames.length}個のツールを実行中… · ${parts}`; }
             currentResultEl = addToolBlock(currentToolGroupInnerEl, data.name, data.args);
+          } else if (data.type === 'tool_stdout') {
+            // run_command のリアルタイムストリーミング出力
+            if (currentResultEl) {
+              let liveEl = currentResultEl.querySelector('.live-stdout');
+              if (!liveEl) {
+                liveEl = document.createElement('pre');
+                liveEl.className = 'live-stdout';
+                liveEl.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;font-size:12px;opacity:0.85;';
+                currentResultEl.appendChild(liveEl);
+              }
+              liveEl.textContent += data.line + '\n';
+              liveEl.scrollTop = liveEl.scrollHeight;
+              chat.scrollTop = chat.scrollHeight;
+            }
           } else if (data.type === 'tool_result') {
-            if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
+            if (currentResultEl) {
+              // ライブ出力エリアを消してから最終結果を表示
+              const liveEl = currentResultEl.querySelector('.live-stdout');
+              if (liveEl) liveEl.remove();
+              setResult(currentResultEl, currentToolName, data.result);
+            }
           } else if (data.type === 'answer_chunk') {
             genPhase = 'responding'; genTokenChars += data.content.length; updateGenStatus();
             updateStatusLine(statusEl, 'Responding...');
@@ -2917,7 +2931,6 @@
     const input = document.getElementById('shell-input');
     const command = input.value.trim();
     if (!command) return;
-    input.value = '';
     if (shellAbortController) shellAbortController.abort();
     shellAbortController = new AbortController();
 

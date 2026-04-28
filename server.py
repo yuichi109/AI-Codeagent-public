@@ -2,7 +2,6 @@ import asyncio
 import json
 import shutil
 import subprocess
-import sys
 import requests
 from datetime import datetime
 import httpx
@@ -26,7 +25,7 @@ _GEMINI_DEFAULT_MODELS = [
     "gemini-1.5-flash",
 ]
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
-from tools.command_tools import run_command
+from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
@@ -35,11 +34,6 @@ from tools.manim_tools import render_manim
 from tools.pdf_tools import read_pdf
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
-from tools.office_tools import (
-    read_docx, write_docx, edit_docx,
-    read_xlsx, write_xlsx, edit_xlsx,
-    read_pptx, write_pptx, edit_pptx,
-)
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -58,7 +52,7 @@ def _load_provider_config():
     """起動時にファイルから設定を読み込む（なければデフォルト）"""
     if _PROVIDER_CONFIG_FILE.exists():
         try:
-            saved = json.loads(_PROVIDER_CONFIG_FILE.read_text(encoding="utf-8"))
+            saved = json.loads(_PROVIDER_CONFIG_FILE.read_text())
             # 必須キーが揃っているか確認
             if all(k in saved for k in ("type", "url", "api_key", "model", "api_version")):
                 # tools_enabled は旧ファイルにない場合でも補完（後方互換）
@@ -183,15 +177,6 @@ TOOL_REGISTRY = {
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
-    "read_docx": read_docx,
-    "write_docx": write_docx,
-    "edit_docx": edit_docx,
-    "read_xlsx": read_xlsx,
-    "write_xlsx": write_xlsx,
-    "edit_xlsx": edit_xlsx,
-    "read_pptx": read_pptx,
-    "write_pptx": write_pptx,
-    "edit_pptx": edit_pptx,
 }
 
 TOOLS = [
@@ -549,156 +534,6 @@ TOOLS = [
             },
         },
     },
-    # ---- Office tools ----
-    {
-        "type": "function",
-        "function": {
-            "name": "read_docx",
-            "description": "Word ファイル (.docx) を読み込み、テキスト・段落構造を返します。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス (例: docs/report.docx)"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_docx",
-            "description": "Word ファイル (.docx) を作成・上書きします。content は Markdown 風テキスト（# 見出し対応）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス (例: output/report.docx)"},
-                    "content": {"type": "string", "description": "Markdown 風テキスト。# / ## / ### を見出しとして解釈します。"},
-                    "title": {"type": "string", "description": "ドキュメントタイトル（省略可）"},
-                },
-                "required": ["path", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_docx",
-            "description": "Word ファイル内の指定テキストを置換します（段落内の run 単位で一致）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス"},
-                    "old_text": {"type": "string", "description": "置換前のテキスト"},
-                    "new_text": {"type": "string", "description": "置換後のテキスト"},
-                },
-                "required": ["path", "old_text", "new_text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_xlsx",
-            "description": "Excel ファイル (.xlsx) を読み込み、シートのデータを返します。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス (例: data/sales.xlsx)"},
-                    "sheet": {"type": "string", "description": "シート名（省略時は最初のシート）"},
-                    "max_rows": {"type": "integer", "description": "最大読み込み行数（デフォルト200）"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_xlsx",
-            "description": "Excel ファイル (.xlsx) を作成・上書きします。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス (例: output/result.xlsx)"},
-                    "data": {"type": "array", "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）", "items": {"type": "array", "items": {}}},
-                    "sheet": {"type": "string", "description": "シート名（デフォルト: Sheet1）"},
-                    "headers": {"type": "array", "description": "ヘッダー行（省略可）", "items": {"type": "string"}},
-                },
-                "required": ["path", "data"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_xlsx",
-            "description": "Excel ファイルの特定セルを編集します。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス"},
-                    "sheet": {"type": "string", "description": "シート名（省略時は最初のシート）"},
-                    "cell": {"type": "string", "description": "セルアドレス（例: B3）"},
-                    "row": {"type": "integer", "description": "行番号（1始まり）。cell 指定時は不要"},
-                    "col": {"type": "integer", "description": "列番号（1始まり）。cell 指定時は不要"},
-                    "value": {"type": "string", "description": "設定する値"},
-                },
-                "required": ["path", "value"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_pptx",
-            "description": "PowerPoint ファイル (.pptx) を読み込み、スライドのテキストを返します。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス (例: slides/deck.pptx)"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_pptx",
-            "description": "PowerPoint ファイル (.pptx) を作成・上書きします。slides は [{title, content}] のリスト。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス (例: output/deck.pptx)"},
-                    "slides": {
-                        "type": "array",
-                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\"}",
-                        "items": {"type": "object"},
-                    },
-                    "title": {"type": "string", "description": "プレゼンテーション全体のタイトル（最初のスライドに使用、省略可）"},
-                },
-                "required": ["path", "slides"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_pptx",
-            "description": "PowerPoint の特定スライドのテキストを置換します。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "workspace 相対パス"},
-                    "slide_number": {"type": "integer", "description": "スライド番号（1始まり）"},
-                    "old_text": {"type": "string", "description": "置換前のテキスト"},
-                    "new_text": {"type": "string", "description": "置換後のテキスト"},
-                },
-                "required": ["path", "slide_number", "old_text", "new_text"],
-            },
-        },
-    },
 ]
 
 
@@ -766,18 +601,7 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
-    if name == "web_research":
-        timeout = 60
-    elif name in ("run_command", "run_powershell"):
-        # ツール側の timeout_seconds / timeout_minutes を尊重（上限300秒）
-        ts = arguments.get("timeout_seconds") or 0
-        tm = arguments.get("timeout_minutes") or 0
-        tool_timeout = int(ts) + int(tm) * 60
-        timeout = min(tool_timeout, 300) if tool_timeout > 0 else 60
-    elif name == "browser_search":
-        timeout = 40  # ブラウザ起動 + 検索に時間がかかる
-    else:
-        timeout = 20
+    timeout = 60 if name == "web_research" else 20
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(execute_tool, name, arguments),
@@ -788,6 +612,158 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
             {"error": f"ツールがタイムアウトしました ({timeout}秒): {name}"},
             ensure_ascii=False,
         )
+
+
+async def _stream_command(arguments: dict):
+    """run_command をストリーミングで実行する async generator。
+    {'type': 'line', 'line': str} を逐次 yield し、最後に {'type': 'result', 'result': str} を yield する。
+    bash / ブロックコマンド / && チェーンも適切に処理する。
+    """
+    import shlex as _shlex
+    import sys as _sys
+    _ENCODING = "cp932" if _sys.platform == "win32" else "utf-8"
+
+    command = arguments.get("command", "")
+    work_dir_str = arguments.get("work_dir")
+    timeout_minutes = arguments.get("timeout_minutes")
+    env_extra = arguments.get("env")
+
+    # && チェーン: サブコマンドごとにストリーミング
+    if "&&" in command:
+        sub_commands = _split_shell_chain(command)
+        if len(sub_commands) > 1:
+            combined_stdout, combined_stderr = [], []
+            for sub_cmd in sub_commands:
+                sub_result_str = None
+                async for chunk in _stream_command({**arguments, "command": sub_cmd}):
+                    if chunk["type"] == "line":
+                        combined_stdout.append(chunk["line"] + "\n")
+                        yield chunk
+                    elif chunk["type"] == "result":
+                        sub_result_str = chunk["result"]
+                if sub_result_str:
+                    try:
+                        sub = json.loads(sub_result_str)
+                        if sub.get("error") or sub.get("returncode", 0) != 0:
+                            yield {"type": "result", "result": sub_result_str}
+                            return
+                        if sub.get("stderr"):
+                            combined_stderr.append(sub["stderr"])
+                    except Exception:
+                        pass
+            yield {"type": "result", "result": json.dumps({
+                "stdout": _truncate_output("".join(combined_stdout)),
+                "stderr": _truncate_output("".join(combined_stderr), 4000),
+                "returncode": 0, "error": None,
+            })}
+            return
+
+    try:
+        args = _shlex.split(command)
+    except ValueError as e:
+        yield {"type": "result", "result": json.dumps({"error": f"コマンド解析失敗: {e}", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    if not args:
+        yield {"type": "result", "result": json.dumps({"error": "コマンドが空です", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    import os as _os
+    args = [_os.path.expanduser(a) for a in args]
+    base_cmd = _os.path.basename(args[0])
+
+    # bash はサンドボックス実行（同期・非ストリーミング）
+    if base_cmd == "bash":
+        result = await asyncio.to_thread(execute_tool, "run_command", arguments)
+        yield {"type": "result", "result": result}
+        return
+
+    if base_cmd in BLOCKED_COMMANDS:
+        yield {"type": "result", "result": json.dumps({"error": f"'{base_cmd}' はシステム破壊の恐れがあるため実行できません", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    # work_dir 解決
+    if work_dir_str:
+        p = Path(work_dir_str)
+        if not p.is_absolute():
+            parts = p.parts
+            if parts and parts[0] == ALLOWED_WORK_DIR.name:
+                p = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+        resolved_work_dir = (p if p.is_absolute() else ALLOWED_WORK_DIR / p).resolve()
+    else:
+        resolved_work_dir = ALLOWED_WORK_DIR
+    if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
+        yield {"type": "result", "result": json.dumps({"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    # タイムアウト
+    from config import COMMAND_TIMEOUT_SECONDS as _CTO
+    if timeout_minutes is not None:
+        effective_timeout = int(timeout_minutes * 60) if timeout_minutes > 0 else None
+    elif base_cmd in LONG_RUNNING_CMDS:
+        effective_timeout = 300
+    else:
+        effective_timeout = _CTO
+
+    merged_env = None
+    if env_extra:
+        merged_env = {**_os.environ, **{str(k): str(v) for k, v in env_extra.items()}}
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(resolved_work_dir),
+            env=merged_env,
+        )
+    except FileNotFoundError:
+        yield {"type": "result", "result": json.dumps({"error": f"コマンド '{args[0]}' が見つかりません", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+    except Exception as e:
+        yield {"type": "result", "result": json.dumps({"error": f"実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    stdout_lines = []
+    timed_out = False
+    stderr_task = asyncio.create_task(proc.stderr.read())
+
+    try:
+        loop = asyncio.get_event_loop()
+        deadline = (loop.time() + effective_timeout) if effective_timeout else None
+        async for line_bytes in proc.stdout:
+            line = line_bytes.decode(_ENCODING, errors="replace")
+            stdout_lines.append(line)
+            yield {"type": "line", "line": line.rstrip()}
+            if deadline and loop.time() > deadline:
+                timed_out = True
+                proc.kill()
+                break
+    except Exception as e:
+        proc.kill()
+        yield {"type": "result", "result": json.dumps({"error": str(e), "stdout": _truncate_output("".join(stdout_lines)), "stderr": "", "returncode": -1})}
+        return
+
+    await proc.wait()
+    stderr_bytes = await stderr_task
+    stderr_str = stderr_bytes.decode(_ENCODING, errors="replace")
+
+    if timed_out:
+        label = f"{effective_timeout // 60}分" if effective_timeout >= 60 else f"{effective_timeout}秒"
+        yield {"type": "result", "result": json.dumps({
+            "error": f"{label}のタイムアウトを超えました（コマンド: {base_cmd}）。タイムアウトを延長して再実行しますか？",
+            "stdout": _truncate_output("".join(stdout_lines)),
+            "stderr": _truncate_output(stderr_str, 4000),
+            "returncode": -1,
+        })}
+        return
+
+    full_stdout = _truncate_output("".join(stdout_lines))
+    full_stderr = _truncate_output(stderr_str, 4000)
+    result = {"stdout": full_stdout, "stderr": full_stderr, "returncode": proc.returncode, "error": None}
+    if proc.returncode != 0 and args[0] != "sudo" and _is_permission_error(stderr_str):
+        result["hint"] = f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。"
+    yield {"type": "result", "result": json.dumps(result)}
 
 
 class ChatRequest(BaseModel):
@@ -1125,10 +1101,27 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         for name, args, _ in parsed_calls:
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
-        # 複数ツールを並列実行（単一でもオーバーヘッドは無視できる）
-        results = await asyncio.gather(*[
-            execute_tool_async(name, args) for name, args, _ in parsed_calls
-        ])
+        # ツールを実行（run_commandはストリーミング、他は並列）
+        _STREAMING_TOOLS = {"run_command"}
+        if any(name in _STREAMING_TOOLS for name, _, _ in parsed_calls):
+            # ストリーミングツールが含まれる場合は順次実行
+            results = []
+            for name, args, tc_id in parsed_calls:
+                if name in _STREAMING_TOOLS:
+                    result_str = None
+                    async for chunk in _stream_command(args):
+                        if chunk["type"] == "line":
+                            yield f"data: {json.dumps({'type': 'tool_stdout', 'line': chunk['line'], 'tool_id': tc_id})}\n\n"
+                        elif chunk["type"] == "result":
+                            result_str = chunk["result"]
+                    results.append(result_str or json.dumps({"error": "ストリーミング結果なし", "stdout": "", "stderr": "", "returncode": -1}))
+                else:
+                    results.append(await execute_tool_async(name, args))
+        else:
+            # ストリーミング不要ツールは並列実行
+            results = list(await asyncio.gather(*[
+                execute_tool_async(name, args) for name, args, _ in parsed_calls
+            ]))
 
         # 結果を順番に処理してメッセージ履歴に追加
         pending_vision_images = []  # render_manim の画像をまとめてvision messageに注入するためのキュー
@@ -1582,7 +1575,7 @@ class RawWriteRequest(BaseModel):
 
 @app.post("/workspace/upload")
 async def workspace_upload(file: UploadFile = FastAPIFile(...)):
-    """ファイルをworkspaceにアップロードして保存する。Office/バイナリファイル対応。"""
+    """ファイルをworkspaceにアップロードして保存する。バイナリファイル（PDF・Office等）対応。"""
     from tools.file_tools import _resolve_safe_path
     try:
         filename = Path(file.filename).name  # パストラバーサル防止
@@ -1590,11 +1583,7 @@ async def workspace_upload(file: UploadFile = FastAPIFile(...)):
         target.parent.mkdir(parents=True, exist_ok=True)
         content = await file.read()
         target.write_bytes(content)
-        return JSONResponse({
-            "path": filename,
-            "size": len(content),
-            "error": None,
-        })
+        return JSONResponse({"path": filename, "size": len(content), "error": None})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -1720,8 +1709,8 @@ async def workspace_exec_shell(req: ShellExecRequest):
     else:
         exec_cwd = str(ALLOWED_WORK_DIR)
     async def stream():
-        import sys
-        if sys.platform == "win32":
+        import sys as _sys
+        if _sys.platform == "win32":
             shell_args = ["powershell", "-NoProfile", "-Command", req.command]
         else:
             shell_args = ["bash", "-c", req.command]
@@ -1975,7 +1964,7 @@ async def setup_current():
     env_path = Path(__file__).parent / ".env"
     raw = {}
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+        for line in env_path.read_text().splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
@@ -2061,7 +2050,7 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
     env_path = Path(__file__).parent / ".env"
     raw: dict = {}
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+        for line in env_path.read_text().splitlines():
             line = line.strip()
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
@@ -2151,7 +2140,7 @@ async def setup_save(req: SetupSaveRequest):
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+        for line in env_path.read_text().splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or not stripped:
                 existing_lines.append(line)  # コメント・空行は保持
@@ -2163,7 +2152,7 @@ async def setup_save(req: SetupSaveRequest):
         if "***" in new_val:
             # 既存 .env から取得
             if env_path.exists():
-                for line in env_path.read_text(encoding="utf-8").splitlines():
+                for line in env_path.read_text().splitlines():
                     if line.startswith(key_in_env + "="):
                         return line.partition("=")[2].strip()
             return ""
@@ -2263,24 +2252,17 @@ async def setup_save(req: SetupSaveRequest):
     if proxy_lines:
         lines += ["# プロキシバイパス"] + proxy_lines + [""]
 
-    env_path.write_text("\n".join(lines), encoding="utf-8")
+    env_path.write_text("\n".join(lines))
 
-    # サービス再起動
-    if sys.platform == "win32":
-        # Windows: systemctl 非対応のため、プロセスを自己終了して setup.bat に再起動させる
-        import threading
-        def _restart():
-            import time, os
-            time.sleep(1)
-            os._exit(0)
-        threading.Thread(target=_restart, daemon=True).start()
-        return JSONResponse({"status": "ok", "warning": "設定を保存しました。サーバーを再起動しています..."})
-    else:
-        try:
+    # systemd サービスを再起動
+    try:
+        if sys.platform == "win32":
+            os._exit(0)  # setup.bat の再起動ループに委ねる
+        else:
             subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
-            return JSONResponse({"status": "ok"})
-        except Exception as e:
-            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
 
 
 @app.get("/setup/ansible-creds")

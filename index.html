@@ -2558,8 +2558,27 @@
               currentToolGroupEl.querySelector('summary').textContent =
                 `⚙️ ${currentToolGroupNames.length}個のツールを実行中… · ${parts}`; }
             currentResultEl = addToolBlock(currentToolGroupInnerEl, data.name, data.args);
+          } else if (data.type === 'tool_stdout') {
+            // run_command のリアルタイムストリーミング出力
+            if (currentResultEl) {
+              let liveEl = currentResultEl.querySelector('.live-stdout');
+              if (!liveEl) {
+                liveEl = document.createElement('pre');
+                liveEl.className = 'live-stdout';
+                liveEl.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;font-size:12px;opacity:0.85;';
+                currentResultEl.appendChild(liveEl);
+              }
+              liveEl.textContent += data.line + '\n';
+              liveEl.scrollTop = liveEl.scrollHeight;
+              chat.scrollTop = chat.scrollHeight;
+            }
           } else if (data.type === 'tool_result') {
-            if (currentResultEl) setResult(currentResultEl, currentToolName, data.result);
+            if (currentResultEl) {
+              // ライブ出力エリアを消してから最終結果を表示
+              const liveEl = currentResultEl.querySelector('.live-stdout');
+              if (liveEl) liveEl.remove();
+              setResult(currentResultEl, currentToolName, data.result);
+            }
           } else if (data.type === 'answer_chunk') {
             genPhase = 'responding'; genTokenChars += data.content.length; updateGenStatus();
             updateStatusLine(statusEl, 'Responding...');

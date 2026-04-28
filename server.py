@@ -25,7 +25,7 @@ _GEMINI_DEFAULT_MODELS = [
     "gemini-1.5-flash",
 ]
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
-from tools.command_tools import run_command
+from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
@@ -614,6 +614,156 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
         )
 
 
+async def _stream_command(arguments: dict):
+    """run_command をストリーミングで実行する async generator。
+    {'type': 'line', 'line': str} を逐次 yield し、最後に {'type': 'result', 'result': str} を yield する。
+    bash / ブロックコマンド / && チェーンも適切に処理する。
+    """
+    import shlex as _shlex
+
+    command = arguments.get("command", "")
+    work_dir_str = arguments.get("work_dir")
+    timeout_minutes = arguments.get("timeout_minutes")
+    env_extra = arguments.get("env")
+
+    # && チェーン: サブコマンドごとにストリーミング
+    if "&&" in command:
+        sub_commands = _split_shell_chain(command)
+        if len(sub_commands) > 1:
+            combined_stdout, combined_stderr = [], []
+            for sub_cmd in sub_commands:
+                sub_result_str = None
+                async for chunk in _stream_command({**arguments, "command": sub_cmd}):
+                    if chunk["type"] == "line":
+                        combined_stdout.append(chunk["line"] + "\n")
+                        yield chunk
+                    elif chunk["type"] == "result":
+                        sub_result_str = chunk["result"]
+                if sub_result_str:
+                    try:
+                        sub = json.loads(sub_result_str)
+                        if sub.get("error") or sub.get("returncode", 0) != 0:
+                            yield {"type": "result", "result": sub_result_str}
+                            return
+                        if sub.get("stderr"):
+                            combined_stderr.append(sub["stderr"])
+                    except Exception:
+                        pass
+            yield {"type": "result", "result": json.dumps({
+                "stdout": _truncate_output("".join(combined_stdout)),
+                "stderr": _truncate_output("".join(combined_stderr), 4000),
+                "returncode": 0, "error": None,
+            })}
+            return
+
+    try:
+        args = _shlex.split(command)
+    except ValueError as e:
+        yield {"type": "result", "result": json.dumps({"error": f"コマンド解析失敗: {e}", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    if not args:
+        yield {"type": "result", "result": json.dumps({"error": "コマンドが空です", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    import os as _os
+    args = [_os.path.expanduser(a) for a in args]
+    base_cmd = _os.path.basename(args[0])
+
+    # bash はサンドボックス実行（同期・非ストリーミング）
+    if base_cmd == "bash":
+        result = await asyncio.to_thread(execute_tool, "run_command", arguments)
+        yield {"type": "result", "result": result}
+        return
+
+    if base_cmd in BLOCKED_COMMANDS:
+        yield {"type": "result", "result": json.dumps({"error": f"'{base_cmd}' はシステム破壊の恐れがあるため実行できません", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    # work_dir 解決
+    if work_dir_str:
+        p = Path(work_dir_str)
+        if not p.is_absolute():
+            parts = p.parts
+            if parts and parts[0] == ALLOWED_WORK_DIR.name:
+                p = Path(*parts[1:]) if len(parts) > 1 else Path(".")
+        resolved_work_dir = (p if p.is_absolute() else ALLOWED_WORK_DIR / p).resolve()
+    else:
+        resolved_work_dir = ALLOWED_WORK_DIR
+    if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
+        yield {"type": "result", "result": json.dumps({"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    # タイムアウト
+    from config import COMMAND_TIMEOUT_SECONDS as _CTO
+    if timeout_minutes is not None:
+        effective_timeout = int(timeout_minutes * 60) if timeout_minutes > 0 else None
+    elif base_cmd in LONG_RUNNING_CMDS:
+        effective_timeout = 300
+    else:
+        effective_timeout = _CTO
+
+    merged_env = None
+    if env_extra:
+        merged_env = {**_os.environ, **{str(k): str(v) for k, v in env_extra.items()}}
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(resolved_work_dir),
+            env=merged_env,
+        )
+    except FileNotFoundError:
+        yield {"type": "result", "result": json.dumps({"error": f"コマンド '{args[0]}' が見つかりません", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+    except Exception as e:
+        yield {"type": "result", "result": json.dumps({"error": f"実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1})}
+        return
+
+    stdout_lines = []
+    timed_out = False
+    stderr_task = asyncio.create_task(proc.stderr.read())
+
+    try:
+        loop = asyncio.get_event_loop()
+        deadline = (loop.time() + effective_timeout) if effective_timeout else None
+        async for line_bytes in proc.stdout:
+            line = line_bytes.decode("utf-8", errors="replace")
+            stdout_lines.append(line)
+            yield {"type": "line", "line": line.rstrip()}
+            if deadline and loop.time() > deadline:
+                timed_out = True
+                proc.kill()
+                break
+    except Exception as e:
+        proc.kill()
+        yield {"type": "result", "result": json.dumps({"error": str(e), "stdout": _truncate_output("".join(stdout_lines)), "stderr": "", "returncode": -1})}
+        return
+
+    await proc.wait()
+    stderr_bytes = await stderr_task
+    stderr_str = stderr_bytes.decode("utf-8", errors="replace")
+
+    if timed_out:
+        label = f"{effective_timeout // 60}分" if effective_timeout >= 60 else f"{effective_timeout}秒"
+        yield {"type": "result", "result": json.dumps({
+            "error": f"{label}のタイムアウトを超えました（コマンド: {base_cmd}）。タイムアウトを延長して再実行しますか？",
+            "stdout": _truncate_output("".join(stdout_lines)),
+            "stderr": _truncate_output(stderr_str, 4000),
+            "returncode": -1,
+        })}
+        return
+
+    full_stdout = _truncate_output("".join(stdout_lines))
+    full_stderr = _truncate_output(stderr_str, 4000)
+    result = {"stdout": full_stdout, "stderr": full_stderr, "returncode": proc.returncode, "error": None}
+    if proc.returncode != 0 and args[0] != "sudo" and _is_permission_error(stderr_str):
+        result["hint"] = f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。"
+    yield {"type": "result", "result": json.dumps(result)}
+
+
 class ChatRequest(BaseModel):
     message: str
     history: list = []
@@ -949,10 +1099,27 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         for name, args, _ in parsed_calls:
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
-        # 複数ツールを並列実行（単一でもオーバーヘッドは無視できる）
-        results = await asyncio.gather(*[
-            execute_tool_async(name, args) for name, args, _ in parsed_calls
-        ])
+        # ツールを実行（run_commandはストリーミング、他は並列）
+        _STREAMING_TOOLS = {"run_command"}
+        if any(name in _STREAMING_TOOLS for name, _, _ in parsed_calls):
+            # ストリーミングツールが含まれる場合は順次実行
+            results = []
+            for name, args, tc_id in parsed_calls:
+                if name in _STREAMING_TOOLS:
+                    result_str = None
+                    async for chunk in _stream_command(args):
+                        if chunk["type"] == "line":
+                            yield f"data: {json.dumps({'type': 'tool_stdout', 'line': chunk['line'], 'tool_id': tc_id})}\n\n"
+                        elif chunk["type"] == "result":
+                            result_str = chunk["result"]
+                    results.append(result_str or json.dumps({"error": "ストリーミング結果なし", "stdout": "", "stderr": "", "returncode": -1}))
+                else:
+                    results.append(await execute_tool_async(name, args))
+        else:
+            # ストリーミング不要ツールは並列実行
+            results = list(await asyncio.gather(*[
+                execute_tool_async(name, args) for name, args, _ in parsed_calls
+            ]))
 
         # 結果を順番に処理してメッセージ履歴に追加
         pending_vision_images = []  # render_manim の画像をまとめてvision messageに注入するためのキュー

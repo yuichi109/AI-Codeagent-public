@@ -21,7 +21,8 @@
 - `edit_file`（old_str → new_str 部分置換、件数不一致エラー検出）
 - `glob_files`（再帰 glob パターン検索）
 - `grep`（正規表現・行番号付き横断検索、case_sensitive / max_results オプション）
-- `run_command`（ブラックリスト方式 + work_dir をworkspace相対で解決）
+- `run_command`（ブラックリスト方式 + work_dir をworkspace相対で解決、出力を先頭+末尾各4000文字に切り捨て）
+- `run_background` / `check_background` / `kill_background`（バックグラウンドプロセス管理 #20）
 - `bash script.sh`（bubblewrap サンドボックス経由）
 - `web_search`（Tavily優先 → ddgs → SearXNG → DuckDuckGo API → Wikipedia フォールバック）
 - `web_fetch`（BeautifulSoup テキスト抽出、SSRF 対策）
@@ -42,6 +43,7 @@
 - Catppuccin テーマのチャット画面
 - localStorage 履歴永続化 + ターン折りたたみ（MAX=5）
 - ストリーミング回答（`answer_chunk` SSE イベントで delta を逐次表示）
+- **run_command リアルタイムストリーミング**（`tool_stdout` SSE イベントで行ごとに逐次表示、tool-group を自動展開）
 - ツール結果折りたたみ表示（`<details>/<summary>` 形式）
 - ツールグループ折りたたみ UI（「N個のツールを実行 · run_command ×3」形式）
 - LLMプロバイダー切り替えパネル（⚙️ボタン）
@@ -60,6 +62,7 @@
 - ドラッグアンドドロップ・バイナリファイルアップロード（PDF/Office）
 - `/setup` セットアップウィザード（ブラウザから `.env` を GUI 編集）
 - 複数 Azure AI Foundry インスタンス対応（`FOUNDRY_N_*` 環境変数）
+- **for_windows: タスクトレイ常駐**（`start.bat` → `tray.py`、🤖アイコン、右クリックで再起動/停止、初回セットアップ自動実行）
 
 ### スキルシステム
 - `skills/スキル名/SKILL.md` に定義（再起動不要で即反映）
@@ -100,6 +103,7 @@
 
 | 日付 | 内容 |
 |---|---|
+| 2026-04-28 | run_command 出力切り捨て改善（先頭+末尾）、リアルタイムストリーミング、バックグラウンドプロセス管理、タスクトレイ常駐（for_windows）、/setup UTF-8修正 |
 | 2026-04-24 | read_pdf ツール追加、/compact バグ修正、SUMMARY_TRIGGER 25に変更、setup.bat CRLF修正 |
 | 2026-04-23 | setup.bat winget 自動インストール、/boost スキル、docs/setup.md Windows版手順追加 |
 | 2026-04-22 | for_windows ブランチ作成、Officeファイルツール追加、ドラッグアンドドロップアップロード |

@@ -7,7 +7,8 @@ cd /d "%~dp0"
 git config core.autocrlf false >nul 2>&1
 
 echo ============================================================
-echo  AI Code Agent - Windows Setup
+echo  AI Code Agent - デバッグ起動（ログ確認用）
+echo  通常起動は start.bat をダブルクリックしてください
 echo ============================================================
 echo.
 

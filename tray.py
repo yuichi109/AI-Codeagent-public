@@ -91,13 +91,21 @@ def _no_window_flag() -> int:
     return 0x08000000 if sys.platform == "win32" else 0
 
 
+def _get_python_exe() -> str:
+    """venv の python.exe を返す（pythonw.exe では uvicorn が動かないため）"""
+    python_exe = Path(sys.executable).parent / "python.exe"
+    if python_exe.exists():
+        return str(python_exe)
+    return sys.executable  # フォールバック
+
+
 def _start_server():
     global _server_proc
     with _lock:
         if _server_proc and _server_proc.poll() is None:
             return
         _server_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "server:app",
+            [_get_python_exe(), "-m", "uvicorn", "server:app",
              "--host", "0.0.0.0", "--port", str(PORT)],
             cwd=str(BASE_DIR),
             env=os.environ.copy(),

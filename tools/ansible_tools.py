@@ -4,6 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 from config import ALLOWED_WORK_DIR, COMMAND_TIMEOUT_SECONDS
+from tools.command_tools import _truncate_output
 
 CREDS_FILE = ALLOWED_WORK_DIR / ".azure_creds"
 
@@ -87,8 +88,8 @@ def run_ansible_playbook(playbook: str) -> str:
         return json.dumps({
             "playbook": playbook,
             "returncode": result.returncode,
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": _truncate_output(result.stdout),
+            "stderr": _truncate_output(result.stderr, 4000),
             "error": None,
         }, ensure_ascii=False)
     except subprocess.TimeoutExpired:

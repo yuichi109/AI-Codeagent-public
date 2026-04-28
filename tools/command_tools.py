@@ -16,6 +16,14 @@ BLOCKED_COMMANDS = {
 LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy", "ansible-playbook", "ansible"}
 
 
+def _truncate_output(text: str, limit: int = 8000) -> str:
+    """長い出力を先頭+末尾で切り詰める。エラーが末尾に出るコマンドに対応。"""
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return text[:half] + f"\n...（中略: {len(text) - limit} 文字省略）...\n" + text[-half:]
+
+
 def _split_shell_chain(command: str) -> list[str]:
     """&& で連結されたコマンドを分割する（クォート内の && は無視）"""
     parts = []
@@ -119,8 +127,8 @@ def _run_bash_sandboxed(args: list) -> dict:
             timeout=COMMAND_TIMEOUT_SECONDS,
         )
         return {
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": _truncate_output(result.stdout),
+            "stderr": _truncate_output(result.stderr, 4000),
             "returncode": result.returncode,
             "error": None,
             "sandbox": "bubblewrap",
@@ -225,16 +233,16 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
                 and args[0] != "sudo"
                 and _is_permission_error(result.stderr)):
             return {
-                "stdout": result.stdout[:8192],
-                "stderr": result.stderr[:4096],
+                "stdout": _truncate_output(result.stdout),
+                "stderr": _truncate_output(result.stderr, 4000),
                 "returncode": result.returncode,
                 "error": None,
                 "hint": f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。",
             }
 
         return {
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": _truncate_output(result.stdout),
+            "stderr": _truncate_output(result.stderr, 4000),
             "returncode": result.returncode,
             "error": None,
         }

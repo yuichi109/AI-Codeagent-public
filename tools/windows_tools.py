@@ -3,6 +3,7 @@ import subprocess
 import shutil
 from pathlib import Path
 from config import COMMAND_TIMEOUT_SECONDS
+from tools.command_tools import _truncate_output
 
 # PowerShell で危険な操作をブロックするキーワードリスト
 BLOCKED_PS_KEYWORDS = [
@@ -97,8 +98,8 @@ def run_powershell(command: str, timeout_seconds: int = None) -> dict:
             shell=False,
         )
         return {
-            "stdout": result.stdout[:8192],
-            "stderr": result.stderr[:4096],
+            "stdout": _truncate_output(result.stdout),
+            "stderr": _truncate_output(result.stderr, 4000),
             "returncode": result.returncode,
             "error": None,
         }

@@ -2002,6 +2002,17 @@ async def setup_page():
     return FileResponse("setup.html")
 
 
+def _get_git_email() -> str:
+    """git config --global user.email を取得。git が PATH にない場合は空文字を返す"""
+    try:
+        return subprocess.run(
+            ["git", "config", "--global", "user.email"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+    except Exception:
+        return ""
+
+
 @app.get("/setup/current")
 async def setup_current():
     """現在の .env 値を返す（APIキーはマスク）"""
@@ -2080,8 +2091,7 @@ async def setup_current():
             "user":    raw.get("GITLAB_USER", ""),
             "pat":     mask(raw.get("GITLAB_PAT", "")),
             "pat_set": bool(raw.get("GITLAB_PAT")),
-            "email":   subprocess.run(["git", "config", "--global", "user.email"],
-                           capture_output=True, text=True).stdout.strip(),
+            "email":   _get_git_email(),
         },
         "searxng": {
             "url":     raw.get("SEARXNG_BASE_URL", "http://localhost:8888"),

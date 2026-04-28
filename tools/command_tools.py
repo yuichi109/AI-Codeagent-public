@@ -16,6 +16,19 @@ BLOCKED_COMMANDS = {
 LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy", "ansible-playbook", "ansible"}
 
 
+def _decode_output(data: bytes) -> str:
+    """バイト列を UTF-8 → CP932 → errors=replace の順でデコードする。
+    winget 等の Windows コマンドが CP932 を返す環境でも文字化けしない。"""
+    if not data:
+        return ""
+    for enc in ("utf-8", "cp932"):
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def _truncate_output(text: str, limit: int = 8000) -> str:
     """長い出力を先頭+末尾で切り詰める。エラーが末尾に出るコマンドに対応。"""
     if len(text) <= limit:
@@ -123,12 +136,11 @@ def _run_bash_sandboxed(args: list) -> dict:
         result = subprocess.run(
             bwrap_cmd,
             capture_output=True,
-            text=True,
             timeout=COMMAND_TIMEOUT_SECONDS,
         )
         return {
-            "stdout": _truncate_output(result.stdout),
-            "stderr": _truncate_output(result.stderr, 4000),
+            "stdout": _truncate_output(_decode_output(result.stdout)),
+            "stderr": _truncate_output(_decode_output(result.stderr), 4000),
             "returncode": result.returncode,
             "error": None,
             "sandbox": "bubblewrap",
@@ -221,28 +233,30 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
         result = subprocess.run(
             args,
             capture_output=True,
-            text=True,
             timeout=effective_timeout,
             cwd=str(resolved_work_dir),
             shell=False,
             env=merged_env,
         )
 
+        stdout = _decode_output(result.stdout)
+        stderr = _decode_output(result.stderr)
+
         # 権限エラーで失敗した場合、AIにユーザー確認を促すヒントを付与する
         if (result.returncode != 0
                 and args[0] != "sudo"
-                and _is_permission_error(result.stderr)):
+                and _is_permission_error(stderr)):
             return {
-                "stdout": _truncate_output(result.stdout),
-                "stderr": _truncate_output(result.stderr, 4000),
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr, 4000),
                 "returncode": result.returncode,
                 "error": None,
                 "hint": f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。",
             }
 
         return {
-            "stdout": _truncate_output(result.stdout),
-            "stderr": _truncate_output(result.stderr, 4000),
+            "stdout": _truncate_output(stdout),
+            "stderr": _truncate_output(stderr, 4000),
             "returncode": result.returncode,
             "error": None,
         }

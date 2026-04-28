@@ -104,7 +104,11 @@ def _load_env() -> dict:
     env = os.environ.copy()
     env_file = BASE_DIR / ".env"
     if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
+        try:
+            text = env_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = env_file.read_text(encoding="cp932", errors="replace")
+        for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue

@@ -99,6 +99,20 @@ def _get_python_exe() -> str:
     return sys.executable  # フォールバック
 
 
+def _load_env() -> dict:
+    """BASE_DIR/.env を読み込んで現在の環境変数にマージした辞書を返す"""
+    env = os.environ.copy()
+    env_file = BASE_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            env[key.strip()] = val.strip()
+    return env
+
+
 def _start_server():
     global _server_proc
     with _lock:
@@ -108,7 +122,7 @@ def _start_server():
             [_get_python_exe(), "-m", "uvicorn", "server:app",
              "--host", "0.0.0.0", "--port", str(PORT)],
             cwd=str(BASE_DIR),
-            env=os.environ.copy(),
+            env=_load_env(),
             creationflags=_no_window_flag(),
         )
 
@@ -160,6 +174,11 @@ def _monitor(icon: pystray.Icon):
     prev = None
     while True:
         running = _is_running()
+        if not running and prev is True:
+            # サーバーが予期せず停止した（setup 保存による os._exit 含む）→ 自動再起動
+            time.sleep(1)
+            _start_server()
+            running = _is_running()
         if running != prev:
             icon.icon = _make_icon("running" if running else "stopped")
             icon.title = (f"AI Code Agent — 起動中 {URL}"

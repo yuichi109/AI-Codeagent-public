@@ -84,6 +84,8 @@ echo.
 echo   Chat UI : http://localhost:8001
 echo   Setup   : http://localhost:8001/setup
 echo.
+echo   ※ 通常起動は start.bat をダブルクリック（黒窓なし・タスクトレイ常駐）
+echo   ※ このウィンドウはデバッグ用（ログをここに表示）
 echo   Press Ctrl+C to stop.
 echo ============================================================
 echo.

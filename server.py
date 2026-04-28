@@ -34,6 +34,7 @@ from tools.manim_tools import render_manim
 from tools.pdf_tools import read_pdf
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
+from tools.background_tools import run_background, check_background, kill_background
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -177,6 +178,9 @@ TOOL_REGISTRY = {
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
+    "run_background": run_background,
+    "check_background": check_background,
+    "kill_background": kill_background,
 }
 
 TOOLS = [
@@ -531,6 +535,50 @@ TOOLS = [
                     },
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_background",
+            "description": "コマンドをバックグラウンド（非同期）で起動し、即座にジョブIDを返す。ビルド・サーバー起動・長時間処理に使う。進捗は check_background(job_id) で確認する。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "バックグラウンドで実行するコマンド"},
+                    "work_dir": {"type": "string", "description": "作業ディレクトリ（workspace 相対パス）"},
+                    "description": {"type": "string", "description": "ジョブの説明（一覧表示時に使う）"},
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_background",
+            "description": "バックグラウンドジョブの状態と stdout/stderr を確認する。job_id 省略で全ジョブ一覧を返す。完了・失敗したジョブは確認後に自動削除される。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "確認するジョブID。省略すると全ジョブ一覧を返す。"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kill_background",
+            "description": "実行中のバックグラウンドジョブを強制停止する",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "停止するジョブID"},
+                },
+                "required": ["job_id"],
             },
         },
     },

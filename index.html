@@ -2561,6 +2561,9 @@
           } else if (data.type === 'tool_stdout') {
             // run_command のリアルタイムストリーミング出力
             if (currentResultEl) {
+              // <details> を自動的に開いてライブ出力を見えるようにする
+              const detailsEl = currentResultEl.closest('details');
+              if (detailsEl) detailsEl.open = true;
               let liveEl = currentResultEl.querySelector('.live-stdout');
               if (!liveEl) {
                 liveEl = document.createElement('pre');

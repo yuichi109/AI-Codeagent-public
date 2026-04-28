@@ -102,6 +102,9 @@ def _get_python_exe() -> str:
 def _load_env() -> dict:
     """BASE_DIR/.env を読み込んで現在の環境変数にマージした辞書を返す"""
     env = os.environ.copy()
+    # Windows のデフォルト cp932 を回避してサーバープロセスを UTF-8 モードで動かす
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     env_file = BASE_DIR / ".env"
     if env_file.exists():
         try:

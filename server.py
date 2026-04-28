@@ -2206,9 +2206,8 @@ async def setup_save(req: SetupSaveRequest):
                 existing_lines.append(line)  # 未知キーも保持
 
     def api_key_val(new_val: str, key_in_env: str) -> str:
-        """新値が *** のみの場合は既存値を維持"""
-        if "***" in new_val:
-            # 既存 .env から取得
+        """新値が空か *** を含む場合は既存値を維持"""
+        if not new_val or "***" in new_val:
             if env_path.exists():
                 for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
                     if line.startswith(key_in_env + "="):
@@ -2310,17 +2309,22 @@ async def setup_save(req: SetupSaveRequest):
     if proxy_lines:
         lines += ["# プロキシバイパス"] + proxy_lines + [""]
 
-    env_path.write_text("\n".join(lines))
+    env_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # systemd サービスを再起動
-    try:
-        if sys.platform == "win32":
-            os._exit(0)  # setup.bat の再起動ループに委ねる
-        else:
-            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+    # サービスを再起動
+    if sys.platform == "win32":
+        # レスポンスを送信してから終了（_monitor が自動再起動する）
+        async def _delayed_exit():
+            await asyncio.sleep(0.5)
+            os._exit(0)
+        asyncio.create_task(_delayed_exit())
         return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+    else:
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+            return JSONResponse({"status": "ok"})
+        except Exception as e:
+            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
 
 
 @app.get("/setup/ansible-creds")

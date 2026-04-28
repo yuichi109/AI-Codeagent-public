@@ -2023,7 +2023,7 @@ async def setup_current():
     env_path = Path(__file__).parent / ".env"
     raw = {}
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
@@ -2108,7 +2108,7 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
     env_path = Path(__file__).parent / ".env"
     raw: dict = {}
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
@@ -2198,7 +2198,7 @@ async def setup_save(req: SetupSaveRequest):
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or not stripped:
                 existing_lines.append(line)  # コメント・空行は保持
@@ -2210,7 +2210,7 @@ async def setup_save(req: SetupSaveRequest):
         if "***" in new_val:
             # 既存 .env から取得
             if env_path.exists():
-                for line in env_path.read_text().splitlines():
+                for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
                     if line.startswith(key_in_env + "="):
                         return line.partition("=")[2].strip()
             return ""

@@ -3001,6 +3001,8 @@
       document.querySelectorAll('.shell-run-btn').forEach(b => b.disabled = false);
       document.getElementById('shell-output-abort').style.display = 'none';
       shellAbortController = null;
+      input.value = "";
+      input.style.height = "auto";
     }
   }
 

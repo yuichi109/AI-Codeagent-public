@@ -9,16 +9,20 @@ _AGENT_MD_MAX_BYTES = 20_000  # 1ファイルあたりの上限文字数
 
 
 def _load_workspace_agent_mds() -> str:
-    """workspace/ ルートと1階層下のサブディレクトリにある AGENT.md を収集して返す"""
+    """workspace/ ルートと1階層下のサブディレクトリにある AGENT.md / MEMORY.md を収集して返す"""
     work_dir = Path(ALLOWED_WORK_DIR).resolve()
     if not work_dir.exists():
         return ""
 
-    found = []
-    # workspace 直下の AGENT.md
-    root_md = work_dir / "AGENT.md"
-    if root_md.exists():
-        found.append((root_md, "workspace/AGENT.md"))
+    # (path, label, section_title) のリスト
+    agent_found = []
+    memory_found = []
+
+    # workspace 直下
+    for fname, bucket in (("AGENT.md", agent_found), ("MEMORY.md", memory_found)):
+        p = work_dir / fname
+        if p.exists():
+            bucket.append((p, f"workspace/{fname}"))
 
     # 1階層下のサブディレクトリ（最終更新順で最大10件）
     subdirs = sorted(
@@ -27,27 +31,33 @@ def _load_workspace_agent_mds() -> str:
         reverse=True,
     )[:10]
     for subdir in subdirs:
-        md = subdir / "AGENT.md"
-        if md.exists():
-            found.append((md, f"workspace/{subdir.name}/AGENT.md"))
+        for fname, bucket in (("AGENT.md", agent_found), ("MEMORY.md", memory_found)):
+            p = subdir / fname
+            if p.exists():
+                bucket.append((p, f"workspace/{subdir.name}/{fname}"))
 
-    if not found:
-        return ""
+    def _read_sections(entries: list) -> list[str]:
+        sections = []
+        for path, label in entries:
+            try:
+                content = path.read_text(encoding="utf-8")
+                if len(content) > _AGENT_MD_MAX_BYTES:
+                    content = content[:_AGENT_MD_MAX_BYTES] + "\n...(省略)"
+                sections.append(f"### {label}\n\n{content.strip()}")
+            except Exception:
+                pass
+        return sections
 
-    sections = []
-    for path, label in found:
-        try:
-            content = path.read_text(encoding="utf-8")
-            if len(content) > _AGENT_MD_MAX_BYTES:
-                content = content[:_AGENT_MD_MAX_BYTES] + "\n...(省略)"
-            sections.append(f"### {label}\n\n{content.strip()}")
-        except Exception:
-            pass
+    parts = []
+    agent_sections = _read_sections(agent_found)
+    if agent_sections:
+        parts.append("## プロジェクト固有の指示（AGENT.md）\n\n" + "\n\n---\n\n".join(agent_sections))
 
-    if not sections:
-        return ""
+    memory_sections = _read_sections(memory_found)
+    if memory_sections:
+        parts.append("## 作業メモリ（MEMORY.md）\n\n" + "\n\n---\n\n".join(memory_sections))
 
-    return "## プロジェクト固有の指示（AGENT.md）\n\n" + "\n\n---\n\n".join(sections)
+    return "\n\n".join(parts)
 
 
 def _load_skills() -> str:

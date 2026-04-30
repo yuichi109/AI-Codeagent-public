@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-04-30
+
+### WSL版: プロジェクト指示ファイルを CLAUDE.md → AGENT.md に改名
+- `prompts.py` の読み込み対象ファイル名を `CLAUDE.md` から `AGENT.md` に変更
+- Claude Code の `CLAUDE.md` と名前が衝突して紛らわしかったため
+- `workspace/AGENT.md`（全体共通）・`workspace/<プロジェクト>/AGENT.md`（プロジェクト固有）の両方を読み込む動作は変わらず
+
+### Windows版（for_windowsブランチ）: git clone の認証・パス問題を修正
+- **認証エラー修正**: `git -c credential.helper=""` を追加し Windows Credential Manager をバイパス。URL に埋め込んだ PAT が直接使われるようになった
+- **パス修正**: クローン先を `~/AI-Codeagent/workspace/リポジトリ名` から `リポジトリ名`（相対パス）に変更。Git for Windows が `~` をホームディレクトリに展開するため workspace 外にクローンされていた問題を解消
+
+---
+
 ## 実装済み機能
 
 ### セキュリティ

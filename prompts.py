@@ -35,6 +35,11 @@ def _load_workspace_agent_mds() -> str:
             p = subdir / fname
             if p.exists():
                 bucket.append((p, f"workspace/{subdir.name}/{fname}"))
+        # memory/ サブディレクトリ以下の .md ファイルを最終更新順で読み込む
+        memory_dir = subdir / "memory"
+        if memory_dir.is_dir():
+            for md in sorted(memory_dir.glob("*.md"), key=lambda f: f.stat().st_mtime):
+                memory_found.append((md, f"workspace/{subdir.name}/memory/{md.name}"))
 
     def _read_sections(entries: list) -> list[str]:
         sections = []

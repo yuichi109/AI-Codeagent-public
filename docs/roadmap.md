@@ -29,7 +29,7 @@
 ## 中優先度
 
 - **#22 スラッシュコマンド拡充**: `/clear` `/compact` `/help` 以外のショートカット追加
-- **#23 CLAUDE.md 自動読み込み**: workspace 内の `CLAUDE.md` を自動検出してシステムプロンプトに注入
+- **#23 AGENT.md 自動読み込み**: workspace 内の `AGENT.md` を自動検出してシステムプロンプトに注入（実装済み）
 - **LINE Bot連携**（★）: スマホの LINE からエージェントを遠隔操作
   - LINE Messaging API（webhook）→ `server.py` に転送 → 返答をLINEに送信
   - `/setup` 画面にLINE Bot設定セクション追加

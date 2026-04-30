@@ -5,20 +5,20 @@ from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME
 # スキルディレクトリ（このファイルと同階層の skills/）
 _SKILLS_DIR = Path(__file__).parent / "skills"
 
-_CLAUDE_MD_MAX_BYTES = 20_000  # 1ファイルあたりの上限文字数
+_AGENT_MD_MAX_BYTES = 20_000  # 1ファイルあたりの上限文字数
 
 
-def _load_workspace_claude_mds() -> str:
-    """workspace/ ルートと1階層下のサブディレクトリにある CLAUDE.md を収集して返す"""
+def _load_workspace_agent_mds() -> str:
+    """workspace/ ルートと1階層下のサブディレクトリにある AGENT.md を収集して返す"""
     work_dir = Path(ALLOWED_WORK_DIR).resolve()
     if not work_dir.exists():
         return ""
 
     found = []
-    # workspace 直下の CLAUDE.md
-    root_md = work_dir / "CLAUDE.md"
+    # workspace 直下の AGENT.md
+    root_md = work_dir / "AGENT.md"
     if root_md.exists():
-        found.append((root_md, "workspace/CLAUDE.md"))
+        found.append((root_md, "workspace/AGENT.md"))
 
     # 1階層下のサブディレクトリ（最終更新順で最大10件）
     subdirs = sorted(
@@ -27,9 +27,9 @@ def _load_workspace_claude_mds() -> str:
         reverse=True,
     )[:10]
     for subdir in subdirs:
-        md = subdir / "CLAUDE.md"
+        md = subdir / "AGENT.md"
         if md.exists():
-            found.append((md, f"workspace/{subdir.name}/CLAUDE.md"))
+            found.append((md, f"workspace/{subdir.name}/AGENT.md"))
 
     if not found:
         return ""
@@ -38,8 +38,8 @@ def _load_workspace_claude_mds() -> str:
     for path, label in found:
         try:
             content = path.read_text(encoding="utf-8")
-            if len(content) > _CLAUDE_MD_MAX_BYTES:
-                content = content[:_CLAUDE_MD_MAX_BYTES] + "\n...(省略)"
+            if len(content) > _AGENT_MD_MAX_BYTES:
+                content = content[:_AGENT_MD_MAX_BYTES] + "\n...(省略)"
             sections.append(f"### {label}\n\n{content.strip()}")
         except Exception:
             pass
@@ -47,7 +47,7 @@ def _load_workspace_claude_mds() -> str:
     if not sections:
         return ""
 
-    return "## プロジェクト固有の指示（CLAUDE.md）\n\n" + "\n\n---\n\n".join(sections)
+    return "## プロジェクト固有の指示（AGENT.md）\n\n" + "\n\n---\n\n".join(sections)
 
 
 def _load_skills() -> str:
@@ -99,7 +99,7 @@ git clone https://oauth2:{GITLAB_PAT}@gitlab.com/ユーザー名/リポジトリ
 - クローン後は `list_files("リポジトリ名")` で中身を確認して報告する
 
 ### 新規プロジェクト作成の手順
-1. `write_file` で README.md / .gitignore / CLAUDE.md 等を配置（例: "MYPROJ/README.md"）
+1. `write_file` で README.md / .gitignore / AGENT.md 等を配置（例: "MYPROJ/README.md"）
 2. `run_command` で `curl` → GitLab API にプロジェクト作成
    ```
    curl -s -X POST https://gitlab.com/api/v4/projects \
@@ -137,7 +137,7 @@ def get_system_prompt(bypass_approval: bool = False) -> str:
     bypass_section = BYPASS_SECTION if bypass_approval else BYPASS_DISABLED_SECTION
     skills = _load_skills()
     skills_section = f"\n### 登録済みスキル\n\n{skills}" if skills else ""
-    claude_mds_section = _load_workspace_claude_mds()
+    claude_mds_section = _load_workspace_agent_mds()
     return _build_prompt(bypass_section, skills_section, claude_mds_section)
 
 def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_section: str = "") -> str:
@@ -301,7 +301,7 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 - pip install などの依存解決
 - `git add` / `git commit`（ユーザーが git 管理・push を明示的に求めた場合のみ）
 - web 検索・調査
-- CLAUDE.md などドキュメントの更新
+- AGENT.md などドキュメントの更新
 
 ### 聞いてから実行すること（1回だけ確認）
 - **main/master への直接 push**
@@ -313,7 +313,7 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 ユーザーの指示は「何をしたいか」のヒント。その奥にある目的を達成するまで動き続ける。
 - 「ファイルを書いて」→ 書いた後に lint・動作確認まで行う（git操作は求められた場合のみ）
 - 「バグを直して」→ 直した後に同パターンのバグを grep で調べる
-- 「機能を追加して」→ 実装 → テスト → CLAUDE.md 更新まで行う（commit はユーザーが求めた場合のみ）
+- 「機能を追加して」→ 実装 → テスト → AGENT.md 更新まで行う（commit はユーザーが求めた場合のみ）
 - **git add / commit / push はユーザーから明示的に要求がない限り実行しない**
 
 ### 2. エラーは自分で解決してから報告する（最大3回リトライ）

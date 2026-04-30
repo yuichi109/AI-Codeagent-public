@@ -16,6 +16,13 @@
 - **認証エラー修正**: `git -c credential.helper=""` を追加し Windows Credential Manager をバイパス。URL に埋め込んだ PAT が直接使われるようになった
 - **パス修正**: クローン先を `~/AI-Codeagent/workspace/リポジトリ名` から `リポジトリ名`（相対パス）に変更。Git for Windows が `~` をホームディレクトリに展開するため workspace 外にクローンされていた問題を解消
 
+### WSL版・Windows版: シェルパネルのコマンド実行後に入力欄がクリアされないリグレッション修正
+- `index.html` の `shellExec()` の `finally` ブロックに `input.value = ''` と `input.style.height = 'auto'` を追加
+- 過去に修正済みだったが再発していた（`aad98ba` のリグレッション）
+
+### 未対応（次回対応予定）
+- **Windows版シェルパネルの文字化け**: PowerShell 出力が CP932 でエンコードされているため `ls` 等で日本語が文字化けする。WSL版で過去に同様の修正済み（CP932→UTF-8変換）
+
 ---
 
 ## 実装済み機能

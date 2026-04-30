@@ -1278,6 +1278,7 @@ async def chat(req: ChatRequest):
 @app.get("/skills")
 async def get_skills():
     """登録済みスキルの一覧を返す"""
+    from fastapi.responses import JSONResponse as _JSONResponse
     from prompts import _SKILLS_DIR
     result = []
     if _SKILLS_DIR.exists():
@@ -1297,7 +1298,7 @@ async def get_skills():
                     result.append({"name": name, "trigger": trigger, "description": description})
                 except Exception:
                     pass
-    return result
+    return _JSONResponse(content=result, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/gitlab/issues")

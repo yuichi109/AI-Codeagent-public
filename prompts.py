@@ -93,9 +93,9 @@ _gitlab_section = f"""
 ### リポジトリを workspace にクローンする手順
 「workspace にクローンして」と依頼されたら以下のコマンド **1つだけ** 実行する。`_gp_tmp` は使わない。
 ```
-git clone https://oauth2:{GITLAB_PAT}@gitlab.com/ユーザー名/リポジトリ名.git ~/AI-Codeagent/workspace/リポジトリ名
+git -c credential.helper="" clone https://oauth2:{GITLAB_PAT}@gitlab.com/ユーザー名/リポジトリ名.git リポジトリ名
 ```
-- `~` を使う（`$HOME` は shell=False のため展開されない）
+- workspace ルートで実行される（work_dir 不要）
 - クローン後は `list_files("リポジトリ名")` で中身を確認して報告する
 
 ### 新規プロジェクト作成の手順

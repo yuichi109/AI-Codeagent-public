@@ -25,11 +25,17 @@ def _load_workspace_agent_mds() -> str:
             bucket.append((p, f"workspace/{fname}"))
 
     # 1階層下のサブディレクトリ（最終更新順で最大10件）
-    subdirs = sorted(
-        [d for d in work_dir.iterdir() if d.is_dir()],
-        key=lambda d: d.stat().st_mtime,
-        reverse=True,
-    )[:10]
+    # stat() が失敗するディレクトリ（Windows の隠しフォルダ等）は mtime=0 で扱う
+    _dir_entries = []
+    for d in work_dir.iterdir():
+        if not d.is_dir():
+            continue
+        try:
+            mtime = d.stat().st_mtime
+        except OSError:
+            mtime = 0
+        _dir_entries.append((mtime, d))
+    subdirs = [d for _, d in sorted(_dir_entries, key=lambda x: x[0], reverse=True)[:10]]
     for subdir in subdirs:
         for fname, bucket in (("AGENT.md", agent_found), ("MEMORY.md", memory_found)):
             p = subdir / fname

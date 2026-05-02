@@ -594,7 +594,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "出力先 workspace 相対パス (.xlsx)"},
-                    "data": {"type": "array", "items": {"type": "array"}, "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）"},
+                    "data": {"type": "array", "items": {"type": "array", "items": {}}, "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）"},
                     "sheet": {"type": "string", "description": "シート名（デフォルト: Sheet1）"},
                     "headers": {"type": "array", "items": {"type": "string"}, "description": "ヘッダー行（省略可）"},
                 },

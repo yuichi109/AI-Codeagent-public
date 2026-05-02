@@ -33,7 +33,12 @@ from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup
 from tools.manim_tools import render_manim
-from tools.pdf_tools import read_pdf
+from tools.pdf_tools import read_pdf, write_pdf
+from tools.office_tools import (
+    read_docx, write_docx, edit_docx,
+    read_xlsx, write_xlsx, edit_xlsx,
+    read_pptx, write_pptx, edit_pptx,
+)
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
@@ -177,6 +182,16 @@ TOOL_REGISTRY = {
     "workspace_cleanup_preview": workspace_cleanup_preview,
     "render_manim": render_manim,
     "read_pdf": read_pdf,
+    "write_pdf": write_pdf,
+    "read_docx": read_docx,
+    "write_docx": write_docx,
+    "edit_docx": edit_docx,
+    "read_xlsx": read_xlsx,
+    "write_xlsx": write_xlsx,
+    "edit_xlsx": edit_xlsx,
+    "read_pptx": read_pptx,
+    "write_pptx": write_pptx,
+    "edit_pptx": edit_pptx,
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
@@ -490,6 +505,172 @@ TOOLS = [
                     "extract_tables": {"type": "boolean", "description": "テーブルを Markdown 形式で抽出するか (デフォルト: false)"},
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_pdf",
+            "description": "Markdown 風テキストから PDF ファイルを生成します。調査結果・レポート・議事録などをPDF出力するときに使います。日本語対応。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "出力先 workspace 相対パス (.pdf)"},
+                    "content": {"type": "string", "description": "Markdown 風テキスト。# 見出し1 / ## 見出し2 / ### 見出し3 / - 箇条書き / | テーブル 対応。"},
+                    "title": {"type": "string", "description": "PDF タイトル（表紙見出し、省略可）"},
+                    "font_size": {"type": "integer", "description": "本文フォントサイズ（デフォルト: 11）"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_docx",
+            "description": "Word ファイル (.docx) のテキストを読み取ります。ドラッグアンドドロップでアップロードされた Word 文書の内容確認・PDF変換などに使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.docx)"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_docx",
+            "description": "Word ファイル (.docx) を新規作成・上書きします。Markdown 風テキスト（# 見出し等）を Word 文書に変換します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "出力先 workspace 相対パス (.docx)"},
+                    "content": {"type": "string", "description": "Markdown 風テキスト"},
+                    "title": {"type": "string", "description": "ドキュメントタイトル（省略可）"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_docx",
+            "description": "Word ファイル内の特定テキストを置換します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.docx)"},
+                    "old_text": {"type": "string", "description": "置換前のテキスト"},
+                    "new_text": {"type": "string", "description": "置換後のテキスト"},
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_xlsx",
+            "description": "Excel ファイル (.xlsx) のデータを読み取ります。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.xlsx)"},
+                    "sheet": {"type": "string", "description": "シート名（省略時は最初のシート）"},
+                    "max_rows": {"type": "integer", "description": "最大読み込み行数（デフォルト: 200）"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_xlsx",
+            "description": "Excel ファイル (.xlsx) を新規作成・上書きします。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "出力先 workspace 相対パス (.xlsx)"},
+                    "data": {"type": "array", "items": {"type": "array", "items": {}}, "description": "行データのリスト（例: [[\"Alice\", 30], [\"Bob\", 25]]）"},
+                    "sheet": {"type": "string", "description": "シート名（デフォルト: Sheet1）"},
+                    "headers": {"type": "array", "items": {"type": "string"}, "description": "ヘッダー行（省略可）"},
+                },
+                "required": ["path", "data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_xlsx",
+            "description": "Excel ファイルの特定セルを編集します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.xlsx)"},
+                    "sheet": {"type": "string", "description": "シート名（省略時は最初のシート）"},
+                    "cell": {"type": "string", "description": "セルアドレス（例: \"B3\"）"},
+                    "row": {"type": "integer", "description": "行番号（1始まり）"},
+                    "col": {"type": "integer", "description": "列番号（1始まり）"},
+                    "value": {"type": "string", "description": "設定する値"},
+                },
+                "required": ["path", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pptx",
+            "description": "PowerPoint ファイル (.pptx) のテキストを読み取ります。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.pptx)"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_pptx",
+            "description": "PowerPoint ファイル (.pptx) を新規作成・上書きします。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "出力先 workspace 相対パス (.pptx)"},
+                    "slides": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\"}",
+                    },
+                    "title": {"type": "string", "description": "プレゼンテーション全体のタイトル（省略可）"},
+                },
+                "required": ["path", "slides"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_pptx",
+            "description": "PowerPoint の特定スライドのテキストを置換します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "workspace 相対パス (.pptx)"},
+                    "slide_number": {"type": "integer", "description": "スライド番号（1始まり）"},
+                    "old_text": {"type": "string", "description": "置換前のテキスト"},
+                    "new_text": {"type": "string", "description": "置換後のテキスト"},
+                },
+                "required": ["path", "slide_number", "old_text", "new_text"],
             },
         },
     },

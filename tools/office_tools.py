@@ -16,17 +16,11 @@ from tools.file_tools import _resolve_safe_path
 def read_docx(path: str) -> dict:
     """
     Word ファイル (.docx) を読み込み、テキストを返します。
-    段落ごとに改行で区切り、見出しレベルも付与します。
 
-    Args:
-        path: workspace 相対パス (例: docs/report.docx)
-
-    Returns:
-        dict: text (全文テキスト), paragraphs (段落リスト), sections (セクション数), error
+    path: workspace 相対パス (例: docs/report.docx)
     """
     try:
         from docx import Document
-        from docx.oxml.ns import qn
     except ImportError:
         return {"error": "python-docx がインストールされていません。run_command('pip install python-docx') でインストールしてください。"}
 
@@ -51,9 +45,7 @@ def read_docx(path: str) -> dict:
                     level = "# "
             paragraphs.append({"level": level, "text": text, "style": style})
 
-        full_text = "\n".join(
-            (p["level"] + p["text"]) for p in paragraphs
-        )
+        full_text = "\n".join((p["level"] + p["text"]) for p in paragraphs)
         return {
             "text": full_text,
             "paragraphs": paragraphs,
@@ -68,19 +60,14 @@ def read_docx(path: str) -> dict:
 def write_docx(path: str, content: str, title: str = "") -> dict:
     """
     Word ファイル (.docx) を作成・上書きします。
-    content は Markdown 風のテキストで、# / ## / ### を見出しとして解釈します。
+    content は Markdown 風テキスト（# 見出し、## 小見出し、通常段落）。
 
-    Args:
-        path: workspace 相対パス (例: docs/report.docx)
-        content: Markdown 風テキスト（# 見出し, ## 小見出し, 通常段落）
-        title: ドキュメントタイトル（省略可）
-
-    Returns:
-        dict: path, paragraphs_written, error
+    path: workspace 相対パス (例: docs/report.docx)
+    content: Markdown 風テキスト
+    title: ドキュメントタイトル（省略可）
     """
     try:
         from docx import Document
-        from docx.shared import Pt
     except ImportError:
         return {"error": "python-docx がインストールされていません。run_command('pip install python-docx') でインストールしてください。"}
 
@@ -102,7 +89,6 @@ def write_docx(path: str, content: str, title: str = "") -> dict:
             elif stripped.startswith("# "):
                 doc.add_heading(stripped[2:], level=1)
             elif stripped == "":
-                # 空行はスキップ（段落間の空白は Word が自動挿入）
                 continue
             else:
                 doc.add_paragraph(stripped)
@@ -116,15 +102,11 @@ def write_docx(path: str, content: str, title: str = "") -> dict:
 
 def edit_docx(path: str, old_text: str, new_text: str) -> dict:
     """
-    Word ファイル内の指定テキストを置換します（段落単位の完全一致）。
+    Word ファイル内の指定テキストを置換します（段落単位）。
 
-    Args:
-        path: workspace 相対パス
-        old_text: 置換前のテキスト（段落の完全一致）
-        new_text: 置換後のテキスト
-
-    Returns:
-        dict: replaced_count, path, error
+    path: workspace 相対パス
+    old_text: 置換前のテキスト
+    new_text: 置換後のテキスト
     """
     try:
         from docx import Document
@@ -160,15 +142,11 @@ def edit_docx(path: str, old_text: str, new_text: str) -> dict:
 
 def read_xlsx(path: str, sheet: str = None, max_rows: int = 200) -> dict:
     """
-    Excel ファイル (.xlsx/.xls) を読み込み、シートのデータを返します。
+    Excel ファイル (.xlsx) を読み込み、シートのデータを返します。
 
-    Args:
-        path: workspace 相対パス (例: data/sales.xlsx)
-        sheet: シート名（省略時は最初のシート）
-        max_rows: 最大読み込み行数（デフォルト200）
-
-    Returns:
-        dict: sheet_name, headers, rows (list of list), row_count, sheets, error
+    path: workspace 相対パス (例: data/sales.xlsx)
+    sheet: シート名（省略時は最初のシート）
+    max_rows: 最大読み込み行数（デフォルト 200）
     """
     try:
         import openpyxl
@@ -182,7 +160,6 @@ def read_xlsx(path: str, sheet: str = None, max_rows: int = 200) -> dict:
 
         wb = openpyxl.load_workbook(str(target), read_only=True, data_only=True)
         sheet_names = wb.sheetnames
-
         ws = wb[sheet] if sheet and sheet in sheet_names else wb.active
         actual_sheet = ws.title
 
@@ -191,7 +168,6 @@ def read_xlsx(path: str, sheet: str = None, max_rows: int = 200) -> dict:
             if i >= max_rows:
                 break
             rows.append([str(cell) if cell is not None else "" for cell in row])
-
         wb.close()
 
         headers = rows[0] if rows else []
@@ -213,14 +189,10 @@ def write_xlsx(path: str, data: list, sheet: str = "Sheet1", headers: list = Non
     """
     Excel ファイル (.xlsx) を作成・上書きします。
 
-    Args:
-        path: workspace 相対パス (例: output/result.xlsx)
-        data: 行データのリスト（例: [["Alice", 30], ["Bob", 25]]）
-        sheet: シート名（デフォルト: Sheet1）
-        headers: ヘッダー行（省略可）
-
-    Returns:
-        dict: path, rows_written, error
+    path: workspace 相対パス (例: output/result.xlsx)
+    data: 行データのリスト（例: [["Alice", 30], ["Bob", 25]]）
+    sheet: シート名（デフォルト: Sheet1）
+    headers: ヘッダー行（省略可）
     """
     try:
         import openpyxl
@@ -239,7 +211,6 @@ def write_xlsx(path: str, data: list, sheet: str = "Sheet1", headers: list = Non
         row_num = 1
         if headers:
             ws.append(headers)
-            # ヘッダーを太字に
             for cell in ws[row_num]:
                 cell.font = Font(bold=True)
             row_num += 1
@@ -258,16 +229,12 @@ def edit_xlsx(path: str, sheet: str = None, row: int = None, col: int = None,
     """
     Excel ファイルの特定セルを編集します。
 
-    Args:
-        path: workspace 相対パス
-        sheet: シート名（省略時は最初のシート）
-        row: 行番号（1始まり）。cell 指定時は不要
-        col: 列番号（1始まり）。cell 指定時は不要
-        cell: セルアドレス（例: "B3"）。row/col の代わりに使用可
-        value: 設定する値
-
-    Returns:
-        dict: path, cell, value, error
+    path: workspace 相対パス
+    sheet: シート名（省略時は最初のシート）
+    row: 行番号（1始まり）。cell 指定時は不要
+    col: 列番号（1始まり）。cell 指定時は不要
+    cell: セルアドレス（例: "B3"）
+    value: 設定する値
     """
     try:
         import openpyxl
@@ -306,11 +273,7 @@ def read_pptx(path: str) -> dict:
     """
     PowerPoint ファイル (.pptx) を読み込み、スライドのテキストを返します。
 
-    Args:
-        path: workspace 相対パス (例: slides/presentation.pptx)
-
-    Returns:
-        dict: slides (list of dict), slide_count, error
+    path: workspace 相対パス (例: slides/presentation.pptx)
     """
     try:
         from pptx import Presentation
@@ -352,15 +315,9 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
     """
     PowerPoint ファイル (.pptx) を作成・上書きします。
 
-    Args:
-        path: workspace 相対パス (例: output/presentation.pptx)
-        slides: スライドデータのリスト
-            各要素: {"title": "スライドタイトル", "content": "本文テキスト（改行区切り）"}
-            または: {"title": "タイトルのみ"}
-        title: プレゼンテーション全体のタイトル（最初のスライドに使用、省略可）
-
-    Returns:
-        dict: path, slides_written, error
+    path: workspace 相対パス (例: output/presentation.pptx)
+    slides: [{"title": "スライドタイトル", "content": "本文（改行区切り）"}, ...]
+    title: プレゼンテーション全体のタイトル（最初のスライドに使用、省略可）
     """
     try:
         from pptx import Presentation
@@ -373,18 +330,14 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
 
         prs = Presentation()
-        # レイアウト: 0=タイトルスライド, 1=タイトルと内容, 6=空白
         title_layout = prs.slide_layouts[0]
         content_layout = prs.slide_layouts[1]
-        blank_layout = prs.slide_layouts[6]
 
         count = 0
-
-        # タイトルスライドが指定された場合
         if title:
             slide = prs.slides.add_slide(title_layout)
             slide.shapes.title.text = title
-            if slide.placeholders and len(slide.placeholders) > 1:
+            if len(slide.placeholders) > 1:
                 slide.placeholders[1].text = ""
             count += 1
 
@@ -401,8 +354,7 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
                     if i == 0:
                         tf.paragraphs[0].text = line
                     else:
-                        p = tf.add_paragraph()
-                        p.text = line
+                        tf.add_paragraph().text = line
             else:
                 slide = prs.slides.add_slide(title_layout)
                 slide.shapes.title.text = slide_title
@@ -418,14 +370,10 @@ def edit_pptx(path: str, slide_number: int, old_text: str, new_text: str) -> dic
     """
     PowerPoint の特定スライドのテキストを置換します。
 
-    Args:
-        path: workspace 相対パス
-        slide_number: スライド番号（1始まり）
-        old_text: 置換前のテキスト
-        new_text: 置換後のテキスト
-
-    Returns:
-        dict: replaced_count, path, error
+    path: workspace 相対パス
+    slide_number: スライド番号（1始まり）
+    old_text: 置換前のテキスト
+    new_text: 置換後のテキスト
     """
     try:
         from pptx import Presentation

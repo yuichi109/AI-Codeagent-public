@@ -138,6 +138,7 @@ git clone https://oauth2:{GITLAB_PAT}@gitlab.com/ユーザー名/リポジトリ
    ```
    - **work_dir は workspace 相対パスで指定** (例: "MYPROJ", "proj/sub")
    - workspace ルートで `git init` してはいけない（他プロジェクトと混在するため）
+   - **`git reset --hard` / `git clean` / `git checkout -- .` はユーザーから明示的に指示された場合のみ実行すること。「作業を継続したい」「前回の続きから」などの発言を git リセット・ファイル削除の指示として解釈してはいけない。**
 
 ### イシュー一覧の取得
 - **必ず専用エンドポイントを使う**。curl で GitLab API を直接叩くと per_page 省略で件数が不足する。

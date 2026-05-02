@@ -832,15 +832,7 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
-    # ツール引数で指定されたタイムアウトがあればそれに合わせて待つ（+10秒のマージン）
-    if name == "web_research":
-        timeout = 60
-    elif name == "run_powershell" and "timeout_seconds" in arguments:
-        timeout = int(arguments["timeout_seconds"]) + 10
-    elif name == "run_command" and "timeout_minutes" in arguments:
-        timeout = int(arguments["timeout_minutes"] * 60) + 10
-    else:
-        timeout = 20
+    timeout = 60 if name == "web_research" else 20
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(execute_tool, name, arguments),

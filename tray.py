@@ -120,11 +120,24 @@ def _load_env() -> dict:
     return env
 
 
+def _sync_requirements():
+    """requirements.txt の差分を自動インストールする（起動時・再起動時に実行）"""
+    req_file = BASE_DIR / "requirements.txt"
+    if not req_file.exists():
+        return
+    subprocess.run(
+        [_get_python_exe(), "-m", "pip", "install", "-r", str(req_file), "--quiet"],
+        cwd=str(BASE_DIR),
+        creationflags=_no_window_flag(),
+    )
+
+
 def _start_server():
     global _server_proc
     with _lock:
         if _server_proc and _server_proc.poll() is None:
             return
+        _sync_requirements()
         _server_proc = subprocess.Popen(
             [_get_python_exe(), "-m", "uvicorn", "server:app",
              "--host", "0.0.0.0", "--port", str(PORT)],

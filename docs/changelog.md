@@ -5,6 +5,20 @@
 
 ---
 
+## 2026-05-05
+
+### Responses API サブエージェント対応（コミット: c4670f7）
+
+- `tools/responses_tools.py` 新規作成
+  - `call_responses_api(model, input, tools, instructions, previous_response_id)` ツール追加
+  - メインエージェントがサブタスクを別モデルに委譲するマルチエージェント構成を実現
+- `setup.html`: Responses API 有効/無効トグルを設定画面に追加
+- `server.py`: `call_responses_api` を TOOL_REGISTRY・TOOLS に登録
+- `config.py`: Responses API 関連の設定値を追加
+- `prompts.py`: Responses API ツールの使い方をシステムプロンプトに追記
+
+---
+
 ## 2026-04-30
 
 ### WSL版: プロジェクト指示ファイルを CLAUDE.md → AGENT.md に改名

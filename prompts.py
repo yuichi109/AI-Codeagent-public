@@ -1,6 +1,6 @@
 from datetime import date
 from pathlib import Path
-from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME
+from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME, RESPONSES_API_ENABLED, RESPONSES_API_MODEL
 
 # スキルディレクトリ（このファイルと同階層の skills/）
 _SKILLS_DIR = Path(__file__).parent / "skills"
@@ -154,6 +154,20 @@ git clone https://oauth2:{GITLAB_PAT}@gitlab.com/ユーザー名/リポジトリ
 - **イシュー一覧を表示する際は取得した全件をMarkdown表形式で番号順に列挙すること。省略・要約・「他にもあります」は禁止。**
 - **Markdown表はコードブロック（```）で囲まずにそのまま出力すること。囲むとレンダリングされない。**
 """ if GITLAB_USER and GITLAB_PAT else ""
+
+_RESPONSES_API_RULE = f"""
+---
+
+## コード生成ルール（Responses API サブエージェント有効）
+
+`call_responses_api` ツールが使用可能です（モデル: {RESPONSES_API_MODEL or "Responses API"}）。
+
+- **`write_file` または `edit_file` でコードを保存する前に、必ず `call_responses_api` でコードを生成すること。**
+- `call_responses_api` の戻り値からマークダウンのコードフェンス（` ```python ` 等）を除去してから `write_file` の content / `edit_file` の new_content に使う。
+- 設計・ファイル構造の確認・ファイル操作は自分で行う。コード生成部分だけ委譲する。
+- `call_responses_api` が `[ERROR]` を返した場合は自分でコードを生成して続行する。
+""" if RESPONSES_API_ENABLED else ""
+
 
 def get_system_prompt(bypass_approval: bool = False) -> str:
     bypass_section = BYPASS_SECTION if bypass_approval else BYPASS_DISABLED_SECTION
@@ -591,7 +605,7 @@ run_command("git status", work_dir="myproject")
 
 {skills_section}
 
-{claude_mds_section}"""
+{claude_mds_section}{_RESPONSES_API_RULE}"""
 
 # 後方互換性のためデフォルト（バイパスなし）で SYSTEM_PROMPT も残す（起動時スナップショット）
 SYSTEM_PROMPT = get_system_prompt(bypass_approval=False)

@@ -17,6 +17,20 @@
 - `config.py`: Responses API 関連の設定値を追加
 - `prompts.py`: Responses API ツールの使い方をシステムプロンプトに追記
 
+### Claude Code CLI版のセットアップ（環境整備）
+
+- Windows PowerShell に `npm install -g @anthropic-ai/claude-code` でインストール
+- WSL からも `/mnt/c/...` マウント経由で参照可能（追加インストール不要・既定の動作）
+- Google アカウント（claude.ai Pro）でログイン済み・追加課金なし
+- Windows Terminal（`winget install Microsoft.WindowsTerminal`）もインストール済み
+- このプロジェクトの作業はデスクトップ版継続推奨（memory自動読み込み・GUIパネルのため）
+
+### Ubuntu apt 障害メモ（2026-04-30〜）
+
+- `archive.ubuntu.com` が DDoS 攻撃の影響で断続的に不安定
+- 回避策：`sudo sed -i 's|http://archive.ubuntu.com|https://ftp.udx.icscoe.jp/Linux/ubuntu|g' /etc/apt/sources.list`
+- 復旧後は `sudo sed -i 's|https://ftp.udx.icscoe.jp/Linux/ubuntu|http://archive.ubuntu.com|g' /etc/apt/sources.list` で元に戻す
+
 ---
 
 ## 2026-04-30

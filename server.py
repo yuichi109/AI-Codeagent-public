@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL
 from prompts import get_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
@@ -42,6 +42,7 @@ from tools.office_tools import (
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
+from tools.responses_tools import call_responses_api
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -199,6 +200,9 @@ TOOL_REGISTRY = {
     "check_background": check_background,
     "kill_background": kill_background,
 }
+
+if RESPONSES_API_ENABLED:
+    TOOL_REGISTRY["call_responses_api"] = call_responses_api
 
 TOOLS = [
     {
@@ -767,6 +771,25 @@ TOOLS = [
     },
 ]
 
+if RESPONSES_API_ENABLED:
+    TOOLS.append({
+        "type": "function",
+        "function": {
+            "name": "call_responses_api",
+            "description": f"コード生成特化モデル（{RESPONSES_API_MODEL or 'Responses API'}）を呼び出してコードを生成します。write_file / edit_file でコードを保存する前に必ずこのツールでコードを生成してください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "生成してほしいコードの詳細な指示（言語・ファイルパス・既存コードの文脈・要件を含める）",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    })
+
 
 def _get_error_hint(tool_name: str, error_type: str, error_msg: str, args: dict) -> str:
     """エラー種別に応じた自己修正ヒントを返す"""
@@ -804,9 +827,42 @@ def _get_error_hint(tool_name: str, error_type: str, error_msg: str, args: dict)
     return " → ".join(hints)
 
 
+import threading
+_ra_called_flag = threading.local()
+
+
+def _inject_responses_api(tool_name: str, arguments: dict) -> None:
+    """write_file / edit_file の content を Responses API で生成したコードで上書きする"""
+    from tools.responses_tools import call_responses_api
+    content_key = "content" if tool_name == "write_file" else "new_content"
+    existing = arguments.get(content_key, "")
+    if not existing:
+        return
+    path = arguments.get("path", "")
+    prompt = (
+        f"次のコードを生成してください。ファイルパス: {path}\n\n"
+        f"要件（エージェントが用意したドラフト）:\n{existing}\n\n"
+        "完全なコードのみを出力し、説明文は不要です。"
+    )
+    generated = call_responses_api(prompt)
+    if generated and not generated.startswith("[ERROR]"):
+        # マークダウンのコードフェンスを除去
+        import re
+        generated = re.sub(r"^```[^\n]*\n?", "", generated.strip())
+        generated = re.sub(r"\n?```$", "", generated)
+        arguments[content_key] = generated
+
+
 def execute_tool(name: str, arguments: dict) -> str:
     if name not in TOOL_REGISTRY:
         return json.dumps({"error": f"未知のツール: {name}"}, ensure_ascii=False)
+    # Responses API が有効な場合、AIが call_responses_api をスキップして write_file/edit_file を直接呼んだ時のみ自動注入
+    if RESPONSES_API_ENABLED and name == "call_responses_api":
+        _ra_called_flag.called = True
+    if RESPONSES_API_ENABLED and name in ("write_file", "edit_file"):
+        if not getattr(_ra_called_flag, "called", False):
+            _inject_responses_api(name, arguments)
+        _ra_called_flag.called = False
     try:
         result = TOOL_REGISTRY[name](**arguments)
         # 検索系ツールで結果が空の場合、LLMがハルシネーションしないよう明示的な警告を付与
@@ -2283,6 +2339,14 @@ async def setup_current():
             "tavily_api_key": mask(raw.get("TAVILY_API_KEY", "")),
             "tavily_api_key_set": bool(raw.get("TAVILY_API_KEY")),
         },
+        "responses_api": {
+            "enabled":     raw.get("RESPONSES_API_ENABLED", "false"),
+            "endpoint":    raw.get("RESPONSES_API_ENDPOINT", ""),
+            "api_key":     mask(raw.get("RESPONSES_API_KEY", "")),
+            "api_key_set": bool(raw.get("RESPONSES_API_KEY")),
+            "model":       raw.get("RESPONSES_API_MODEL", ""),
+            "api_version": raw.get("RESPONSES_API_VERSION", ""),
+        },
     })
 
 
@@ -2368,6 +2432,7 @@ class SetupSaveRequest(BaseModel):
     agent: dict
     gitlab: dict
     searxng: dict
+    responses_api: dict = {}
 
 
 @app.post("/setup/save")
@@ -2379,7 +2444,8 @@ async def setup_save(req: SetupSaveRequest):
     existing_lines = []
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
-        "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "no_proxy", "NO_PROXY",
+        "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
+        "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -2487,6 +2553,23 @@ async def setup_save(req: SetupSaveRequest):
     if tavily_key:
         lines.append(f"TAVILY_API_KEY={tavily_key}")
     lines.append("")
+
+    # Responses API サブエージェント
+    ra = req.responses_api
+    if ra:
+        ra_key = api_key_val(ra.get("api_key", ""), "RESPONSES_API_KEY")
+        lines += [
+            "# Responses API サブエージェント（コード生成特化モデル）",
+            f"RESPONSES_API_ENABLED={ra.get('enabled', 'false')}",
+            f"RESPONSES_API_ENDPOINT={ra.get('endpoint', '')}",
+        ]
+        if ra_key:
+            lines.append(f"RESPONSES_API_KEY={ra_key}")
+        lines += [
+            f"RESPONSES_API_MODEL={ra.get('model', '')}",
+            f"RESPONSES_API_VERSION={ra.get('api_version', '')}",
+            "",
+        ]
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

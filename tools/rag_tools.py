@@ -49,7 +49,7 @@ def _get_embedding_function(mode: str = None):
                 api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
                 api_type="azure",
                 api_version=RAG_EMBED_API_VERSION,
-                model_name=RAG_EMBED_DEPLOYMENT,
+                deployment_id=RAG_EMBED_DEPLOYMENT,
             )
     return None  # None = ChromaDB 内蔵
 

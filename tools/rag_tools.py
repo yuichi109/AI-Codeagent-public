@@ -223,12 +223,17 @@ def rag_search(query: str, record_type: str = None, n_results: int = 5) -> dict:
         include=["documents", "metadatas", "distances"],
     )
 
+    MIN_RELEVANCE = 0.3  # これ以下は無関係とみなす
+
     results = []
     for i, (doc, meta, dist) in enumerate(zip(
         res["documents"][0],
         res["metadatas"][0],
         res["distances"][0],
     )):
+        relevance = round(1 - dist, 3)
+        if relevance < MIN_RELEVANCE:
+            continue
         results.append({
             "id": res["ids"][0][i],
             "summary": doc,
@@ -236,7 +241,7 @@ def rag_search(query: str, record_type: str = None, n_results: int = 5) -> dict:
             "tags": [t for t in meta.get("tags", "").split(",") if t],
             "date": meta.get("date"),
             "last_verified": meta.get("last_verified"),
-            "relevance": round(1 - dist, 3),
+            "relevance": relevance,
         })
 
     return {
@@ -244,6 +249,7 @@ def rag_search(query: str, record_type: str = None, n_results: int = 5) -> dict:
         "query": query,
         "record_type_filter": record_type,
         "total_in_db": total,
+        "message": "該当する記録なし" if not results else None,
     }
 
 

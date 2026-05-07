@@ -71,7 +71,17 @@ def _get_collection():
     kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
     if ef is not None:
         kwargs["embedding_function"] = ef
-    return client.get_or_create_collection(**kwargs)
+    try:
+        return client.get_or_create_collection(**kwargs)
+    except Exception as e:
+        msg = str(e)
+        if "onnxruntime" in msg.lower() or "onnx" in msg.lower():
+            raise RuntimeError(
+                "RAG初期化失敗: onnxruntime が見つかりません。\n"
+                "pip install onnxruntime を実行してサーバーを再起動してください。\n"
+                f"詳細: {msg}"
+            ) from e
+        raise
 
 
 def _saved_mode() -> str | None:

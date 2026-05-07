@@ -36,7 +36,7 @@ def _current_mode() -> str:
 
 
 def _make_azure_ef():
-    """Azure OpenAI embedding function を生成。設定不足なら None を返す。"""
+    """Azure OpenAI embedding function を生成。RAG_EMBED_* 設定が揃っていない場合は None。"""
     from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
     if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
         from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction

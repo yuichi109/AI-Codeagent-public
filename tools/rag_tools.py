@@ -31,50 +31,28 @@ _VALID_STATUSES = {"active", "deprecated"}
 
 
 def _current_mode() -> str:
-    """有効な埋め込みモードを返す。Azure 設定済みなら 'azure'、なければ設定値。"""
-    from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT
-    if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
-        return "azure"
     from config import RAG_EMBED_MODE
     return RAG_EMBED_MODE or "default"
 
 
-def _make_azure_ef():
-    """Azure OpenAI embedding function を生成。RAG_EMBED_* 設定が揃っていない場合は None。"""
-    from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
-    if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
-        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-        return OpenAIEmbeddingFunction(
-            api_key=RAG_EMBED_API_KEY,
-            api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
-            api_type="azure",
-            api_version=RAG_EMBED_API_VERSION,
-            deployment_id=RAG_EMBED_DEPLOYMENT,
-        )
-    return None
-
 
 def _get_embedding_function(mode: str = None):
-    """指定モードの embedding function を返す。mode 省略時は _current_mode() を使用。"""
+    """指定モード（省略時は設定値）の embedding function を返す。"""
     if mode is None:
         mode = _current_mode()
 
     if mode == "azure":
-        ef = _make_azure_ef()
-        if ef:
-            return ef
-
-    # default: ChromaDB 内蔵（onnxruntime 必須・初回に HuggingFace からDL）
-    try:
-        import onnxruntime  # noqa: F401
-        return None  # None = ChromaDB 内蔵 EF
-    except ImportError:
-        pass
-
-    raise RuntimeError(
-        "RAG初期化失敗: Azure embedding が未設定で onnxruntime もありません。\n"
-        "setup 画面で RAG_EMBED_* を設定するか、pip install onnxruntime してください。"
-    )
+        from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
+        if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
+            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+            return OpenAIEmbeddingFunction(
+                api_key=RAG_EMBED_API_KEY,
+                api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
+                api_type="azure",
+                api_version=RAG_EMBED_API_VERSION,
+                deployment_id=RAG_EMBED_DEPLOYMENT,
+            )
+    return None  # None = ChromaDB 内蔵 EF（onnxruntime）
 
 
 def _get_client():

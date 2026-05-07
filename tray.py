@@ -27,6 +27,41 @@ _server_proc: subprocess.Popen | None = None
 _lock = threading.Lock()
 _LOG_FILE = BASE_DIR / "server.log"
 
+_VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+
+def _ensure_vcredist():
+    """onnxruntime の DLL が読めない場合に VC++ 再頒布パッケージを自動インストールする。"""
+    result = subprocess.run(
+        [_get_python_exe(), "-c", "import onnxruntime"],
+        capture_output=True,
+        creationflags=_no_window_flag(),
+    )
+    if result.returncode == 0:
+        return  # 正常
+
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    if "dll" not in stderr.lower() and "dyn" not in stderr.lower():
+        return  # DLL 以外のエラーはここでは対処しない
+
+    with open(_LOG_FILE, "a", encoding="utf-8", buffering=1) as log_fh:
+        log_fh.write("[tray] VC++ 再頒布パッケージが未インストール → 自動インストールを開始します...
+")
+        import urllib.request, tempfile
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=".exe", delete=False)
+            tmp.close()
+            urllib.request.urlretrieve(_VCREDIST_URL, tmp.name)
+            subprocess.run(
+                [tmp.name, "/install", "/quiet", "/norestart"],
+                creationflags=_no_window_flag(),
+            )
+            log_fh.write("[tray] VC++ 再頒布パッケージのインストール完了
+")
+        except Exception as e:
+            log_fh.write(f"[tray] VC++ 自動インストール失敗: {e}
+")
+
 
 # ---------------------------------------------------------------------------
 # アイコン生成
@@ -154,6 +189,7 @@ def _start_server():
     with _lock:
         if _server_proc and _server_proc.poll() is None:
             return
+        _ensure_vcredist()
         _sync_requirements()
         log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1)
         _server_proc = subprocess.Popen(

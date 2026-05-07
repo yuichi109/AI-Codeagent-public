@@ -10,18 +10,16 @@ import time
 import webbrowser
 from pathlib import Path
 
-# pythonw.exe はエラーが無音で消えるためファイルに記録する
-_STARTUP_LOG = Path(__file__).parent / "server.log"
 try:
     import pystray
     from PIL import Image, ImageDraw, ImageFont
 except Exception:
-    _STARTUP_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(_STARTUP_LOG, "a", encoding="utf-8") as _f:
-        import traceback
-        _f.write("[tray] import error:
-")
-        _f.write(traceback.format_exc())
+    _err_log = Path(__file__).parent / "server.log"
+    _err_log.parent.mkdir(parents=True, exist_ok=True)
+    import traceback
+    _err_log.open("a", encoding="utf-8").write(
+        "[tray] import error:\n" + traceback.format_exc()
+    )
     sys.exit(1)
 
 BASE_DIR = Path(__file__).parent
@@ -37,41 +35,6 @@ _EMOJI_FONTS = [
 _server_proc: subprocess.Popen | None = None
 _lock = threading.Lock()
 _LOG_FILE = BASE_DIR / "server.log"
-
-_VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-
-
-def _ensure_vcredist():
-    """onnxruntime の DLL が読めない場合に VC++ 再頒布パッケージを自動インストールする。"""
-    result = subprocess.run(
-        [_get_python_exe(), "-c", "import onnxruntime"],
-        capture_output=True,
-        creationflags=_no_window_flag(),
-    )
-    if result.returncode == 0:
-        return  # 正常
-
-    stderr = result.stderr.decode("utf-8", errors="replace")
-    if "dll" not in stderr.lower() and "dyn" not in stderr.lower():
-        return  # DLL 以外のエラーはここでは対処しない
-
-    with open(_LOG_FILE, "a", encoding="utf-8", buffering=1) as log_fh:
-        log_fh.write("[tray] VC++ 再頒布パッケージが未インストール → 自動インストールを開始します...
-")
-        import urllib.request, tempfile
-        try:
-            tmp = tempfile.NamedTemporaryFile(suffix=".exe", delete=False)
-            tmp.close()
-            urllib.request.urlretrieve(_VCREDIST_URL, tmp.name)
-            subprocess.run(
-                [tmp.name, "/install", "/quiet", "/norestart"],
-                creationflags=_no_window_flag(),
-            )
-            log_fh.write("[tray] VC++ 再頒布パッケージのインストール完了
-")
-        except Exception as e:
-            log_fh.write(f"[tray] VC++ 自動インストール失敗: {e}
-")
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +132,37 @@ def _load_env() -> dict:
             key, _, val = line.partition("=")
             env[key.strip()] = val.strip()
     return env
+
+
+_VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+
+def _ensure_vcredist():
+    """onnxruntime の DLL が読めない場合に VC++ を自動サイレントインストールする。"""
+    result = subprocess.run(
+        [_get_python_exe(), "-c", "import onnxruntime"],
+        capture_output=True,
+        creationflags=_no_window_flag(),
+    )
+    if result.returncode == 0:
+        return
+    stderr = result.stderr.decode("utf-8", errors="replace").lower()
+    if "dll" not in stderr and "dyn" not in stderr:
+        return
+    with open(_LOG_FILE, "a", encoding="utf-8", buffering=1) as lf:
+        lf.write("[tray] VC++ not found, installing...\n")
+        import urllib.request, tempfile
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=".exe", delete=False)
+            tmp.close()
+            urllib.request.urlretrieve(_VCREDIST_URL, tmp.name)
+            subprocess.run(
+                [tmp.name, "/install", "/quiet", "/norestart"],
+                creationflags=_no_window_flag(),
+            )
+            lf.write("[tray] VC++ installed OK\n")
+        except Exception as e:
+            lf.write(f"[tray] VC++ install failed: {e}\n")
 
 
 def _sync_requirements():
@@ -301,7 +295,6 @@ def main():
         menu=menu,
     )
 
-    # アイコンを先に出してからバックグラウンドで起動処理
     def _startup():
         _start_server()
         if _is_running():

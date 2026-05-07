@@ -51,37 +51,26 @@ def _make_azure_ef():
 
 
 def _get_embedding_function(mode: str = None):
-    """指定モード（省略時は設定値）の embedding function を返す。
+    """embedding function を返す。
 
-    mode=azure  → Azure embedding を使用
-    mode=default → onnxruntime（ChromaDB 内蔵）を使用。
-                   onnxruntime がない場合のみ Azure にフォールバック。
+    Azure embedding（RAG_EMBED_*）が設定済みならそちらを使う。
+    未設定なら ChromaDB 内蔵（onnxruntime）を使う。
     """
-    if mode is None:
-        mode = _current_mode()
+    # Azure が設定済みなら優先（ローカルDL不要・安定）
+    ef = _make_azure_ef()
+    if ef:
+        return ef
 
-    if mode == "azure":
-        ef = _make_azure_ef()
-        if ef:
-            return ef
-        # Azure 設定不足なら default にフォールバック
-
-    # default: ChromaDB 内蔵（onnxruntime が必要・初回に HuggingFace からモデルDL）
+    # Azure 未設定: ChromaDB 内蔵（onnxruntime 必須・初回に HuggingFace からDL）
     try:
         import onnxruntime  # noqa: F401
         return None  # None = ChromaDB 内蔵 EF
     except ImportError:
         pass
 
-    # onnxruntime なし → Azure にフォールバック
-    ef = _make_azure_ef()
-    if ef:
-        return ef
-
     raise RuntimeError(
-        "RAG初期化失敗: onnxruntime が見つからず Azure embedding も未設定です。\n"
-        "pip install onnxruntime を実行してサーバーを再起動するか、\n"
-        "setup 画面で RAG_EMBED_* を設定してください。"
+        "RAG初期化失敗: Azure embedding が未設定で onnxruntime もありません。\n"
+        "setup 画面で RAG_EMBED_* を設定するか、pip install onnxruntime してください。"
     )
 
 

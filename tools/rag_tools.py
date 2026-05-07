@@ -63,13 +63,34 @@ def _get_client():
 
 
 def _reset_collection(client, kwargs):
-    """コレクションをリセットして新しく作り直す。"""
+    """既存データを新しい EF で再変換してコレクションを作り直す。データは保持される。"""
+    # 既存データを取得（テキストだけ取り出す・embeddings は捨てる）
+    existing_ids, existing_docs, existing_metas = [], [], []
+    try:
+        old_col = client.get_collection(_COLLECTION_NAME)
+        result = old_col.get(include=["documents", "metadatas"])
+        existing_ids  = result.get("ids", [])
+        existing_docs = result.get("documents", [])
+        existing_metas = result.get("metadatas", [])
+    except Exception:
+        pass
+
+    # 旧コレクション削除
     try:
         client.delete_collection(_COLLECTION_NAME)
     except Exception:
         pass
     _EMBED_MODE_FILE.unlink(missing_ok=True)
-    return client.get_or_create_collection(**kwargs)
+
+    # 新 EF でコレクション再作成
+    new_col = client.get_or_create_collection(**kwargs)
+
+    # 既存データを新 EF で再投入（chromaDB が新しい embedding を自動生成）
+    if existing_ids:
+        new_col.add(ids=existing_ids, documents=existing_docs, metadatas=existing_metas)
+        print(f"[rag] 次元不一致を検出 → {len(existing_ids)}件を新EFで再変換しました")
+
+    return new_col
 
 
 def _get_collection():

@@ -126,11 +126,23 @@ def _sync_requirements():
     req_file = BASE_DIR / "requirements.txt"
     if not req_file.exists():
         return
-    subprocess.run(
-        [_get_python_exe(), "-m", "pip", "install", "-r", str(req_file), "--quiet"],
-        cwd=str(BASE_DIR),
-        creationflags=_no_window_flag(),
-    )
+    with open(_LOG_FILE, "a", encoding="utf-8", buffering=1) as log_fh:
+        log_fh.write("[tray] pip install -r requirements.txt ...\n")
+        result = subprocess.run(
+            [_get_python_exe(), "-m", "pip", "install", "-r", str(req_file)],
+            cwd=str(BASE_DIR),
+            creationflags=_no_window_flag(),
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout:
+            log_fh.write(result.stdout)
+        if result.stderr:
+            log_fh.write(result.stderr)
+        log_fh.write(
+            "[tray] pip install 完了\n" if result.returncode == 0
+            else f"[tray] pip install 失敗 (code={result.returncode})\n"
+        )
 
 
 def _start_server():

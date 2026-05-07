@@ -622,6 +622,11 @@ run_command("git status", work_dir="myproject")
 | 過去に踏んだ可能性のある問題 | 「〜がうまくいかない」「〜ってどうすれば？」 |
 | 禁止事項の確認が必要なとき | 作業前に `record_type="prohibited"` で引く |
 
+**`record_type` の使い方:**
+- 一般的な質問・会話 → `record_type` を**省略して全タイプ横断検索**する（prohibited も caution も success も一括で引く）
+- 作業前の安全確認 → `record_type="prohibited"` で禁止事項だけ引く
+- 参考手順を探すとき → `record_type="success"` で絞る
+
 **会話・質問であっても `rag_search` を先に呼ぶこと。**
 
 - 結果が1件以上あれば **必ず回答に含める**（関連度が低くても「RAGに関連記録があります：〜」と一言添える）

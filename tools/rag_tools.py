@@ -35,23 +35,52 @@ def _current_mode() -> str:
     return RAG_EMBED_MODE or "default"
 
 
+def _make_azure_ef():
+    """Azure OpenAI embedding function を生成。設定不足なら None を返す。"""
+    from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
+    if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
+        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+        return OpenAIEmbeddingFunction(
+            api_key=RAG_EMBED_API_KEY,
+            api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
+            api_type="azure",
+            api_version=RAG_EMBED_API_VERSION,
+            deployment_id=RAG_EMBED_DEPLOYMENT,
+        )
+    return None
+
+
 def _get_embedding_function(mode: str = None):
-    """指定モード（省略時は設定値）の embedding function を返す。"""
+    """指定モード（省略時は設定値）の embedding function を返す。
+
+    default モードで onnxruntime が見つからない場合は Azure embedding に自動フォールバック。
+    """
     if mode is None:
         mode = _current_mode()
 
     if mode == "azure":
-        from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
-        if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
-            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-            return OpenAIEmbeddingFunction(
-                api_key=RAG_EMBED_API_KEY,
-                api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
-                api_type="azure",
-                api_version=RAG_EMBED_API_VERSION,
-                deployment_id=RAG_EMBED_DEPLOYMENT,
-            )
-    return None  # None = ChromaDB 内蔵
+        ef = _make_azure_ef()
+        if ef:
+            return ef
+        # Azure 設定不足なら default にフォールバック
+
+    # default: ChromaDB 内蔵（onnxruntime が必要）
+    try:
+        import onnxruntime  # noqa: F401
+        return None  # None = ChromaDB 内蔵 EF を使用
+    except ImportError:
+        pass
+
+    # onnxruntime なし → Azure embedding に自動フォールバック
+    ef = _make_azure_ef()
+    if ef:
+        return ef
+
+    raise RuntimeError(
+        "RAG初期化失敗: onnxruntime が見つからず、Azure embedding も未設定です。\n"
+        "setup 画面で「RAG 埋め込みモード」を azure に設定するか、\n"
+        "RAG_EMBED_ENDPOINT / RAG_EMBED_API_KEY / RAG_EMBED_DEPLOYMENT を .env に設定してください。"
+    )
 
 
 def _get_client():

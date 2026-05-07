@@ -94,10 +94,14 @@ def _no_window_flag() -> int:
 
 def _get_python_exe() -> str:
     """venv の python.exe を返す（pythonw.exe では uvicorn が動かないため）"""
+    # まず BASE_DIR/venv を優先（tray.py の起動方法に依存しない）
+    venv_python = BASE_DIR / "venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
     python_exe = Path(sys.executable).parent / "python.exe"
     if python_exe.exists():
         return str(python_exe)
-    return sys.executable  # フォールバック
+    return sys.executable
 
 
 def _load_env() -> dict:

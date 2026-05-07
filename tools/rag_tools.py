@@ -59,6 +59,12 @@ class _AzureEmbeddingFunction:
         response = self._client.embeddings.create(model=self._deployment, input=input)
         return [item.embedding for item in response.data]
 
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self([text])[0]
+
 
 def _get_embedding_function(mode: str = None):
     """指定モード（省略時は設定値）の embedding function を返す。"""

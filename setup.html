@@ -46,6 +46,17 @@
   .save-btn:hover { background: #74c7ec; }
   .save-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #save-status { font-size: 13px; }
+  /* トグルスイッチ */
+  .toggle-row { display: flex; align-items: center; gap: 10px; }
+  .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; cursor: pointer; inset: 0; background: #45475a; border-radius: 24px; transition: .2s; }
+  .toggle-slider:before { content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #cdd6f4; border-radius: 50%; transition: .2s; }
+  input:checked + .toggle-slider { background: #a6e3a1; }
+  input:checked + .toggle-slider:before { transform: translateX(20px); }
+  .toggle-label { font-size: 13px; color: #cdd6f4; }
+  .ra-fields { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; transition: opacity .2s; }
+  .ra-fields.disabled { opacity: 0.4; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -162,6 +173,97 @@
         <button class="save-btn" style="font-size:13px;padding:7px 18px;background:#f38ba8;margin-left:8px;" onclick="clearAnsibleCreds()">🗑 消去</button>
         <span id="ans-save-status" style="margin-left:10px;font-size:13px;"></span>
       </div>
+    </div>
+  </div>
+
+  <!-- Responses API サブエージェント -->
+  <div class="section collapsed" id="sec-responses-api">
+    <div class="section-header" onclick="toggleSection('sec-responses-api')">
+      ⚡ Responses API サブエージェント <span class="tag">省略可・コード生成特化</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="toggle-row">
+        <label class="toggle-switch">
+          <input type="checkbox" id="ra-enabled" onchange="onRaToggle()">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">有効化（コード生成を Responses API モデルに委譲する）</span>
+      </div>
+      <div class="ra-fields disabled" id="ra-fields">
+        <div class="row">
+          <div class="field">
+            <label>エンドポイント</label>
+            <input id="ra-endpoint" type="text" placeholder="https://...（OpenAI互換またはAzure）">
+          </div>
+          <div class="field">
+            <label>モデル名</label>
+            <input id="ra-model" type="text" placeholder="gpt-5.3-codex など">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>API キー</label>
+            <input id="ra-api-key" type="password" placeholder="（未設定）" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>API バージョン <span class="tag">Azure のみ</span></label>
+            <input id="ra-api-version" type="text" placeholder="2025-xx-xx-preview（OpenAI直接は不要）">
+          </div>
+        </div>
+        <span class="hint">有効にすると、write_file / edit_file の前に必ずこのモデルでコードを生成します。再起動後に反映されます。</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RAG 埋め込みモデル -->
+  <div class="section collapsed" id="sec-rag">
+    <div class="section-header" onclick="toggleSection('sec-rag')">
+      🧠 RAG 知見DB <span class="tag">省略可・デフォルトで動作</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="field">
+        <label>RAG 有効化</label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="rag-enabled" onchange="onRagEnabledChange()" style="width:auto;">
+          <span id="rag-enabled-label">有効（エージェントが知見DBを参照する）</span>
+        </label>
+        <span class="hint">OFFにするとエージェントがRAG検索を行わなくなります。</span>
+      </div>
+      <div id="rag-settings">
+      <div class="field">
+        <label>埋め込みモード</label>
+        <select id="rag-mode" onchange="onRagModeChange()">
+          <option value="default">デフォルト（ChromaDB 内蔵 · ローカル · 無料）</option>
+          <option value="azure">Azure OpenAI（text-embedding · 高精度 · 日本語対応）</option>
+        </select>
+        <span class="hint">デフォルトはローカルで動作・無料。Azure に切り替えると日本語精度が上がります。<br>⚠️ モードを変更して保存すると、次回起動時に既存の記録を自動で新モデルに変換します（記録は消えません）。</span>
+      </div>
+      <div class="ra-fields disabled" id="rag-azure-fields">
+        <div class="row">
+          <div class="field">
+            <label>エンドポイント</label>
+            <input id="rag-endpoint" type="text" placeholder="https://xxx.openai.azure.com">
+          </div>
+          <div class="field">
+            <label>デプロイ名</label>
+            <input id="rag-deployment" type="text" placeholder="text-embedding-3-small など">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>API キー</label>
+            <input id="rag-api-key" type="password" placeholder="（未設定）" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>API バージョン</label>
+            <input id="rag-api-version" type="text" placeholder="2024-12-01-preview">
+          </div>
+        </div>
+        <span class="hint">エンドポイント・APIキーは Azure OpenAI と同じものを使い回せます。デプロイ名だけ embedding 用に変えてください。</span>
+      </div>
+      </div><!-- /rag-settings -->
     </div>
   </div>
 
@@ -379,6 +481,27 @@ function addModelOption(btn) {
   input.value = '';
 }
 
+// ---- Responses API トグル ----
+function onRaToggle() {
+  const enabled = document.getElementById('ra-enabled').checked;
+  document.getElementById('ra-fields').classList.toggle('disabled', !enabled);
+}
+
+// ---- RAG 有効/無効トグル ----
+function onRagEnabledChange() {
+  const enabled = document.getElementById('rag-enabled').checked;
+  document.getElementById('rag-settings').classList.toggle('disabled', !enabled);
+  document.getElementById('rag-enabled-label').textContent = enabled
+    ? '有効（エージェントが知見DBを参照する）'
+    : '無効（RAG検索をスキップする）';
+}
+
+// ---- RAG 埋め込みモード切り替え ----
+function onRagModeChange() {
+  const mode = document.getElementById('rag-mode').value;
+  document.getElementById('rag-azure-fields').classList.toggle('disabled', mode !== 'azure');
+}
+
 // ---- セクション開閉 ----
 function toggleSection(id) {
   document.getElementById(id).classList.toggle('collapsed');
@@ -459,6 +582,31 @@ async function loadConfig() {
       document.getElementById('sx-tavily-key').placeholder = 'tvly-...（未設定）';
       document.getElementById('sx-tavily-hint').textContent = '未設定 — tavily.com で取得（無料・カード不要）';
     }
+
+    // Responses API
+    if (d.responses_api) {
+      const ra = d.responses_api;
+      const enabled = ra.enabled === 'true';
+      document.getElementById('ra-enabled').checked = enabled;
+      document.getElementById('ra-endpoint').value  = ra.endpoint || '';
+      document.getElementById('ra-model').value     = ra.model || '';
+      document.getElementById('ra-api-key').placeholder = ra.api_key_set ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
+      document.getElementById('ra-api-version').value = ra.api_version || '';
+      onRaToggle();
+    }
+
+    // RAG 埋め込みモデル
+    if (d.rag_embed) {
+      const re = d.rag_embed;
+      document.getElementById('rag-enabled').checked  = (re.enabled !== 'false');
+      document.getElementById('rag-mode').value       = re.mode || 'default';
+      document.getElementById('rag-endpoint').value   = re.endpoint || '';
+      document.getElementById('rag-deployment').value = re.deployment || '';
+      document.getElementById('rag-api-key').placeholder = re.api_key_set ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
+      document.getElementById('rag-api-version').value = re.api_version || '2024-02-01';
+      onRagEnabledChange();
+      onRagModeChange();
+    }
   } catch(e) {
     document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
   }
@@ -500,6 +648,21 @@ async function saveConfig() {
       url:            document.getElementById('sx-url').value,
       enabled:        document.getElementById('sx-enabled').value,
       tavily_api_key: document.getElementById('sx-tavily-key').value,
+    },
+    responses_api: {
+      enabled:     document.getElementById('ra-enabled').checked ? 'true' : 'false',
+      endpoint:    document.getElementById('ra-endpoint').value,
+      api_key:     document.getElementById('ra-api-key').value,
+      model:       document.getElementById('ra-model').value,
+      api_version: document.getElementById('ra-api-version').value,
+    },
+    rag_embed: {
+      enabled:     document.getElementById('rag-enabled').checked ? 'true' : 'false',
+      mode:        document.getElementById('rag-mode').value,
+      endpoint:    document.getElementById('rag-endpoint').value,
+      api_key:     document.getElementById('rag-api-key').value,
+      deployment:  document.getElementById('rag-deployment').value,
+      api_version: document.getElementById('rag-api-version').value,
     },
   };
 

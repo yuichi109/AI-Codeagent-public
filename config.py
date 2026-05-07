@@ -100,3 +100,19 @@ SEARXNG_ENABLED: bool = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"
 
 # Tavily Search API (省略可・無料1000クエリ/月・カード不要)
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+
+# Responses API サブエージェント (省略可・コード生成特化モデル用)
+RESPONSES_API_ENABLED: bool = os.getenv("RESPONSES_API_ENABLED", "false").lower() == "true"
+RESPONSES_API_ENDPOINT: str = os.getenv("RESPONSES_API_ENDPOINT", "")
+RESPONSES_API_KEY: str      = os.getenv("RESPONSES_API_KEY", "")
+RESPONSES_API_MODEL: str    = os.getenv("RESPONSES_API_MODEL", "")
+RESPONSES_API_VERSION: str  = os.getenv("RESPONSES_API_VERSION", "")
+
+# RAG 埋め込みモデル設定 (省略可)
+# RAG_EMBED_MODE: "default"（ChromaDB内蔵）または "azure"（Azure OpenAI text-embedding）
+RAG_ENABLED: bool           = os.getenv("RAG_ENABLED", "true").lower() == "true"
+RAG_EMBED_MODE: str         = os.getenv("RAG_EMBED_MODE", "default")
+RAG_EMBED_ENDPOINT: str     = os.getenv("RAG_EMBED_ENDPOINT", "")
+RAG_EMBED_API_KEY: str      = os.getenv("RAG_EMBED_API_KEY", "")
+RAG_EMBED_DEPLOYMENT: str   = os.getenv("RAG_EMBED_DEPLOYMENT", "")
+RAG_EMBED_API_VERSION: str  = os.getenv("RAG_EMBED_API_VERSION", "2024-12-01-preview")

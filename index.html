@@ -299,12 +299,24 @@
   .sess-meta { font-size: 11px; color: #6c7086; margin-top: 2px; }
   .sess-del-btn { padding: 6px 8px; background: transparent; border: none; color: #45475a; cursor: pointer; font-size: 12px; flex-shrink: 0; }
   .sess-del-btn:hover { color: #f38ba8; }
+  .sess-protect-btn { padding: 6px 6px; background: transparent; border: none; color: #45475a; cursor: pointer; font-size: 14px; flex-shrink: 0; line-height: 1; }
+  .sess-protect-btn.active { color: #f9e2af; }
+  .sess-protect-btn:hover { color: #f9e2af; }
+  .sess-item.archived { opacity: 0.75; }
+  .sess-item.archived .sess-title { color: #a6adc8; }
+  #sessions-archive-toggle { padding: 2px 8px; font-size: 11px; background: #313244; color: #6c7086; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  #sessions-archive-toggle:hover { color: #cdd6f4; }
+  #sessions-archive-toggle.active { color: #89b4fa; }
+  .sess-archive-divider { padding: 6px 10px 2px; font-size: 11px; color: #45475a; }
   /* 過去セッション再開バナー */
   #session-banner { display: none; padding: 6px 20px; background: #1e1e2e; border-bottom: 1px solid #45475a; align-items: center; gap: 10px; font-size: 12px; color: #6c7086; flex-shrink: 0; }
   #session-banner.visible { display: flex; }
   #session-banner-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a6adc8; }
   #session-banner-back { padding: 3px 10px; background: #313244; color: #cdd6f4; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; white-space: nowrap; }
   #session-banner-back:hover { background: #45475a; }
+  #session-banner-restore { padding: 3px 10px; background: #1e66f5; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; white-space: nowrap; display: none; }
+  #session-banner-restore:hover { background: #89b4fa; color: #1e1e2e; }
+  #session-banner.archived-view { background: #1a1a2e; border-bottom-color: #1e66f5; }
   /* 過去セッションのメッセージスタイル（チャットエリアに表示） */
   .sess-msg { padding: 8px 12px; border-radius: 8px; font-size: 14px; line-height: 1.75; word-break: break-word; }
   .sess-msg-user { white-space: pre-wrap; background: #313244; color: #cdd6f4; border-radius: 12px 12px 4px 12px; border: 1px solid #45475a; }
@@ -415,8 +427,11 @@
 <!-- セッション履歴パネル（左からスライドイン） -->
 <div id="sessions-panel">
   <div id="sessions-panel-header">
-    🕐 過去のセッション
-    <button id="sessions-panel-close" onclick="toggleSessionsPanel()">✕</button>
+    <span>🕐 過去のセッション</span>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button id="sessions-archive-toggle" onclick="toggleArchiveView()" title="アーカイブを表示">📦 アーカイブ</button>
+      <button id="sessions-panel-close" onclick="toggleSessionsPanel()">✕</button>
+    </div>
   </div>
   <div id="sessions-list-view">
     <div id="sessions-list"></div>
@@ -509,7 +524,8 @@
 </div>
 
 <div id="session-banner">
-  🕐 再開：<span id="session-banner-title"></span>
+  <span id="session-banner-label">🕐 再開：</span><span id="session-banner-title"></span>
+  <button id="session-banner-restore" onclick="restoreArchivedSession()">↩ この会話を再開</button>
   <button id="session-banner-back" onclick="newSession()">＋ 新しい会話</button>
 </div>
 <div id="chat"></div>
@@ -1264,93 +1280,151 @@
     if (isOpen) loadSessionsList();
   }
 
+  let _showArchive = false;
+
+  function toggleArchiveView() {
+    _showArchive = !_showArchive;
+    const btn = document.getElementById('sessions-archive-toggle');
+    btn.classList.toggle('active', _showArchive);
+    btn.textContent = _showArchive ? '🕐 履歴' : '📦 アーカイブ';
+    document.querySelector('#sessions-panel-header span').textContent = _showArchive ? '📦 アーカイブ' : '🕐 過去のセッション';
+    loadSessionsList();
+  }
+
+  function _renderSessionItem(s) {
+    const div = document.createElement('div');
+    div.className = 'sess-item' + (s.archived ? ' archived' : '');
+    const d = s.updated_at ? new Date(s.updated_at) : null;
+    const dateStr = d ? d.toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    const sid = escHtml(s.session_id);
+    div.innerHTML = `
+      <button class="sess-protect-btn${s.protected ? ' active' : ''}" onclick="toggleProtect(event,'${sid}',this)" title="${s.protected ? '保護を解除' : 'このセッションを保護'}">${s.protected ? '★' : '☆'}</button>
+      <div class="sess-item-body" onclick="viewSession('${sid}', ${!!s.archived})">
+        <div class="sess-title">${escHtml(s.title)}</div>
+        <div class="sess-meta">${dateStr}${s.turn_count ? ' · ' + s.turn_count + 'ターン' : ''}</div>
+      </div>
+      <button class="sess-del-btn" onclick="deleteSessionItem(event,'${sid}',this)" title="削除">✕</button>
+    `;
+    return div;
+  }
+
   async function loadSessionsList() {
     const listEl = document.getElementById('sessions-list');
     const emptyEl = document.getElementById('sessions-empty');
     listEl.innerHTML = '<div style="color:#6c7086;font-size:13px;padding:16px">読み込み中...</div>';
     emptyEl.style.display = 'none';
     try {
-      const r = await fetch('/sessions');
+      const url = _showArchive ? '/sessions/archive' : '/sessions';
+      const r = await fetch(url);
       const sessions = await r.json();
       listEl.innerHTML = '';
       if (sessions.length === 0) {
         emptyEl.style.display = 'block';
+        emptyEl.innerHTML = _showArchive
+          ? 'アーカイブはありません<br><small style="color:#45475a">20件を超えると自動移動されます</small>'
+          : '過去のセッションはありません<br><small style="color:#45475a">会話が終わると自動保存されます</small>';
         return;
       }
-      sessions.forEach(s => {
-        const div = document.createElement('div');
-        div.className = 'sess-item';
-        const d = s.updated_at ? new Date(s.updated_at) : null;
-        const dateStr = d ? d.toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-        div.innerHTML = `
-          <div class="sess-item-body" onclick="viewSession('${escHtml(s.session_id)}')">
-            <div class="sess-title">${escHtml(s.title)}</div>
-            <div class="sess-meta">${dateStr}${s.turn_count ? ' · ' + s.turn_count + 'ターン' : ''}</div>
-          </div>
-          <button class="sess-del-btn" onclick="deleteSessionItem(event,'${escHtml(s.session_id)}',this)" title="削除">✕</button>
-        `;
-        listEl.appendChild(div);
-      });
+      sessions.forEach(s => listEl.appendChild(_renderSessionItem(s)));
     } catch(e) {
       listEl.innerHTML = '<div style="color:#f38ba8;font-size:12px;padding:16px">取得失敗: ' + escHtml(e.message) + '</div>';
     }
   }
 
-  async function viewSession(sessionId) {
-    // パネルを閉じる
-    document.getElementById('sessions-panel').classList.remove('open');
+  async function toggleProtect(e, sessionId, btn) {
+    e.stopPropagation();
+    try {
+      const r = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/protect', { method: 'POST' });
+      const data = await r.json();
+      btn.classList.toggle('active', data.protected);
+      btn.title = data.protected ? '保護を解除' : 'このセッションを保護';
+      btn.textContent = data.protected ? '★' : '☆';
+    } catch(e) {
+      alert('保護設定の変更に失敗しました: ' + e.message);
+    }
+  }
 
+  let _viewingArchivedSessionId = null;
+
+  function _renderSessionContent(data) {
+    history = data.history || [];
+    turns = [];
+    tokenSession = { prompt: 0, completion: 0, total: 0 };
+    chat.innerHTML = '';
+    const savedModels = Array.isArray(data.turn_models) ? data.turn_models : [];
+    let i = 0, turnIdx = 0;
+    while (i < history.length) {
+      const u = history[i];
+      if (u?.role !== 'user') { i++; continue; }
+      let aiText = '';
+      let j = i + 1;
+      while (j < history.length && history[j]?.role !== 'user') {
+        if (history[j]?.role === 'assistant' && history[j]?.content) aiText = history[j].content;
+        j++;
+      }
+      const modelName = savedModels[turnIdx] || null;
+      const turnEl = createTurnEl();
+      appendMsg(turnEl, 'user', u.content);
+      if (aiText) {
+        const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
+        if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
+      }
+      turns.push({ el: turnEl, userText: u.content, aiText, modelName });
+      turnIdx++;
+      i = j;
+    }
+    foldOldTurns();
+    updateTurnCount();
+    updateTokenInfo(0, 0);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  async function viewSession(sessionId, isArchived) {
+    document.getElementById('sessions-panel').classList.remove('open');
     try {
       const r = await fetch('/sessions/' + encodeURIComponent(sessionId));
       const data = await r.json();
       if (data.error) throw new Error(data.error);
 
-      // history・turns・トークンをリセットしてセッション内容で上書き
-      history = data.history || [];
-      turns = [];
-      tokenSession = { prompt: 0, completion: 0, total: 0 };
-      chat.innerHTML = '';
+      _renderSessionContent(data);
 
-      // loadHistory() と同じロジックでUI再構築
-      const savedModels = Array.isArray(data.turn_models) ? data.turn_models : [];
-      let i = 0, turnIdx = 0;
-      while (i < history.length) {
-        const u = history[i];
-        if (u?.role !== 'user') { i++; continue; }
-        let aiText = '';
-        let j = i + 1;
-        while (j < history.length && history[j]?.role !== 'user') {
-          if (history[j]?.role === 'assistant' && history[j]?.content) aiText = history[j].content;
-          j++;
-        }
-        const modelName = savedModels[turnIdx] || null;
-        const turnEl = createTurnEl();
-        appendMsg(turnEl, 'user', u.content);
-        if (aiText) {
-          const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
-          if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
-        }
-        turns.push({ el: turnEl, userText: u.content, aiText, modelName });
-        turnIdx++;
-        i = j;
-      }
-      foldOldTurns();
-      updateTurnCount();
-      updateTokenInfo(0, 0);
-
-      // セッションIDをこのセッションに切り替え → 続きから自動保存される
-      localStorage.setItem(SESSION_ID_KEY, sessionId);
-      saveHistory();
-
-      // バナーに再開中セッション名を表示
+      const banner = document.getElementById('session-banner');
       document.getElementById('session-banner-title').textContent = data.title || '無題';
-      document.getElementById('session-banner').classList.add('visible');
 
-      chat.scrollTop = chat.scrollHeight;
+      if (isArchived) {
+        _viewingArchivedSessionId = sessionId;
+        document.getElementById('session-banner-label').textContent = '📦 アーカイブ参照中：';
+        document.getElementById('session-banner-restore').style.display = 'inline-block';
+        document.getElementById('session-banner-back').style.display = 'none';
+        banner.classList.add('archived-view');
+        // セッションIDは切り替えない・saveHistory しない
+      } else {
+        _viewingArchivedSessionId = null;
+        document.getElementById('session-banner-label').textContent = '🕐 再開：';
+        document.getElementById('session-banner-restore').style.display = 'none';
+        document.getElementById('session-banner-back').style.display = 'inline-block';
+        banner.classList.remove('archived-view');
+        localStorage.setItem(SESSION_ID_KEY, sessionId);
+      }
+      banner.classList.add('visible');
       document.getElementById('input').focus();
     } catch(e) {
       alert('セッションの読み込みに失敗しました: ' + e.message);
     }
+  }
+
+  async function restoreArchivedSession() {
+    if (!_viewingArchivedSessionId) return;
+    const sessionId = _viewingArchivedSessionId;
+    _viewingArchivedSessionId = null;
+    localStorage.setItem(SESSION_ID_KEY, sessionId);
+    saveHistory();
+    const banner = document.getElementById('session-banner');
+    document.getElementById('session-banner-label').textContent = '🕐 再開：';
+    document.getElementById('session-banner-restore').style.display = 'none';
+    document.getElementById('session-banner-back').style.display = 'inline-block';
+    banner.classList.remove('archived-view');
+    document.getElementById('input').focus();
   }
 
   function newSession() {

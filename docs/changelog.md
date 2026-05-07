@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-05-05
+
+### Responses API サブエージェント対応（コミット: c4670f7）
+
+- `tools/responses_tools.py` 新規作成
+  - `call_responses_api(model, input, tools, instructions, previous_response_id)` ツール追加
+  - メインエージェントがサブタスクを別モデルに委譲するマルチエージェント構成を実現
+- `setup.html`: Responses API 有効/無効トグルを設定画面に追加
+- `server.py`: `call_responses_api` を TOOL_REGISTRY・TOOLS に登録
+- `config.py`: Responses API 関連の設定値を追加
+- `prompts.py`: Responses API ツールの使い方をシステムプロンプトに追記
+
+### Claude Code CLI版のセットアップ（環境整備）
+
+- Windows PowerShell に `npm install -g @anthropic-ai/claude-code` でインストール
+- WSL からも `/mnt/c/...` マウント経由で参照可能（追加インストール不要・既定の動作）
+- Google アカウント（claude.ai Pro）でログイン済み・追加課金なし
+- Windows Terminal（`winget install Microsoft.WindowsTerminal`）もインストール済み
+- このプロジェクトの作業はデスクトップ版継続推奨（memory自動読み込み・GUIパネルのため）
+
+### Ubuntu apt 障害メモ（2026-04-30〜）
+
+- `archive.ubuntu.com` が DDoS 攻撃の影響で断続的に不安定
+- 回避策：`sudo sed -i 's|http://archive.ubuntu.com|https://ftp.udx.icscoe.jp/Linux/ubuntu|g' /etc/apt/sources.list`
+- 復旧後は `sudo sed -i 's|https://ftp.udx.icscoe.jp/Linux/ubuntu|http://archive.ubuntu.com|g' /etc/apt/sources.list` で元に戻す
+
+---
+
+## 2026-04-30
+
+### WSL版: プロジェクト指示ファイルを CLAUDE.md → AGENT.md に改名
+- `prompts.py` の読み込み対象ファイル名を `CLAUDE.md` から `AGENT.md` に変更
+- Claude Code の `CLAUDE.md` と名前が衝突して紛らわしかったため
+- `workspace/AGENT.md`（全体共通）・`workspace/<プロジェクト>/AGENT.md`（プロジェクト固有）の両方を読み込む動作は変わらず
+
+### Windows版（for_windowsブランチ）: git clone の認証・パス問題を修正
+- **認証エラー修正**: `git -c credential.helper=""` を追加し Windows Credential Manager をバイパス。URL に埋め込んだ PAT が直接使われるようになった
+- **パス修正**: クローン先を `~/AI-Codeagent/workspace/リポジトリ名` から `リポジトリ名`（相対パス）に変更。Git for Windows が `~` をホームディレクトリに展開するため workspace 外にクローンされていた問題を解消
+
+### WSL版・Windows版: シェルパネルのコマンド実行後に入力欄がクリアされないリグレッション修正
+- `index.html` の `shellExec()` の `finally` ブロックに `input.value = ''` と `input.style.height = 'auto'` を追加
+- 過去に修正済みだったが再発していた（`aad98ba` のリグレッション）
+
+### 未対応（次回対応予定）
+- **Windows版シェルパネルの文字化け**: PowerShell 出力が CP932 でエンコードされているため `ls` 等で日本語が文字化けする。WSL版で過去に同様の修正済み（CP932→UTF-8変換）
+
+---
+
+
 ## 実装済み機能
 
 ### セキュリティ

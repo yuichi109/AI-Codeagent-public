@@ -10,8 +10,11 @@ DBは ~/AI-Codeagent/.rag_db/ に永続化。GitLabで全PC同期する想定。
 埋め込みモードは .env の RAG_EMBED_MODE で切り替え:
   - "default": ChromaDB 内蔵（all-MiniLM-L6-v2、ローカル・無料）
   - "azure"  : Azure OpenAI text-embedding モデル（高精度・日本語対応）
+
+モードが変わった場合は _ensure_embed_mode_consistent() が自動で全件再変換する。
 """
 
+import json
 import uuid
 from datetime import date
 from pathlib import Path
@@ -21,38 +24,126 @@ from chromadb.config import Settings
 
 _DB_DIR = Path(__file__).parent.parent / ".rag_db"
 _COLLECTION_NAME = "knowledge"
+_EMBED_MODE_FILE = _DB_DIR / "_embed_mode.json"
 
 _VALID_TYPES = {"success", "prohibited", "caution"}
 _VALID_STATUSES = {"active", "deprecated"}
 
 
-def _get_embedding_function():
-    """RAG_EMBED_MODE に応じた embedding function を返す。"""
-    from config import RAG_EMBED_MODE, RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
-
-    if RAG_EMBED_MODE == "azure" and RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
-        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-        return OpenAIEmbeddingFunction(
-            api_key=RAG_EMBED_API_KEY,
-            api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
-            api_type="azure",
-            api_version=RAG_EMBED_API_VERSION,
-            model_name=RAG_EMBED_DEPLOYMENT,
-        )
-    # デフォルト: ChromaDB 内蔵（None を返すと自動使用）
-    return None
+def _current_mode() -> str:
+    from config import RAG_EMBED_MODE
+    return RAG_EMBED_MODE or "default"
 
 
-def _get_collection():
-    client = chromadb.PersistentClient(
+def _get_embedding_function(mode: str = None):
+    """指定モード（省略時は設定値）の embedding function を返す。"""
+    if mode is None:
+        mode = _current_mode()
+
+    if mode == "azure":
+        from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
+        if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
+            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+            return OpenAIEmbeddingFunction(
+                api_key=RAG_EMBED_API_KEY,
+                api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
+                api_type="azure",
+                api_version=RAG_EMBED_API_VERSION,
+                model_name=RAG_EMBED_DEPLOYMENT,
+            )
+    return None  # None = ChromaDB 内蔵
+
+
+def _get_client():
+    return chromadb.PersistentClient(
         path=str(_DB_DIR),
         settings=Settings(anonymized_telemetry=False),
     )
+
+
+def _get_collection():
+    """現在の埋め込みモードでコレクションを取得する。モード変更時は自動再変換。"""
+    _DB_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_embed_mode_consistent()
+
+    client = _get_client()
     ef = _get_embedding_function()
     kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
     if ef is not None:
         kwargs["embedding_function"] = ef
     return client.get_or_create_collection(**kwargs)
+
+
+def _saved_mode() -> str | None:
+    """前回保存した埋め込みモードを返す。未記録なら None。"""
+    if _EMBED_MODE_FILE.exists():
+        try:
+            return json.loads(_EMBED_MODE_FILE.read_text(encoding="utf-8")).get("mode")
+        except Exception:
+            pass
+    return None
+
+
+def _save_mode(mode: str):
+    _EMBED_MODE_FILE.write_text(json.dumps({"mode": mode}), encoding="utf-8")
+
+
+def _ensure_embed_mode_consistent():
+    """
+    埋め込みモードが変わっていたら全記録を新モデルで再変換する。
+    ユーザーは何もしなくてよい。
+    """
+    current = _current_mode()
+    saved = _saved_mode()
+
+    if saved is None:
+        # 初回 or モードファイルなし → 現在のモードを記録するだけ
+        _save_mode(current)
+        return
+
+    if saved == current:
+        return  # モード変更なし
+
+    # ---- モード変更検出: 全件取り出して再投入 ----
+    print(f"[rag] 埋め込みモード変更を検出: {saved} → {current}。全記録を再変換します...")
+
+    client = _get_client()
+
+    # 旧コレクションから全件取得
+    old_ef = _get_embedding_function(saved)
+    old_kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
+    if old_ef is not None:
+        old_kwargs["embedding_function"] = old_ef
+
+    try:
+        old_col = client.get_collection(**old_kwargs)
+        existing = old_col.get(include=["documents", "metadatas"])
+    except Exception:
+        # 旧コレクションが取得できなければスキップ
+        _save_mode(current)
+        return
+
+    ids = existing.get("ids", [])
+    docs = existing.get("documents", [])
+    metas = existing.get("metadatas", [])
+
+    # 旧コレクション削除
+    client.delete_collection(_COLLECTION_NAME)
+    print(f"[rag] 旧コレクション削除完了（{len(ids)}件）")
+
+    # 新モードでコレクション再作成
+    new_ef = _get_embedding_function(current)
+    new_kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
+    if new_ef is not None:
+        new_kwargs["embedding_function"] = new_ef
+    new_col = client.get_or_create_collection(**new_kwargs)
+
+    # 全件再投入（embedding は ChromaDB が自動生成）
+    if ids:
+        new_col.add(ids=ids, documents=docs, metadatas=metas)
+        print(f"[rag] 再変換完了（{len(ids)}件）")
+
+    _save_mode(current)
 
 
 def rag_save(summary: str, record_type: str, tags: list = None) -> dict:

@@ -41,6 +41,7 @@ from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
+from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -197,6 +198,10 @@ TOOL_REGISTRY = {
     "run_background": run_background,
     "check_background": check_background,
     "kill_background": kill_background,
+    "rag_save": rag_save,
+    "rag_search": rag_search,
+    "rag_update_status": rag_update_status,
+    "rag_list": rag_list,
 }
 
 if RESPONSES_API_ENABLED:
@@ -764,6 +769,81 @@ TOOLS = [
                     "job_id": {"type": "string", "description": "停止するジョブID"},
                 },
                 "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_save",
+            "description": (
+                "知見をRAGデータベースに保存します。"
+                "タスク完了・エラー解決・問題発見時にユーザーへ「記録しますか？」と確認してから呼び出してください。"
+                "record_type: success=動いた手順・解決策 / prohibited=絶対やってはいけない操作 / caution=間違えやすい・ハマりやすい罠"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "記録する内容の要約（何をしたか・何がダメか・なぜかを含める）"},
+                    "record_type": {"type": "string", "enum": ["success", "prohibited", "caution"], "description": "記録の種類"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "検索用タグ（例: ['ansible', 'gitlab', 'proxy']）"},
+                },
+                "required": ["summary", "record_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_search",
+            "description": (
+                "RAGデータベースから関連する知見を検索します。"
+                "タスク開始前に prohibited で禁止事項、caution で注意点、success で参考手順を確認してください。"
+                "record_type を省略すると全タイプ横断検索します。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "検索クエリ（自然言語でOK）"},
+                    "record_type": {"type": "string", "enum": ["success", "prohibited", "caution"], "description": "絞り込む種類（省略可）"},
+                    "n_results": {"type": "integer", "description": "取得件数（デフォルト5）", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_update_status",
+            "description": (
+                "RAGデータベースの記録を deprecated（無効）に変更します。"
+                "古くなった・仕様変更で無効になった記録を発見したとき、またはユーザーが「あれ古い」と言ったときに使います。"
+                "削除はせず deprecated として残します（履歴保持のため）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "更新する記録のID"},
+                    "new_status": {"type": "string", "enum": ["active", "deprecated"], "description": "新しいステータス"},
+                    "reason": {"type": "string", "description": "変更理由（省略可）"},
+                },
+                "required": ["record_id", "new_status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_list",
+            "description": "/rag-review スキルで記録一覧を表示するときに使います。ユーザーに見せて古いものを整理するため。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_type": {"type": "string", "enum": ["success", "prohibited", "caution"], "description": "絞り込む種類（省略可）"},
+                    "status": {"type": "string", "enum": ["active", "deprecated", "all"], "description": "ステータスフィルタ（デフォルト: active）", "default": "active"},
+                },
+                "required": [],
             },
         },
     },

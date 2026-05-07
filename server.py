@@ -2110,6 +2110,43 @@ async def workspace_cleanup(req: CleanupRequest):
 # ---- セッション履歴管理 ----
 SESSIONS_DIR = Path(__file__).parent / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
+ARCHIVE_DIR = SESSIONS_DIR / "archive"
+ARCHIVE_DIR.mkdir(exist_ok=True)
+PROTECTED_FILE = SESSIONS_DIR / ".protected"
+SESSIONS_KEEP = 20
+ARCHIVE_KEEP = 100
+
+
+def _load_protected() -> set:
+    if not PROTECTED_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(PROTECTED_FILE.read_text(encoding="utf-8")))
+    except Exception:
+        return set()
+
+
+def _save_protected(ids: set):
+    PROTECTED_FILE.write_text(json.dumps(sorted(ids), ensure_ascii=False), encoding="utf-8")
+
+
+def _archive_old_sessions():
+    """sessions/ が SESSIONS_KEEP 件を超えたら古い順にアーカイブ移動。archive/ が ARCHIVE_KEEP 件を超えたら古い順に削除。"""
+    protected = _load_protected()
+    files = sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    keep, overflow = [], []
+    for f in files:
+        sid = f.stem
+        if sid in protected or len(keep) < SESSIONS_KEEP:
+            keep.append(f)
+        else:
+            overflow.append(f)
+    for f in overflow:
+        dest = ARCHIVE_DIR / f.name
+        f.rename(dest)
+    archive_files = sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for f in archive_files[ARCHIVE_KEEP:]:
+        f.unlink(missing_ok=True)
 
 
 class SessionSaveRequest(BaseModel):
@@ -2145,22 +2182,65 @@ async def compact_history_endpoint(req: CompactRequest):
 
 @app.get("/sessions")
 async def list_sessions():
-    """セッション一覧を取得（最新順、最大100件）"""
+    """セッション一覧を取得（最新順）"""
+    protected = _load_protected()
     sessions = []
-    for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:100]:
+    for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
+            sid = data.get("session_id")
             turn_count = len([m for m in data.get("history", []) if m.get("role") == "user"])
             sessions.append({
-                "session_id": data.get("session_id"),
+                "session_id": sid,
                 "title": data.get("title", "無題"),
                 "created_at": data.get("created_at"),
                 "updated_at": data.get("updated_at"),
                 "turn_count": turn_count,
+                "protected": sid in protected,
             })
         except Exception:
             pass
     return JSONResponse(sessions)
+
+
+@app.get("/sessions/archive")
+async def list_archive_sessions():
+    """アーカイブ済みセッション一覧を取得（最新順）"""
+    protected = _load_protected()
+    sessions = []
+    for f in sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            sid = data.get("session_id")
+            turn_count = len([m for m in data.get("history", []) if m.get("role") == "user"])
+            sessions.append({
+                "session_id": sid,
+                "title": data.get("title", "無題"),
+                "created_at": data.get("created_at"),
+                "updated_at": data.get("updated_at"),
+                "turn_count": turn_count,
+                "protected": sid in protected,
+                "archived": True,
+            })
+        except Exception:
+            pass
+    return JSONResponse(sessions)
+
+
+@app.post("/sessions/{session_id}/protect")
+async def toggle_protect_session(session_id: str):
+    """セッションの保護フラグをトグル"""
+    if "/" in session_id or "\\" in session_id or ".." in session_id:
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+    protected = _load_protected()
+    if session_id in protected:
+        protected.discard(session_id)
+        is_protected = False
+    else:
+        protected.add(session_id)
+        is_protected = True
+    _save_protected(protected)
+    return JSONResponse({"ok": True, "protected": is_protected})
 
 
 @app.post("/sessions/save")
@@ -2202,15 +2282,18 @@ async def save_session(req: SessionSaveRequest):
         "turn_models": req.turn_models,
     }
     session_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    _archive_old_sessions()
     return JSONResponse({"ok": True})
 
 
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
-    """セッション内容を取得"""
+    """セッション内容を取得（アーカイブも検索）"""
     if "/" in session_id or "\\" in session_id or ".." in session_id:
         return JSONResponse({"error": "invalid session_id"}, status_code=400)
     session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not session_file.exists():
+        session_file = ARCHIVE_DIR / f"{session_id}.json"
     if not session_file.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
     try:
@@ -2222,12 +2305,17 @@ async def get_session(session_id: str):
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """セッションを削除"""
+    """セッションを削除（アーカイブも対象）"""
     if "/" in session_id or "\\" in session_id or ".." in session_id:
         return JSONResponse({"error": "invalid session_id"}, status_code=400)
-    session_file = SESSIONS_DIR / f"{session_id}.json"
-    if session_file.exists():
-        session_file.unlink()
+    for d in (SESSIONS_DIR, ARCHIVE_DIR):
+        f = d / f"{session_id}.json"
+        if f.exists():
+            f.unlink()
+    protected = _load_protected()
+    if session_id in protected:
+        protected.discard(session_id)
+        _save_protected(protected)
     return JSONResponse({"ok": True})
 
 

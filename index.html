@@ -299,6 +299,15 @@
   .sess-meta { font-size: 11px; color: #6c7086; margin-top: 2px; }
   .sess-del-btn { padding: 6px 8px; background: transparent; border: none; color: #45475a; cursor: pointer; font-size: 12px; flex-shrink: 0; }
   .sess-del-btn:hover { color: #f38ba8; }
+  .sess-protect-btn { padding: 6px 6px; background: transparent; border: none; color: #45475a; cursor: pointer; font-size: 13px; flex-shrink: 0; line-height: 1; }
+  .sess-protect-btn.active { color: #f9e2af; }
+  .sess-protect-btn:hover { color: #f9e2af; }
+  .sess-item.archived { opacity: 0.75; }
+  .sess-item.archived .sess-title { color: #a6adc8; }
+  #sessions-archive-toggle { padding: 2px 8px; font-size: 11px; background: #313244; color: #6c7086; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  #sessions-archive-toggle:hover { color: #cdd6f4; }
+  #sessions-archive-toggle.active { color: #89b4fa; }
+  .sess-archive-divider { padding: 6px 10px 2px; font-size: 11px; color: #45475a; }
   /* 過去セッション再開バナー */
   #session-banner { display: none; padding: 6px 20px; background: #1e1e2e; border-bottom: 1px solid #45475a; align-items: center; gap: 10px; font-size: 12px; color: #6c7086; flex-shrink: 0; }
   #session-banner.visible { display: flex; }
@@ -415,8 +424,11 @@
 <!-- セッション履歴パネル（左からスライドイン） -->
 <div id="sessions-panel">
   <div id="sessions-panel-header">
-    🕐 過去のセッション
-    <button id="sessions-panel-close" onclick="toggleSessionsPanel()">✕</button>
+    <span>🕐 過去のセッション</span>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button id="sessions-archive-toggle" onclick="toggleArchiveView()" title="アーカイブを表示">📦 アーカイブ</button>
+      <button id="sessions-panel-close" onclick="toggleSessionsPanel()">✕</button>
+    </div>
   </div>
   <div id="sessions-list-view">
     <div id="sessions-list"></div>
@@ -1264,6 +1276,32 @@
     if (isOpen) loadSessionsList();
   }
 
+  let _showArchive = false;
+
+  function toggleArchiveView() {
+    _showArchive = !_showArchive;
+    const btn = document.getElementById('sessions-archive-toggle');
+    btn.classList.toggle('active', _showArchive);
+    loadSessionsList();
+  }
+
+  function _renderSessionItem(s) {
+    const div = document.createElement('div');
+    div.className = 'sess-item' + (s.archived ? ' archived' : '');
+    const d = s.updated_at ? new Date(s.updated_at) : null;
+    const dateStr = d ? d.toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    const sid = escHtml(s.session_id);
+    div.innerHTML = `
+      <button class="sess-protect-btn${s.protected ? ' active' : ''}" onclick="toggleProtect(event,'${sid}',this)" title="${s.protected ? '保護を解除' : 'このセッションを保護'}">⭐</button>
+      <div class="sess-item-body" onclick="viewSession('${sid}')">
+        <div class="sess-title">${escHtml(s.title)}</div>
+        <div class="sess-meta">${dateStr}${s.turn_count ? ' · ' + s.turn_count + 'ターン' : ''}</div>
+      </div>
+      <button class="sess-del-btn" onclick="deleteSessionItem(event,'${sid}',this)" title="削除">✕</button>
+    `;
+    return div;
+  }
+
   async function loadSessionsList() {
     const listEl = document.getElementById('sessions-list');
     const emptyEl = document.getElementById('sessions-empty');
@@ -1273,26 +1311,41 @@
       const r = await fetch('/sessions');
       const sessions = await r.json();
       listEl.innerHTML = '';
-      if (sessions.length === 0) {
+      if (sessions.length === 0 && !_showArchive) {
         emptyEl.style.display = 'block';
         return;
       }
-      sessions.forEach(s => {
-        const div = document.createElement('div');
-        div.className = 'sess-item';
-        const d = s.updated_at ? new Date(s.updated_at) : null;
-        const dateStr = d ? d.toLocaleString('ja-JP', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-        div.innerHTML = `
-          <div class="sess-item-body" onclick="viewSession('${escHtml(s.session_id)}')">
-            <div class="sess-title">${escHtml(s.title)}</div>
-            <div class="sess-meta">${dateStr}${s.turn_count ? ' · ' + s.turn_count + 'ターン' : ''}</div>
-          </div>
-          <button class="sess-del-btn" onclick="deleteSessionItem(event,'${escHtml(s.session_id)}',this)" title="削除">✕</button>
-        `;
-        listEl.appendChild(div);
-      });
+      sessions.forEach(s => listEl.appendChild(_renderSessionItem(s)));
+
+      if (_showArchive) {
+        const ar = await fetch('/sessions/archive');
+        const archived = await ar.json();
+        if (archived.length > 0) {
+          const divider = document.createElement('div');
+          divider.className = 'sess-archive-divider';
+          divider.textContent = `── アーカイブ (${archived.length}件) ──`;
+          listEl.appendChild(divider);
+          archived.forEach(s => listEl.appendChild(_renderSessionItem(s)));
+        }
+      }
+
+      if (!listEl.querySelector('.sess-item')) {
+        emptyEl.style.display = 'block';
+      }
     } catch(e) {
       listEl.innerHTML = '<div style="color:#f38ba8;font-size:12px;padding:16px">取得失敗: ' + escHtml(e.message) + '</div>';
+    }
+  }
+
+  async function toggleProtect(e, sessionId, btn) {
+    e.stopPropagation();
+    try {
+      const r = await fetch('/sessions/' + encodeURIComponent(sessionId) + '/protect', { method: 'POST' });
+      const data = await r.json();
+      btn.classList.toggle('active', data.protected);
+      btn.title = data.protected ? '保護を解除' : 'このセッションを保護';
+    } catch(e) {
+      alert('保護設定の変更に失敗しました: ' + e.message);
     }
   }
 

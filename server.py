@@ -43,6 +43,7 @@ from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
+from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -199,6 +200,10 @@ TOOL_REGISTRY = {
     "run_background": run_background,
     "check_background": check_background,
     "kill_background": kill_background,
+    "rag_save": rag_save,
+    "rag_search": rag_search,
+    "rag_update_status": rag_update_status,
+    "rag_list": rag_list,
 }
 
 if RESPONSES_API_ENABLED:
@@ -766,6 +771,81 @@ TOOLS = [
                     "job_id": {"type": "string", "description": "停止するジョブID"},
                 },
                 "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_save",
+            "description": (
+                "知見をRAGデータベースに保存します。"
+                "タスク完了・エラー解決・問題発見時にユーザーへ「記録しますか？」と確認してから呼び出してください。"
+                "record_type: success=動いた手順・解決策 / prohibited=絶対やってはいけない操作 / caution=間違えやすい・ハマりやすい罠"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "記録する内容の要約（何をしたか・何がダメか・なぜかを含める）"},
+                    "record_type": {"type": "string", "enum": ["success", "prohibited", "caution"], "description": "記録の種類"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "検索用タグ（例: ['ansible', 'gitlab', 'proxy']）"},
+                },
+                "required": ["summary", "record_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_search",
+            "description": (
+                "RAGデータベースから関連する知見を検索します。"
+                "タスク開始前に prohibited で禁止事項、caution で注意点、success で参考手順を確認してください。"
+                "record_type を省略すると全タイプ横断検索します。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "検索クエリ（自然言語でOK）"},
+                    "record_type": {"type": "string", "enum": ["success", "prohibited", "caution"], "description": "絞り込む種類（省略可）"},
+                    "n_results": {"type": "integer", "description": "取得件数（デフォルト5）", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_update_status",
+            "description": (
+                "RAGデータベースの記録を deprecated（無効）に変更します。"
+                "古くなった・仕様変更で無効になった記録を発見したとき、またはユーザーが「あれ古い」と言ったときに使います。"
+                "削除はせず deprecated として残します（履歴保持のため）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {"type": "string", "description": "更新する記録のID"},
+                    "new_status": {"type": "string", "enum": ["active", "deprecated"], "description": "新しいステータス"},
+                    "reason": {"type": "string", "description": "変更理由（省略可）"},
+                },
+                "required": ["record_id", "new_status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_list",
+            "description": "/rag-review スキルで記録一覧を表示するときに使います。ユーザーに見せて古いものを整理するため。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_type": {"type": "string", "enum": ["success", "prohibited", "caution"], "description": "絞り込む種類（省略可）"},
+                    "status": {"type": "string", "enum": ["active", "deprecated", "all"], "description": "ステータスフィルタ（デフォルト: active）", "default": "active"},
+                },
+                "required": [],
             },
         },
     },
@@ -2111,6 +2191,48 @@ async def workspace_cleanup(req: CleanupRequest):
 # ---- セッション履歴管理 ----
 SESSIONS_DIR = Path(__file__).parent / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
+ARCHIVE_DIR = SESSIONS_DIR / "archive"
+ARCHIVE_DIR.mkdir(exist_ok=True)
+PROTECTED_FILE = SESSIONS_DIR / ".protected"
+SESSIONS_KEEP = 20
+ARCHIVE_KEEP = 100
+
+
+def _load_protected() -> set:
+    if not PROTECTED_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(PROTECTED_FILE.read_text(encoding="utf-8")))
+    except Exception:
+        return set()
+
+
+def _save_protected(ids: set):
+    PROTECTED_FILE.write_text(json.dumps(sorted(ids), ensure_ascii=False), encoding="utf-8")
+
+
+def _archive_old_sessions():
+    """sessions/ が SESSIONS_KEEP 件を超えたら古い順にアーカイブ移動。archive/ が ARCHIVE_KEEP 件を超えたら古い順に削除。"""
+    protected = _load_protected()
+    def _updated_at(p):
+        try:
+            return json.loads(p.read_text(encoding="utf-8")).get("updated_at", "")
+        except Exception:
+            return ""
+    files = sorted(SESSIONS_DIR.glob("*.json"), key=_updated_at, reverse=True)
+    keep, overflow = [], []
+    for f in files:
+        sid = f.stem
+        if sid in protected or len(keep) < SESSIONS_KEEP:
+            keep.append(f)
+        else:
+            overflow.append(f)
+    for f in overflow:
+        dest = ARCHIVE_DIR / f.name
+        f.rename(dest)
+    archive_files = sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: json.loads(p.read_text(encoding="utf-8")).get("updated_at", "") if p.exists() else "", reverse=True)
+    for f in archive_files[ARCHIVE_KEEP:]:
+        f.unlink(missing_ok=True)
 
 
 class SessionSaveRequest(BaseModel):
@@ -2146,22 +2268,70 @@ async def compact_history_endpoint(req: CompactRequest):
 
 @app.get("/sessions")
 async def list_sessions():
-    """セッション一覧を取得（最新順、最大100件）"""
+    """セッション一覧を取得（最新順）"""
+    protected = _load_protected()
     sessions = []
-    for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:100]:
+    def _mtime(p):
+        try:
+            return json.loads(p.read_text(encoding="utf-8")).get("updated_at", "")
+        except Exception:
+            return ""
+    for f in sorted(SESSIONS_DIR.glob("*.json"), key=_mtime, reverse=True):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
+            sid = data.get("session_id")
             turn_count = len([m for m in data.get("history", []) if m.get("role") == "user"])
             sessions.append({
-                "session_id": data.get("session_id"),
+                "session_id": sid,
                 "title": data.get("title", "無題"),
                 "created_at": data.get("created_at"),
                 "updated_at": data.get("updated_at"),
                 "turn_count": turn_count,
+                "protected": sid in protected,
             })
         except Exception:
             pass
     return JSONResponse(sessions)
+
+
+@app.get("/sessions/archive")
+async def list_archive_sessions():
+    """アーカイブ済みセッション一覧を取得（最新順）"""
+    protected = _load_protected()
+    sessions = []
+    for f in sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: json.loads(p.read_text(encoding="utf-8")).get("updated_at", ""), reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            sid = data.get("session_id")
+            turn_count = len([m for m in data.get("history", []) if m.get("role") == "user"])
+            sessions.append({
+                "session_id": sid,
+                "title": data.get("title", "無題"),
+                "created_at": data.get("created_at"),
+                "updated_at": data.get("updated_at"),
+                "turn_count": turn_count,
+                "protected": sid in protected,
+                "archived": True,
+            })
+        except Exception:
+            pass
+    return JSONResponse(sessions)
+
+
+@app.post("/sessions/{session_id}/protect")
+async def toggle_protect_session(session_id: str):
+    """セッションの保護フラグをトグル"""
+    if "/" in session_id or "\\" in session_id or ".." in session_id:
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+    protected = _load_protected()
+    if session_id in protected:
+        protected.discard(session_id)
+        is_protected = False
+    else:
+        protected.add(session_id)
+        is_protected = True
+    _save_protected(protected)
+    return JSONResponse({"ok": True, "protected": is_protected})
 
 
 @app.post("/sessions/save")
@@ -2203,15 +2373,18 @@ async def save_session(req: SessionSaveRequest):
         "turn_models": req.turn_models,
     }
     session_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    _archive_old_sessions()
     return JSONResponse({"ok": True})
 
 
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
-    """セッション内容を取得"""
+    """セッション内容を取得（アーカイブも検索）"""
     if "/" in session_id or "\\" in session_id or ".." in session_id:
         return JSONResponse({"error": "invalid session_id"}, status_code=400)
     session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not session_file.exists():
+        session_file = ARCHIVE_DIR / f"{session_id}.json"
     if not session_file.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
     try:
@@ -2223,12 +2396,17 @@ async def get_session(session_id: str):
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """セッションを削除"""
+    """セッションを削除（アーカイブも対象）"""
     if "/" in session_id or "\\" in session_id or ".." in session_id:
         return JSONResponse({"error": "invalid session_id"}, status_code=400)
-    session_file = SESSIONS_DIR / f"{session_id}.json"
-    if session_file.exists():
-        session_file.unlink()
+    for d in (SESSIONS_DIR, ARCHIVE_DIR):
+        f = d / f"{session_id}.json"
+        if f.exists():
+            f.unlink()
+    protected = _load_protected()
+    if session_id in protected:
+        protected.discard(session_id)
+        _save_protected(protected)
     return JSONResponse({"ok": True})
 
 
@@ -2347,6 +2525,15 @@ async def setup_current():
             "model":       raw.get("RESPONSES_API_MODEL", ""),
             "api_version": raw.get("RESPONSES_API_VERSION", ""),
         },
+        "rag_embed": {
+            "enabled":     raw.get("RAG_ENABLED", "true"),
+            "mode":        raw.get("RAG_EMBED_MODE", "default"),
+            "endpoint":    raw.get("RAG_EMBED_ENDPOINT", ""),
+            "api_key":     mask(raw.get("RAG_EMBED_API_KEY", "")),
+            "api_key_set": bool(raw.get("RAG_EMBED_API_KEY")),
+            "deployment":  raw.get("RAG_EMBED_DEPLOYMENT", ""),
+            "api_version": raw.get("RAG_EMBED_API_VERSION", "2024-02-01"),
+        },
     })
 
 
@@ -2433,6 +2620,7 @@ class SetupSaveRequest(BaseModel):
     gitlab: dict
     searxng: dict
     responses_api: dict = {}
+    rag_embed: dict = {}
 
 
 @app.post("/setup/save")
@@ -2445,6 +2633,7 @@ async def setup_save(req: SetupSaveRequest):
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
+        "RAG_ENABLED", "RAG_EMBED_",
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -2456,8 +2645,9 @@ async def setup_save(req: SetupSaveRequest):
                 existing_lines.append(line)  # 未知キーも保持
 
     def api_key_val(new_val: str, key_in_env: str) -> str:
-        """新値が空か *** を含む場合は既存値を維持"""
+        """新値が空または *** を含む場合は既存値を維持"""
         if not new_val or "***" in new_val:
+            # 既存 .env から取得
             if env_path.exists():
                 for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
                     if line.startswith(key_in_env + "="):
@@ -2570,6 +2760,22 @@ async def setup_save(req: SetupSaveRequest):
             f"RESPONSES_API_VERSION={ra.get('api_version', '')}",
             "",
         ]
+
+    # RAG 埋め込みモデル
+    re = req.rag_embed
+    if re:
+        re_key = api_key_val(re.get("api_key", ""), "RAG_EMBED_API_KEY")
+        lines += [
+            "# RAG 埋め込みモデル",
+            f"RAG_ENABLED={re.get('enabled', 'true')}",
+            f"RAG_EMBED_MODE={re.get('mode', 'default')}",
+            f"RAG_EMBED_ENDPOINT={re.get('endpoint', '')}",
+            f"RAG_EMBED_DEPLOYMENT={re.get('deployment', '')}",
+            f"RAG_EMBED_API_VERSION={re.get('api_version', '2024-02-01')}",
+        ]
+        if re_key:
+            lines.append(f"RAG_EMBED_API_KEY={re_key}")
+        lines.append("")
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

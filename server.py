@@ -2133,7 +2133,12 @@ def _save_protected(ids: set):
 def _archive_old_sessions():
     """sessions/ が SESSIONS_KEEP 件を超えたら古い順にアーカイブ移動。archive/ が ARCHIVE_KEEP 件を超えたら古い順に削除。"""
     protected = _load_protected()
-    files = sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    def _updated_at(p):
+        try:
+            return json.loads(p.read_text(encoding="utf-8")).get("updated_at", "")
+        except Exception:
+            return ""
+    files = sorted(SESSIONS_DIR.glob("*.json"), key=_updated_at, reverse=True)
     keep, overflow = [], []
     for f in files:
         sid = f.stem
@@ -2144,7 +2149,7 @@ def _archive_old_sessions():
     for f in overflow:
         dest = ARCHIVE_DIR / f.name
         f.rename(dest)
-    archive_files = sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    archive_files = sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: json.loads(p.read_text(encoding="utf-8")).get("updated_at", "") if p.exists() else "", reverse=True)
     for f in archive_files[ARCHIVE_KEEP:]:
         f.unlink(missing_ok=True)
 
@@ -2185,7 +2190,12 @@ async def list_sessions():
     """セッション一覧を取得（最新順）"""
     protected = _load_protected()
     sessions = []
-    for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    def _mtime(p):
+        try:
+            return json.loads(p.read_text(encoding="utf-8")).get("updated_at", "")
+        except Exception:
+            return ""
+    for f in sorted(SESSIONS_DIR.glob("*.json"), key=_mtime, reverse=True):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
             sid = data.get("session_id")
@@ -2208,7 +2218,7 @@ async def list_archive_sessions():
     """アーカイブ済みセッション一覧を取得（最新順）"""
     protected = _load_protected()
     sessions = []
-    for f in sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for f in sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: json.loads(p.read_text(encoding="utf-8")).get("updated_at", ""), reverse=True):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
             sid = data.get("session_id")

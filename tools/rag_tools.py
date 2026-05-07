@@ -146,23 +146,40 @@ def _ensure_embed_mode_consistent():
     docs = existing.get("documents", [])
     metas = existing.get("metadatas", [])
 
-    # 旧コレクション削除
-    client.delete_collection(_COLLECTION_NAME)
-    print(f"[rag] 旧コレクション削除完了（{len(ids)}件）")
-
-    # 新モードでコレクション再作成
+    # 新モードで仮コレクションに再投入してから旧コレクションを削除（失敗時にデータを保持）
+    tmp_name = _COLLECTION_NAME + "_tmp"
     new_ef = _get_embedding_function(current)
-    new_kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
+    new_kwargs = {"name": tmp_name, "metadata": {"hnsw:space": "cosine"}}
     if new_ef is not None:
         new_kwargs["embedding_function"] = new_ef
-    new_col = client.get_or_create_collection(**new_kwargs)
 
-    # 全件再投入（embedding は ChromaDB が自動生成）
+    try:
+        tmp_col = client.get_or_create_collection(**new_kwargs)
+        if ids:
+            tmp_col.add(ids=ids, documents=docs, metadatas=metas)
+        print(f"[rag] 仮コレクションへの再変換完了（{len(ids)}件）")
+    except Exception as e:
+        # 再変換失敗 → 仮コレクション削除してモードファイルは更新しない
+        try:
+            client.delete_collection(tmp_name)
+        except Exception:
+            pass
+        print(f"[rag] 再変換失敗（旧データ保持）: {e}")
+        return
+
+    # 成功後に旧コレクションを削除して本番名にリネーム
+    client.delete_collection(_COLLECTION_NAME)
+    client.delete_collection(tmp_name)
+    final_ef = _get_embedding_function(current)
+    final_kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
+    if final_ef is not None:
+        final_kwargs["embedding_function"] = final_ef
+    final_col = client.get_or_create_collection(**final_kwargs)
     if ids:
-        new_col.add(ids=ids, documents=docs, metadatas=metas)
-        print(f"[rag] 再変換完了（{len(ids)}件）")
+        final_col.add(ids=ids, documents=docs, metadatas=metas)
 
     _save_mode(current)
+    print(f"[rag] モード切替完了: {saved} → {current}（{len(ids)}件）")
 
 
 def rag_save(summary: str, record_type: str, tags: list = None) -> dict:

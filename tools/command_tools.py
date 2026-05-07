@@ -3,7 +3,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from config import ALLOWED_WORK_DIR, COMMAND_TIMEOUT_SECONDS
+from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS, COMMAND_TIMEOUT_SECONDS
 
 # 危険コマンドのブラックリスト（ホワイトリスト廃止 → ブラックリスト方式に移行）
 # rm -rf / や dd if=/dev/zero 等のシステム破壊コマンドのみ拒否
@@ -118,17 +118,22 @@ def _run_bash_sandboxed(args: list) -> dict:
             "stdout": "", "stderr": "", "returncode": -1,
         }
 
+    # 許可ディレクトリすべてを書き込み可でバインド
+    bind_args = []
+    for allowed_dir in ALLOWED_WORK_DIRS:
+        bind_args += ["--bind", str(allowed_dir), str(allowed_dir)]
+
     bwrap_cmd = [
         "bwrap",
-        "--ro-bind", "/", "/",                               # FS 全体を読み取り専用
-        "--dev", "/dev",                                     # デバイスファイル
-        "--proc", "/proc",                                   # プロセス情報
-        "--tmpfs", "/tmp",                                   # 一時領域（書き込み可）
-        "--bind", str(ALLOWED_WORK_DIR), str(ALLOWED_WORK_DIR),  # workspace のみ書き込み可
-        "--chdir", str(ALLOWED_WORK_DIR),                   # 作業ディレクトリを workspace に
-        "--unshare-net",                                     # ネットワーク遮断
-        "--new-session",                                     # 新しいセッション
-        "--die-with-parent",                                 # 親プロセス終了時に子も終了
+        "--ro-bind", "/", "/",       # FS 全体を読み取り専用
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--tmpfs", "/tmp",
+        *bind_args,                  # 許可ディレクトリのみ書き込み可
+        "--chdir", str(ALLOWED_WORK_DIR),
+        "--unshare-net",
+        "--new-session",
+        "--die-with-parent",
         "bash", str(script_path),
     ]
 
@@ -202,19 +207,23 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
         }
 
     # 作業ディレクトリの検証
-    # 相対パスは ALLOWED_WORK_DIR 基準で解決（Python プロセスの CWD ではない）
-    # "workspace" や "workspace/foo" が渡された場合の二重パス防止
     if work_dir:
         p = Path(work_dir)
-        if not p.is_absolute():
+        if p.is_absolute():
+            resolved_work_dir = p.resolve()
+        else:
+            # 相対パス: "workspace" や "workspace/foo" の二重パス防止
             parts = p.parts
             if parts and parts[0] == ALLOWED_WORK_DIR.name:
                 p = Path(*parts[1:]) if len(parts) > 1 else Path(".")
-        resolved_work_dir = (p if p.is_absolute() else ALLOWED_WORK_DIR / p).resolve()
+            resolved_work_dir = (ALLOWED_WORK_DIR / p).resolve()
     else:
         resolved_work_dir = ALLOWED_WORK_DIR
-    if not str(resolved_work_dir).startswith(str(ALLOWED_WORK_DIR)):
-        return {"error": "許可された作業ディレクトリ外へのアクセスは禁止されています", "stdout": "", "stderr": "", "returncode": -1}
+
+    resolved_str = str(resolved_work_dir)
+    if not any(resolved_str.startswith(str(d)) for d in ALLOWED_WORK_DIRS):
+        dirs = ", ".join(str(d) for d in ALLOWED_WORK_DIRS)
+        return {"error": f"許可された作業ディレクトリ外へのアクセスは禁止されています\n許可: {dirs}", "stdout": "", "stderr": "", "returncode": -1}
 
     # タイムアウト決定: timeout_minutes > LONG_RUNNING_CMDS > デフォルト の優先順
     if timeout_minutes is not None:

@@ -1,7 +1,13 @@
 import re
 from pathlib import Path
 from datetime import datetime
-from config import ALLOWED_WORK_DIR
+from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS
+
+
+def _is_under_allowed_dir(target: Path) -> bool:
+    """target がいずれかの許可ディレクトリの配下にあるか判定する。"""
+    target_str = str(target)
+    return any(target_str.startswith(str(d)) for d in ALLOWED_WORK_DIRS)
 
 
 def _normalize_path(path: str) -> str:
@@ -19,10 +25,16 @@ def _normalize_path(path: str) -> str:
 
 
 def _resolve_safe_path(path: str) -> Path:
-    path = _normalize_path(path)
-    target = (ALLOWED_WORK_DIR / path).resolve()
-    if not str(target).startswith(str(ALLOWED_WORK_DIR)):
-        raise PermissionError(f"アクセス禁止: '{path}' は作業ディレクトリ外です")
+    p = Path(path)
+    if p.is_absolute():
+        target = p.resolve()
+    else:
+        # 相対パスはデフォルト作業ディレクトリ基準で解決
+        normalized = _normalize_path(path)
+        target = (ALLOWED_WORK_DIR / normalized).resolve()
+    if not _is_under_allowed_dir(target):
+        dirs = ", ".join(str(d) for d in ALLOWED_WORK_DIRS)
+        raise PermissionError(f"アクセス禁止: '{path}' は許可された作業ディレクトリ外です\n許可: {dirs}")
     return target
 
 

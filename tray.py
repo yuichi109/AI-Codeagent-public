@@ -10,8 +10,19 @@ import time
 import webbrowser
 from pathlib import Path
 
-import pystray
-from PIL import Image, ImageDraw, ImageFont
+# pythonw.exe はエラーが無音で消えるためファイルに記録する
+_STARTUP_LOG = Path(__file__).parent / "server.log"
+try:
+    import pystray
+    from PIL import Image, ImageDraw, ImageFont
+except Exception:
+    _STARTUP_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(_STARTUP_LOG, "a", encoding="utf-8") as _f:
+        import traceback
+        _f.write("[tray] import error:
+")
+        _f.write(traceback.format_exc())
+    sys.exit(1)
 
 BASE_DIR = Path(__file__).parent
 PORT = 8001

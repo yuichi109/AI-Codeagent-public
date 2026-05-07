@@ -7,6 +7,9 @@ ChromaDB を使って3種類の知見を蓄積・検索する。
   - caution   : 間違えやすい・ハマりやすい罠
 
 DBは ~/AI-Codeagent/.rag_db/ に永続化。GitLabで全PC同期する想定。
+埋め込みモードは .env の RAG_EMBED_MODE で切り替え:
+  - "default": ChromaDB 内蔵（all-MiniLM-L6-v2、ローカル・無料）
+  - "azure"  : Azure OpenAI text-embedding モデル（高精度・日本語対応）
 """
 
 import uuid
@@ -23,15 +26,33 @@ _VALID_TYPES = {"success", "prohibited", "caution"}
 _VALID_STATUSES = {"active", "deprecated"}
 
 
+def _get_embedding_function():
+    """RAG_EMBED_MODE に応じた embedding function を返す。"""
+    from config import RAG_EMBED_MODE, RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
+
+    if RAG_EMBED_MODE == "azure" and RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
+        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+        return OpenAIEmbeddingFunction(
+            api_key=RAG_EMBED_API_KEY,
+            api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
+            api_type="azure",
+            api_version=RAG_EMBED_API_VERSION,
+            model_name=RAG_EMBED_DEPLOYMENT,
+        )
+    # デフォルト: ChromaDB 内蔵（None を返すと自動使用）
+    return None
+
+
 def _get_collection():
     client = chromadb.PersistentClient(
         path=str(_DB_DIR),
         settings=Settings(anonymized_telemetry=False),
     )
-    return client.get_or_create_collection(
-        name=_COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"},
-    )
+    ef = _get_embedding_function()
+    kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
+    if ef is not None:
+        kwargs["embedding_function"] = ef
+    return client.get_or_create_collection(**kwargs)
 
 
 def rag_save(summary: str, record_type: str, tags: list = None) -> dict:
@@ -112,13 +133,13 @@ def rag_search(query: str, record_type: str = None, n_results: int = 5) -> dict:
     )
 
     results = []
-    for doc, meta, dist in zip(
+    for i, (doc, meta, dist) in enumerate(zip(
         res["documents"][0],
         res["metadatas"][0],
         res["distances"][0],
-    ):
+    )):
         results.append({
-            "id": res["ids"][0][results.__len__()],  # index trick
+            "id": res["ids"][0][i],
             "summary": doc,
             "type": meta.get("type"),
             "tags": [t for t in meta.get("tags", "").split(",") if t],
@@ -126,10 +147,6 @@ def rag_search(query: str, record_type: str = None, n_results: int = 5) -> dict:
             "last_verified": meta.get("last_verified"),
             "relevance": round(1 - dist, 3),
         })
-
-    # id を正しく取得し直す
-    for i, item in enumerate(results):
-        item["id"] = res["ids"][0][i]
 
     return {
         "results": results,

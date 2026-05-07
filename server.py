@@ -2514,6 +2514,14 @@ async def setup_current():
             "model":       raw.get("RESPONSES_API_MODEL", ""),
             "api_version": raw.get("RESPONSES_API_VERSION", ""),
         },
+        "rag_embed": {
+            "mode":        raw.get("RAG_EMBED_MODE", "default"),
+            "endpoint":    raw.get("RAG_EMBED_ENDPOINT", ""),
+            "api_key":     mask(raw.get("RAG_EMBED_API_KEY", "")),
+            "api_key_set": bool(raw.get("RAG_EMBED_API_KEY")),
+            "deployment":  raw.get("RAG_EMBED_DEPLOYMENT", ""),
+            "api_version": raw.get("RAG_EMBED_API_VERSION", "2024-02-01"),
+        },
     })
 
 
@@ -2600,6 +2608,7 @@ class SetupSaveRequest(BaseModel):
     gitlab: dict
     searxng: dict
     responses_api: dict = {}
+    rag_embed: dict = {}
 
 
 @app.post("/setup/save")
@@ -2612,6 +2621,7 @@ async def setup_save(req: SetupSaveRequest):
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
+        "RAG_EMBED_",
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -2738,6 +2748,21 @@ async def setup_save(req: SetupSaveRequest):
             f"RESPONSES_API_VERSION={ra.get('api_version', '')}",
             "",
         ]
+
+    # RAG 埋め込みモデル
+    re = req.rag_embed
+    if re:
+        re_key = api_key_val(re.get("api_key", ""), "RAG_EMBED_API_KEY")
+        lines += [
+            "# RAG 埋め込みモデル",
+            f"RAG_EMBED_MODE={re.get('mode', 'default')}",
+            f"RAG_EMBED_ENDPOINT={re.get('endpoint', '')}",
+            f"RAG_EMBED_DEPLOYMENT={re.get('deployment', '')}",
+            f"RAG_EMBED_API_VERSION={re.get('api_version', '2024-02-01')}",
+        ]
+        if re_key:
+            lines.append(f"RAG_EMBED_API_KEY={re_key}")
+        lines.append("")
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

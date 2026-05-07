@@ -575,13 +575,8 @@ async function loadConfig() {
     // SearXNG / 検索
     document.getElementById('sx-url').value     = d.searxng.url;
     document.getElementById('sx-enabled').value = d.searxng.enabled;
-    if (d.searxng.tavily_api_key_set) {
-      document.getElementById('sx-tavily-key').value = '***';
-      document.getElementById('sx-tavily-hint').textContent = '現在: 設定済み';
-    } else {
-      document.getElementById('sx-tavily-key').placeholder = 'tvly-...（未設定）';
-      document.getElementById('sx-tavily-hint').textContent = '未設定 — tavily.com で取得（無料・カード不要）';
-    }
+    document.getElementById('sx-tavily-key').placeholder = d.searxng.tavily_api_key_set ? '（設定済み — 変更する場合のみ入力）' : 'tvly-...（未設定）';
+    document.getElementById('sx-tavily-hint').textContent = d.searxng.tavily_api_key_set ? '現在: 設定済み' : '未設定 — tavily.com で取得（無料・カード不要）';
 
     // Responses API
     if (d.responses_api) {
@@ -590,6 +585,7 @@ async function loadConfig() {
       document.getElementById('ra-enabled').checked = enabled;
       document.getElementById('ra-endpoint').value  = ra.endpoint || '';
       document.getElementById('ra-model').value     = ra.model || '';
+      document.getElementById('ra-api-key').value       = ra.api_key_set ? '***' : '';
       document.getElementById('ra-api-key').placeholder = ra.api_key_set ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
       document.getElementById('ra-api-version').value = ra.api_version || '';
       onRaToggle();
@@ -602,6 +598,7 @@ async function loadConfig() {
       document.getElementById('rag-mode').value       = re.mode || 'default';
       document.getElementById('rag-endpoint').value   = re.endpoint || '';
       document.getElementById('rag-deployment').value = re.deployment || '';
+      document.getElementById('rag-api-key').value       = re.api_key_set ? '***' : '';
       document.getElementById('rag-api-key').placeholder = re.api_key_set ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
       document.getElementById('rag-api-version').value = re.api_version || '2024-02-01';
       onRagEnabledChange();
@@ -676,20 +673,10 @@ async function saveConfig() {
     if (data.status === 'ok') {
       status.textContent = '✓ 保存しました。サーバーを再起動しています...';
       status.style.color = '#a6e3a1';
-      // 再起動完了をポーリングで検知（最大15秒）
-      const deadline = Date.now() + 15000;
-      let ready = false;
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 800));
-        try {
-          const r = await fetch('/providers/current', { signal: AbortSignal.timeout(1000) });
-          if (r.ok) { ready = true; break; }
-        } catch {}
-      }
-      status.textContent = ready
-        ? '✓ 完了。チャット画面をリロードしてください。'
-        : '⚠️ 再起動に時間がかかっています。しばらく待ってからリロードしてください。';
-      btn.disabled = false;
+      setTimeout(() => {
+        status.textContent = '✓ 完了。チャット画面をリロードしてください。';
+        btn.disabled = false;
+      }, 3000);
     } else {
       throw new Error(data.error || '不明なエラー');
     }

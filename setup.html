@@ -585,6 +585,7 @@ async function loadConfig() {
       document.getElementById('ra-enabled').checked = enabled;
       document.getElementById('ra-endpoint').value  = ra.endpoint || '';
       document.getElementById('ra-model').value     = ra.model || '';
+      document.getElementById('ra-api-key').value       = ra.api_key_set ? '***' : '';
       document.getElementById('ra-api-key').placeholder = ra.api_key_set ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
       document.getElementById('ra-api-version').value = ra.api_version || '';
       onRaToggle();
@@ -597,6 +598,7 @@ async function loadConfig() {
       document.getElementById('rag-mode').value       = re.mode || 'default';
       document.getElementById('rag-endpoint').value   = re.endpoint || '';
       document.getElementById('rag-deployment').value = re.deployment || '';
+      document.getElementById('rag-api-key').value       = re.api_key_set ? '***' : '';
       document.getElementById('rag-api-key').placeholder = re.api_key_set ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
       document.getElementById('rag-api-version').value = re.api_version || '2024-02-01';
       onRagEnabledChange();

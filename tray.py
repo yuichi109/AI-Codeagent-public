@@ -35,6 +35,20 @@ _EMOJI_FONTS = [
 _server_proc: subprocess.Popen | None = None
 _lock = threading.Lock()
 _LOG_FILE = BASE_DIR / "server.log"
+_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB
+_LOG_BACKUP_COUNT = 3
+
+
+def _rotate_log():
+    """起動時にログファイルが上限を超えていたらローテーションする。"""
+    if not _LOG_FILE.exists() or _LOG_FILE.stat().st_size < _LOG_MAX_BYTES:
+        return
+    for i in range(_LOG_BACKUP_COUNT - 1, 0, -1):
+        src = _LOG_FILE.with_suffix(f".log.{i}")
+        dst = _LOG_FILE.with_suffix(f".log.{i + 1}")
+        if src.exists():
+            src.replace(dst)
+    _LOG_FILE.replace(_LOG_FILE.with_suffix(".log.1"))
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +210,7 @@ def _start_server():
             return
         _ensure_vcredist()
         _sync_requirements()
+        _rotate_log()
         log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1)
         _server_proc = subprocess.Popen(
             [_get_python_exe(), "-m", "uvicorn", "server:app",

@@ -40,6 +40,8 @@ class _AzureEmbeddingFunction:
     """trust_env=False の AzureOpenAI クライアントを使う埋め込み関数。
     社内プロキシ（407）をバイパスするため chromadb 組み込みの OpenAIEmbeddingFunction は使わない。"""
 
+    name = "azure-openai"
+
     def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str):
         import httpx
         from openai import AzureOpenAI

@@ -10,8 +10,17 @@ import time
 import webbrowser
 from pathlib import Path
 
-import pystray
-from PIL import Image, ImageDraw, ImageFont
+try:
+    import pystray
+    from PIL import Image, ImageDraw, ImageFont
+except Exception:
+    _err_log = Path(__file__).parent / "server.log"
+    _err_log.parent.mkdir(parents=True, exist_ok=True)
+    import traceback
+    _err_log.open("a", encoding="utf-8").write(
+        "[tray] import error:\n" + traceback.format_exc()
+    )
+    sys.exit(1)
 
 BASE_DIR = Path(__file__).parent
 PORT = 8001
@@ -25,6 +34,7 @@ _EMOJI_FONTS = [
 
 _server_proc: subprocess.Popen | None = None
 _lock = threading.Lock()
+_LOG_FILE = BASE_DIR / "server.log"
 
 
 # ---------------------------------------------------------------------------
@@ -93,10 +103,14 @@ def _no_window_flag() -> int:
 
 def _get_python_exe() -> str:
     """venv の python.exe を返す（pythonw.exe では uvicorn が動かないため）"""
+    # まず BASE_DIR/venv を優先（tray.py の起動方法に依存しない）
+    venv_python = BASE_DIR / "venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
     python_exe = Path(sys.executable).parent / "python.exe"
     if python_exe.exists():
         return str(python_exe)
-    return sys.executable  # フォールバック
+    return sys.executable
 
 
 def _load_env() -> dict:
@@ -120,16 +134,59 @@ def _load_env() -> dict:
     return env
 
 
+_VCREDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+
+def _ensure_vcredist():
+    """onnxruntime の DLL が読めない場合に VC++ を自動サイレントインストールする。"""
+    result = subprocess.run(
+        [_get_python_exe(), "-c", "import onnxruntime"],
+        capture_output=True,
+        creationflags=_no_window_flag(),
+    )
+    if result.returncode == 0:
+        return
+    stderr = result.stderr.decode("utf-8", errors="replace").lower()
+    if "dll" not in stderr and "dyn" not in stderr:
+        return
+    with open(_LOG_FILE, "a", encoding="utf-8", buffering=1) as lf:
+        lf.write("[tray] VC++ not found, installing...\n")
+        import urllib.request, tempfile
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=".exe", delete=False)
+            tmp.close()
+            urllib.request.urlretrieve(_VCREDIST_URL, tmp.name)
+            subprocess.run(
+                [tmp.name, "/install", "/quiet", "/norestart"],
+                creationflags=_no_window_flag(),
+            )
+            lf.write("[tray] VC++ installed OK\n")
+        except Exception as e:
+            lf.write(f"[tray] VC++ install failed: {e}\n")
+
+
 def _sync_requirements():
     """requirements.txt の差分を自動インストールする（起動時・再起動時に実行）"""
     req_file = BASE_DIR / "requirements.txt"
     if not req_file.exists():
         return
-    subprocess.run(
-        [_get_python_exe(), "-m", "pip", "install", "-r", str(req_file), "--quiet"],
-        cwd=str(BASE_DIR),
-        creationflags=_no_window_flag(),
-    )
+    with open(_LOG_FILE, "a", encoding="utf-8", buffering=1) as log_fh:
+        log_fh.write("[tray] pip install -r requirements.txt ...\n")
+        result = subprocess.run(
+            [_get_python_exe(), "-m", "pip", "install", "-r", str(req_file)],
+            cwd=str(BASE_DIR),
+            creationflags=_no_window_flag(),
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout:
+            log_fh.write(result.stdout)
+        if result.stderr:
+            log_fh.write(result.stderr)
+        log_fh.write(
+            "[tray] pip install 完了\n" if result.returncode == 0
+            else f"[tray] pip install 失敗 (code={result.returncode})\n"
+        )
 
 
 def _start_server():
@@ -137,12 +194,16 @@ def _start_server():
     with _lock:
         if _server_proc and _server_proc.poll() is None:
             return
+        _ensure_vcredist()
         _sync_requirements()
+        log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1)
         _server_proc = subprocess.Popen(
             [_get_python_exe(), "-m", "uvicorn", "server:app",
              "--host", "0.0.0.0", "--port", str(PORT)],
             cwd=str(BASE_DIR),
             env=_load_env(),
+            stdout=log_fh,
+            stderr=log_fh,
             creationflags=_no_window_flag(),
         )
 
@@ -181,6 +242,12 @@ def on_restart(icon, item):
     icon.title = f"AI Code Agent — {URL}"
 
 
+def on_open_log(icon, item):
+    import os
+    _LOG_FILE.touch(exist_ok=True)
+    os.startfile(str(_LOG_FILE))
+
+
 def on_stop(icon, item):
     _stop_server()
     icon.stop()
@@ -212,27 +279,31 @@ def _monitor(icon: pystray.Icon):
 # ---------------------------------------------------------------------------
 
 def main():
-    _start_server()
-
     menu = pystray.Menu(
         pystray.MenuItem(f"🌐  ブラウザで開く  ({URL})", on_open, default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("🔄  再起動", on_restart),
+        pystray.MenuItem("📄  ログを開く", on_open_log),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("⏹  停止して終了", on_stop),
     )
 
     icon = pystray.Icon(
         "ai-code-agent",
-        _make_icon("running"),
-        f"AI Code Agent — {URL}",
+        _make_icon("stopped"),
+        "AI Code Agent — 起動準備中...",
         menu=menu,
     )
 
-    threading.Thread(target=_monitor, args=(icon,), daemon=True).start()
+    def _startup():
+        _start_server()
+        if _is_running():
+            icon.icon = _make_icon("running")
+            icon.title = f"AI Code Agent — {URL}"
+            webbrowser.open(URL)
 
-    # 起動後2秒でブラウザを自動オープン
-    threading.Timer(2.0, lambda: webbrowser.open(URL)).start()
+    threading.Thread(target=_startup, daemon=True).start()
+    threading.Thread(target=_monitor, args=(icon,), daemon=True).start()
 
     icon.run()
 

@@ -36,6 +36,35 @@ def _current_mode() -> str:
 
 
 
+class _AzureEmbeddingFunction:
+    """trust_env=False の AzureOpenAI クライアントを使う埋め込み関数。
+    社内プロキシ（407）をバイパスするため chromadb 組み込みの OpenAIEmbeddingFunction は使わない。"""
+
+    @staticmethod
+    def name() -> str:
+        return "azure-openai"
+
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str):
+        import httpx
+        from openai import AzureOpenAI
+        self._client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version=api_version,
+            http_client=httpx.Client(trust_env=False),
+        )
+        self._deployment = deployment
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        response = self._client.embeddings.create(model=self._deployment, input=input)
+        return [item.embedding for item in response.data]
+
+    def embed_query(self, input) -> list[float]:
+        text = input if isinstance(input, str) else (input[0] if isinstance(input, list) and input else str(input))
+        response = self._client.embeddings.create(model=self._deployment, input=[text])
+        return list(response.data[0].embedding)
+
+
 def _get_embedding_function(mode: str = None):
     """指定モード（省略時は設定値）の embedding function を返す。"""
     if mode is None:
@@ -44,13 +73,11 @@ def _get_embedding_function(mode: str = None):
     if mode == "azure":
         from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT, RAG_EMBED_API_VERSION
         if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
-            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-            return OpenAIEmbeddingFunction(
+            return _AzureEmbeddingFunction(
+                endpoint=RAG_EMBED_ENDPOINT.rstrip("/"),
                 api_key=RAG_EMBED_API_KEY,
-                api_base=RAG_EMBED_ENDPOINT.rstrip("/"),
-                api_type="azure",
+                deployment=RAG_EMBED_DEPLOYMENT,
                 api_version=RAG_EMBED_API_VERSION,
-                deployment_id=RAG_EMBED_DEPLOYMENT,
             )
     return None  # None = ChromaDB 内蔵 EF（onnxruntime）
 

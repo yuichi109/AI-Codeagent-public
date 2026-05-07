@@ -31,6 +31,10 @@ _VALID_STATUSES = {"active", "deprecated"}
 
 
 def _current_mode() -> str:
+    """有効な埋め込みモードを返す。Azure 設定済みなら 'azure'、なければ設定値。"""
+    from config import RAG_EMBED_ENDPOINT, RAG_EMBED_API_KEY, RAG_EMBED_DEPLOYMENT
+    if RAG_EMBED_ENDPOINT and RAG_EMBED_API_KEY and RAG_EMBED_DEPLOYMENT:
+        return "azure"
     from config import RAG_EMBED_MODE
     return RAG_EMBED_MODE or "default"
 
@@ -51,17 +55,16 @@ def _make_azure_ef():
 
 
 def _get_embedding_function(mode: str = None):
-    """embedding function を返す。
+    """指定モードの embedding function を返す。mode 省略時は _current_mode() を使用。"""
+    if mode is None:
+        mode = _current_mode()
 
-    Azure embedding（RAG_EMBED_*）が設定済みならそちらを使う。
-    未設定なら ChromaDB 内蔵（onnxruntime）を使う。
-    """
-    # Azure が設定済みなら優先（ローカルDL不要・安定）
-    ef = _make_azure_ef()
-    if ef:
-        return ef
+    if mode == "azure":
+        ef = _make_azure_ef()
+        if ef:
+            return ef
 
-    # Azure 未設定: ChromaDB 内蔵（onnxruntime 必須・初回に HuggingFace からDL）
+    # default: ChromaDB 内蔵（onnxruntime 必須・初回に HuggingFace からDL）
     try:
         import onnxruntime  # noqa: F401
         return None  # None = ChromaDB 内蔵 EF

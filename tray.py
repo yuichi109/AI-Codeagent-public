@@ -25,6 +25,7 @@ _EMOJI_FONTS = [
 
 _server_proc: subprocess.Popen | None = None
 _lock = threading.Lock()
+_LOG_FILE = BASE_DIR / "server.log"
 
 
 # ---------------------------------------------------------------------------
@@ -138,11 +139,14 @@ def _start_server():
         if _server_proc and _server_proc.poll() is None:
             return
         _sync_requirements()
+        log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1)
         _server_proc = subprocess.Popen(
             [_get_python_exe(), "-m", "uvicorn", "server:app",
              "--host", "0.0.0.0", "--port", str(PORT)],
             cwd=str(BASE_DIR),
             env=_load_env(),
+            stdout=log_fh,
+            stderr=log_fh,
             creationflags=_no_window_flag(),
         )
 
@@ -179,6 +183,12 @@ def on_restart(icon, item):
     _start_server()
     icon.icon = _make_icon("running")
     icon.title = f"AI Code Agent — {URL}"
+
+
+def on_open_log(icon, item):
+    import os
+    _LOG_FILE.touch(exist_ok=True)
+    os.startfile(str(_LOG_FILE))
 
 
 def on_stop(icon, item):
@@ -218,6 +228,7 @@ def main():
         pystray.MenuItem(f"🌐  ブラウザで開く  ({URL})", on_open, default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("🔄  再起動", on_restart),
+        pystray.MenuItem("📄  ログを開く", on_open_log),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("⏹  停止して終了", on_stop),
     )

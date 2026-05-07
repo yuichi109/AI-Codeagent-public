@@ -110,6 +110,14 @@ def _get_collection():
                 "pip install onnxruntime を実行してサーバーを再起動してください。\n"
                 f"詳細: {msg}"
             ) from e
+        # EF 競合（既存 DB と異なる embedding function）→ 空の DB なら削除して再作成
+        if "embedding function" in msg.lower() and "conflict" in msg.lower():
+            try:
+                client.delete_collection(_COLLECTION_NAME)
+            except Exception:
+                pass
+            _EMBED_MODE_FILE.unlink(missing_ok=True)
+            return client.get_or_create_collection(**kwargs)
         raise
 
 

@@ -62,6 +62,16 @@ def _get_client():
     )
 
 
+def _reset_collection(client, kwargs):
+    """コレクションをリセットして新しく作り直す。"""
+    try:
+        client.delete_collection(_COLLECTION_NAME)
+    except Exception:
+        pass
+    _EMBED_MODE_FILE.unlink(missing_ok=True)
+    return client.get_or_create_collection(**kwargs)
+
+
 def _get_collection():
     """現在の埋め込みモードでコレクションを取得する。モード変更時は自動再変換。"""
     _DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,14 +92,10 @@ def _get_collection():
                 "pip install onnxruntime を実行してサーバーを再起動してください。\n"
                 f"詳細: {msg}"
             ) from e
-        # EF 競合（既存 DB と異なる embedding function）→ 空の DB なら削除して再作成
-        if "embedding function" in msg.lower() and "conflict" in msg.lower():
-            try:
-                client.delete_collection(_COLLECTION_NAME)
-            except Exception:
-                pass
-            _EMBED_MODE_FILE.unlink(missing_ok=True)
-            return client.get_or_create_collection(**kwargs)
+        # EF競合 or 次元不一致 → リセットして再作成
+        if ("embedding function" in msg.lower() and "conflict" in msg.lower()) or \
+           "dimension" in msg.lower():
+            return _reset_collection(client, kwargs)
         raise
 
 
@@ -204,17 +210,21 @@ def rag_save(summary: str, record_type: str, tags: list = None) -> dict:
     today = date.today().isoformat()
 
     col = _get_collection()
-    col.add(
-        ids=[record_id],
-        documents=[summary],
-        metadatas=[{
-            "type": record_type,
-            "status": "active",
-            "tags": ",".join(tags),
-            "date": today,
-            "last_verified": today,
-        }],
-    )
+    doc = {"type": record_type, "status": "active", "tags": ",".join(tags), "date": today, "last_verified": today}
+    try:
+        col.add(ids=[record_id], documents=[summary], metadatas=[doc])
+    except Exception as e:
+        if "dimension" in str(e).lower():
+            # 次元不一致 → コレクションリセットして再試行
+            client = _get_client()
+            ef = _get_embedding_function()
+            kwargs = {"name": _COLLECTION_NAME, "metadata": {"hnsw:space": "cosine"}}
+            if ef is not None:
+                kwargs["embedding_function"] = ef
+            col = _reset_collection(client, kwargs)
+            col.add(ids=[record_id], documents=[summary], metadatas=[doc])
+        else:
+            raise
 
     type_label = {"success": "成功実績", "prohibited": "禁止事項", "caution": "注意事例"}[record_type]
     return {

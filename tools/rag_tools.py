@@ -59,9 +59,9 @@ class _AzureEmbeddingFunction:
         response = self._client.embeddings.create(model=self._deployment, input=input)
         return [item.embedding for item in response.data]
 
-    def embed_query(self, input) -> list[float]:
+    def embed_query(self, input) -> list[list[float]]:
         texts = [input] if isinstance(input, str) else input
-        return self(texts)[0]
+        return self(texts)
 
 
 def _get_embedding_function(mode: str = None):

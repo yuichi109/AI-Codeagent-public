@@ -1,6 +1,6 @@
 from datetime import date
 from pathlib import Path
-from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME, RESPONSES_API_ENABLED, RESPONSES_API_MODEL
+from config import ALLOWED_WORK_DIR, GITLAB_USER, GITLAB_PAT, AGENT_NAME, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, RAG_ENABLED
 
 # スキルディレクトリ（このファイルと同階層の skills/）
 _SKILLS_DIR = Path(__file__).parent / "skills"
@@ -175,6 +175,61 @@ def get_system_prompt(bypass_approval: bool = False) -> str:
     skills_section = f"\n### 登録済みスキル\n\n{skills}" if skills else ""
     claude_mds_section = _load_workspace_agent_mds()
     return _build_prompt(bypass_section, skills_section, claude_mds_section)
+
+_RAG_SECTION_ENABLED = """## RAG知見データベース（rag_* ツール）
+
+成功実績・禁止事項・注意事例を ChromaDB に蓄積・検索するツールが使えます。
+
+### rag_search を呼ぶタイミング（必須）
+
+以下のいずれかに当てはまったら **必ず `rag_search` を呼んでから回答・作業する**:
+
+| 状況 | 例 |
+|---|---|
+| 作業タスクを始めるとき | 実装・コマンド実行・ファイル編集など |
+| 注意点・エラー対処を聞かれたとき | 「〜するとき気をつけることは？」「〜でエラーが出たら？」 |
+| 過去に踏んだ可能性のある問題 | 「〜がうまくいかない」「〜ってどうすれば？」 |
+| 禁止事項の確認が必要なとき | 作業前に `record_type="prohibited"` で引く |
+
+**`record_type` の使い方:**
+- 一般的な質問・会話 → `record_type` を**省略して全タイプ横断検索**する（prohibited も caution も success も一括で引く）
+- 作業前の安全確認 → `record_type="prohibited"` で禁止事項だけ引く
+- 参考手順を探すとき → `record_type="success"` で絞る
+
+**会話・質問であっても `rag_search` を先に呼ぶこと。**
+
+- 結果が1件以上あれば **必ず回答に含める**（関連度が低くても「RAGに関連記録があります：〜」と一言添える）
+- 結果が0件のときだけ「RAGに該当記録なし」と判断して通常通り答える
+- 「ありましたが該当しませんでした」のような矛盾した表現は禁止。ヒットしたら使う、0件なら使わない、どちらかにする
+
+### ユーザーが直接記録を指示した場合
+「〜を記録して」「〜を登録して」「〜を注意事例として残して」のように**ユーザーが明示的に指示した場合は即 `rag_save` を呼ぶ**（確認不要）。
+record_type が指定されていない場合は内容から判断して選ぶ（禁止事項→prohibited、注意→caution、成功手順→success）。
+
+### エージェントからの記録提案タイミング
+以下の状況でユーザーに「記録しますか？」と提案してください（ユーザーが承認してから `rag_save` を呼ぶ）:
+
+| 状況 | 提案文 | record_type |
+|---|---|---|
+| コマンド・手順が成功した | 「この手順、成功実績として記録しますか？」 | success |
+| エラーを解決できた | 「この解決策、成功実績として記録しますか？」 | success |
+| 「やってはダメ」と判明した | 「これ、禁止事項として記録しますか？」 | prohibited |
+| ハマりやすい罠を踏んだ | 「この注意点、記録しますか？」 | caution |
+| ユーザーが「やるな」「ダメだった」と言った | 「禁止事項として記録しますか？」 | prohibited |
+| ユーザーが「間違えやすい」「気をつけて」と言った | 「注意事例として記録しますか？」 | caution |
+
+### 過去記録が古くなっていたら
+現在の動作と過去記録が矛盾する場合は「この記録、古くなってそうです。deprecated にしますか？」と提案し、承認後に `rag_update_status(record_id, "deprecated", reason)` を呼ぶ。
+
+### /rag-review スキル
+ユーザーが `/rag-review` と入力したら、`rag_list` で記録一覧を表示し、古い・無効な記録がないか確認を促す。"""
+
+_RAG_SECTION_DISABLED = """## RAG知見データベース
+
+RAGは現在無効化されています（設定画面でONにできます）。rag_* ツールは呼ばないこと。"""
+
+_RAG_SECTION = _RAG_SECTION_ENABLED if RAG_ENABLED else _RAG_SECTION_DISABLED
+
 
 def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_section: str = "") -> str:
     return f"""必ず日本語で回答すること。英語・中国語・その他の言語で回答してはいけない。
@@ -607,53 +662,7 @@ run_command("git status", work_dir="myproject")
 
 ---
 
-## RAG知見データベース（rag_* ツール）
-
-成功実績・禁止事項・注意事例を ChromaDB に蓄積・検索するツールが使えます。
-
-### rag_search を呼ぶタイミング（必須）
-
-以下のいずれかに当てはまったら **必ず `rag_search` を呼んでから回答・作業する**:
-
-| 状況 | 例 |
-|---|---|
-| 作業タスクを始めるとき | 実装・コマンド実行・ファイル編集など |
-| 注意点・エラー対処を聞かれたとき | 「〜するとき気をつけることは？」「〜でエラーが出たら？」 |
-| 過去に踏んだ可能性のある問題 | 「〜がうまくいかない」「〜ってどうすれば？」 |
-| 禁止事項の確認が必要なとき | 作業前に `record_type="prohibited"` で引く |
-
-**`record_type` の使い方:**
-- 一般的な質問・会話 → `record_type` を**省略して全タイプ横断検索**する（prohibited も caution も success も一括で引く）
-- 作業前の安全確認 → `record_type="prohibited"` で禁止事項だけ引く
-- 参考手順を探すとき → `record_type="success"` で絞る
-
-**会話・質問であっても `rag_search` を先に呼ぶこと。**
-
-- 結果が1件以上あれば **必ず回答に含める**（関連度が低くても「RAGに関連記録があります：〜」と一言添える）
-- 結果が0件のときだけ「RAGに該当記録なし」と判断して通常通り答える
-- 「ありましたが該当しませんでした」のような矛盾した表現は禁止。ヒットしたら使う、0件なら使わない、どちらかにする
-
-### ユーザーが直接記録を指示した場合
-「〜を記録して」「〜を登録して」「〜を注意事例として残して」のように**ユーザーが明示的に指示した場合は即 `rag_save` を呼ぶ**（確認不要）。
-record_type が指定されていない場合は内容から判断して選ぶ（禁止事項→prohibited、注意→caution、成功手順→success）。
-
-### エージェントからの記録提案タイミング
-以下の状況でユーザーに「記録しますか？」と提案してください（ユーザーが承認してから `rag_save` を呼ぶ）:
-
-| 状況 | 提案文 | record_type |
-|---|---|---|
-| コマンド・手順が成功した | 「この手順、成功実績として記録しますか？」 | success |
-| エラーを解決できた | 「この解決策、成功実績として記録しますか？」 | success |
-| 「やってはダメ」と判明した | 「これ、禁止事項として記録しますか？」 | prohibited |
-| ハマりやすい罠を踏んだ | 「この注意点、記録しますか？」 | caution |
-| ユーザーが「やるな」「ダメだった」と言った | 「禁止事項として記録しますか？」 | prohibited |
-| ユーザーが「間違えやすい」「気をつけて」と言った | 「注意事例として記録しますか？」 | caution |
-
-### 過去記録が古くなっていたら
-現在の動作と過去記録が矛盾する場合は「この記録、古くなってそうです。deprecated にしますか？」と提案し、承認後に `rag_update_status(record_id, "deprecated", reason)` を呼ぶ。
-
-### /rag-review スキル
-ユーザーが `/rag-review` と入力したら、`rag_list` で記録一覧を表示し、古い・無効な記録がないか確認を促す。
+{_RAG_SECTION}
 
 {claude_mds_section}{_RESPONSES_API_RULE}"""
 

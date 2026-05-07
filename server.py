@@ -2515,6 +2515,7 @@ async def setup_current():
             "api_version": raw.get("RESPONSES_API_VERSION", ""),
         },
         "rag_embed": {
+            "enabled":     raw.get("RAG_ENABLED", "true"),
             "mode":        raw.get("RAG_EMBED_MODE", "default"),
             "endpoint":    raw.get("RAG_EMBED_ENDPOINT", ""),
             "api_key":     mask(raw.get("RAG_EMBED_API_KEY", "")),
@@ -2621,7 +2622,7 @@ async def setup_save(req: SetupSaveRequest):
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
-        "RAG_EMBED_",
+        "RAG_ENABLED", "RAG_EMBED_",
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -2633,8 +2634,8 @@ async def setup_save(req: SetupSaveRequest):
                 existing_lines.append(line)  # 未知キーも保持
 
     def api_key_val(new_val: str, key_in_env: str) -> str:
-        """新値が *** のみの場合は既存値を維持"""
-        if "***" in new_val:
+        """新値が空または *** を含む場合は既存値を維持"""
+        if not new_val or "***" in new_val:
             # 既存 .env から取得
             if env_path.exists():
                 for line in env_path.read_text().splitlines():
@@ -2755,6 +2756,7 @@ async def setup_save(req: SetupSaveRequest):
         re_key = api_key_val(re.get("api_key", ""), "RAG_EMBED_API_KEY")
         lines += [
             "# RAG 埋め込みモデル",
+            f"RAG_ENABLED={re.get('enabled', 'true')}",
             f"RAG_EMBED_MODE={re.get('mode', 'default')}",
             f"RAG_EMBED_ENDPOINT={re.get('endpoint', '')}",
             f"RAG_EMBED_DEPLOYMENT={re.get('deployment', '')}",

@@ -106,6 +106,7 @@ RESPONSES_API_VERSION: str  = os.getenv("RESPONSES_API_VERSION", "")
 
 # RAG 埋め込みモデル設定 (省略可)
 # RAG_EMBED_MODE: "default"（ChromaDB内蔵）または "azure"（Azure OpenAI text-embedding）
+RAG_ENABLED: bool           = os.getenv("RAG_ENABLED", "true").lower() == "true"
 RAG_EMBED_MODE: str         = os.getenv("RAG_EMBED_MODE", "default")
 RAG_EMBED_ENDPOINT: str     = os.getenv("RAG_EMBED_ENDPOINT", "")
 RAG_EMBED_API_KEY: str      = os.getenv("RAG_EMBED_API_KEY", "")

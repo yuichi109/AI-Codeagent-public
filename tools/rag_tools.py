@@ -119,8 +119,8 @@ def _ensure_embed_mode_consistent():
         old_col = client.get_collection(**old_kwargs)
         existing = old_col.get(include=["documents", "metadatas"])
     except Exception:
-        # 旧コレクションが取得できなければスキップ
-        _save_mode(current)
+        # 旧コレクションが取得できなければモードファイルは更新せずスキップ
+        # （次回も再変換を試みられるよう saved モードを保持する）
         return
 
     ids = existing.get("ids", [])
@@ -320,6 +320,10 @@ def rag_list(record_type: str = None, status: str = "active") -> dict:
         })
 
     records.sort(key=lambda r: (r["type"], r["date"]), reverse=True)
+
+    for i, r in enumerate(records, 1):
+        r["no"] = i
+        r["short_id"] = r["id"][:8]
 
     return {
         "records": records,

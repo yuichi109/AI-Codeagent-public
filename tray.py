@@ -274,8 +274,6 @@ def _monitor(icon: pystray.Icon):
 # ---------------------------------------------------------------------------
 
 def main():
-    _start_server()
-
     menu = pystray.Menu(
         pystray.MenuItem(f"🌐  ブラウザで開く  ({URL})", on_open, default=True),
         pystray.Menu.SEPARATOR,
@@ -287,15 +285,21 @@ def main():
 
     icon = pystray.Icon(
         "ai-code-agent",
-        _make_icon("running"),
-        f"AI Code Agent — {URL}",
+        _make_icon("stopped"),
+        "AI Code Agent — 起動準備中...",
         menu=menu,
     )
 
-    threading.Thread(target=_monitor, args=(icon,), daemon=True).start()
+    # アイコンを先に出してからバックグラウンドで起動処理
+    def _startup():
+        _start_server()
+        if _is_running():
+            icon.icon = _make_icon("running")
+            icon.title = f"AI Code Agent — {URL}"
+            webbrowser.open(URL)
 
-    # 起動後2秒でブラウザを自動オープン
-    threading.Timer(2.0, lambda: webbrowser.open(URL)).start()
+    threading.Thread(target=_startup, daemon=True).start()
+    threading.Thread(target=_monitor, args=(icon,), daemon=True).start()
 
     icon.run()
 

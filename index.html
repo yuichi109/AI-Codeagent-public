@@ -290,7 +290,7 @@
   #editor-panel.open { display: flex; }
   #editor-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; }
   #editor-toolbar-title { font-size: 14px; font-weight: bold; color: #cdd6f4; }
-  #editor-filename-label { font-size: 13px; color: #a6adc8; font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #editor-filename-label { font-size: 13px; color: #a6adc8; font-family: monospace; flex: 1; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #editor-save-btn { padding: 4px 14px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
   #editor-save-btn:hover { background: #94e2c8; }
   #editor-save-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
@@ -3271,6 +3271,7 @@
   function toggleEditorAI() {
     editorAIEnabled = !editorAIEnabled;
     localStorage.setItem('editorAIEnabled', editorAIEnabled);
+    if (editorAIEnabled) loadEditorCompleteModels();
     updateEditorAIBtn();
   }
   function updateEditorAIBtn() {
@@ -3280,7 +3281,7 @@
     if (editorAIEnabled) {
       btn.textContent = '🤖 AI補完: ON';
       btn.classList.add('on');
-      if (sel && sel.options.length > 0) sel.style.display = '';
+      if (sel) sel.style.display = 'inline-block';
     } else {
       btn.textContent = '🤖 AI補完: OFF';
       btn.classList.remove('on');
@@ -3304,7 +3305,7 @@
         if (d === saved) opt.selected = true;
         sel.appendChild(opt);
       });
-      if (editorAIEnabled && data.deployments.length > 0) sel.style.display = '';
+      if (editorAIEnabled && data.deployments.length > 0) sel.style.display = 'inline-block';
     } catch(e) { /* 無視 */ }
   }
 

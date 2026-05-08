@@ -2030,6 +2030,34 @@ async def workspace_tree():
     return JSONResponse({"files": result})
 
 
+@app.post("/workspace/move")
+async def workspace_move(body: dict):
+    """エディタ用: ファイル/フォルダを移動"""
+    import shutil
+    from tools.file_tools import _resolve_safe_path
+    src_rel = body.get("src", "").strip("/")
+    dst_rel = body.get("dst", "").strip("/")
+    if not src_rel:
+        return JSONResponse({"error": "src required"}, status_code=400)
+    try:
+        src_path = _resolve_safe_path(src_rel)
+        if not src_path.exists():
+            return JSONResponse({"error": "移動元が見つかりません"}, status_code=404)
+        dst_dir = _resolve_safe_path(dst_rel) if dst_rel else ALLOWED_WORK_DIR
+        if not dst_dir.is_dir():
+            return JSONResponse({"error": "移動先がディレクトリではありません"}, status_code=400)
+        new_path = dst_dir / src_path.name
+        if new_path == src_path:
+            return JSONResponse({"ok": True})
+        if new_path.exists():
+            return JSONResponse({"error": f"{src_path.name} は移動先に既に存在します"}, status_code=409)
+        shutil.move(str(src_path), str(new_path))
+        rel = str(new_path.relative_to(ALLOWED_WORK_DIR)).replace("\\", "/")
+        return JSONResponse({"ok": True, "new_path": rel})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.get("/workspace/shells")
 async def workspace_shells():
     """workspace内の .sh ファイルを再帰的に列挙する"""

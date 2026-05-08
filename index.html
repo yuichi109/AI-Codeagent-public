@@ -3329,7 +3329,7 @@
 
   // エディタパネル上でのブラウザデフォルトのファイル開き動作を全域で抑止
   const _editorPanel = document.getElementById('editor-panel');
-  _editorPanel.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; });
+  _editorPanel.addEventListener('dragover', e => { e.preventDefault(); });
   _editorPanel.addEventListener('drop', e => { e.preventDefault(); });
 
   function openEditorPanel() {
@@ -3522,9 +3522,11 @@
     const tree = document.getElementById('editor-filetree');
     tree.innerHTML = '';
     // ルートへのドロップ（workspace直下に移動）
-    tree.ondragover = e => { e.preventDefault(); };
+    tree.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; tree.classList.add('ft-drag-over'); };
+    tree.ondragleave = e => { if (!tree.contains(e.relatedTarget)) tree.classList.remove('ft-drag-over'); };
     tree.ondrop = async e => {
       e.preventDefault();
+      tree.classList.remove('ft-drag-over');
       const src = e.dataTransfer.getData('text/plain');
       if (!src || !src.includes('/')) return; // 既にルートにある
       const res = await fetch('/workspace/move', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({src, dst: ''}) });
@@ -3594,6 +3596,7 @@
         el.onclick = () => editorOpen(path, el);
         // D&D: ファイルはドラッグ元のみ
         el.draggable = true;
+        el.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.stopPropagation(); };
         el.ondragstart = e => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; el.classList.add('ft-dragging'); window.ftIsDragging = true; };
         el.ondragend = () => { el.classList.remove('ft-dragging'); window.ftIsDragging = false; };
         container.appendChild(el);

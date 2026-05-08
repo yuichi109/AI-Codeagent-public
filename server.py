@@ -1,7 +1,5 @@
 import asyncio
 import json
-import os
-import sys
 import shutil
 import subprocess
 import requests
@@ -147,8 +145,8 @@ async def lifespan(app: FastAPI):
             shutil.rmtree(tmp_path, ignore_errors=True)
             print(f"[INFO] 起動時クリーンアップ: {tmp_path} を削除しました")
 
-    # SearXNG を自動起動（Linux/WSL2 のみ。Windows では Docker 依存のためスキップ）
-    if SEARXNG_ENABLED and sys.platform != "win32":
+    # SearXNG を自動起動
+    if SEARXNG_ENABLED:
         compose_file = Path(__file__).parent / "docker-compose.searxng.yml"
         if compose_file.exists():
             result = subprocess.run(
@@ -968,7 +966,15 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
-    timeout = 60 if name == "web_research" else 20
+    # ツール引数で指定されたタイムアウトがあればそれに合わせて待つ（+10秒のマージン）
+    if name == "web_research":
+        timeout = 60
+    elif name == "run_powershell" and "timeout_seconds" in arguments:
+        timeout = int(arguments["timeout_seconds"]) + 10
+    elif name == "run_command" and "timeout_minutes" in arguments:
+        timeout = int(arguments["timeout_minutes"] * 60) + 10
+    else:
+        timeout = 20
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(execute_tool, name, arguments),
@@ -987,8 +993,6 @@ async def _stream_command(arguments: dict):
     bash / ブロックコマンド / && チェーンも適切に処理する。
     """
     import shlex as _shlex
-    import sys as _sys
-    _ENCODING = "cp932" if _sys.platform == "win32" else "utf-8"
 
     command = arguments.get("command", "")
     work_dir_str = arguments.get("work_dir")
@@ -1099,7 +1103,7 @@ async def _stream_command(arguments: dict):
         loop = asyncio.get_event_loop()
         deadline = (loop.time() + effective_timeout) if effective_timeout else None
         async for line_bytes in proc.stdout:
-            line = line_bytes.decode(_ENCODING, errors="replace")
+            line = line_bytes.decode("utf-8", errors="replace")
             stdout_lines.append(line)
             yield {"type": "line", "line": line.rstrip()}
             if deadline and loop.time() > deadline:
@@ -1113,7 +1117,7 @@ async def _stream_command(arguments: dict):
 
     await proc.wait()
     stderr_bytes = await stderr_task
-    stderr_str = stderr_bytes.decode(_ENCODING, errors="replace")
+    stderr_str = stderr_bytes.decode("utf-8", errors="replace")
 
     if timed_out:
         label = f"{effective_timeout // 60}分" if effective_timeout >= 60 else f"{effective_timeout}秒"
@@ -2111,13 +2115,8 @@ async def workspace_exec_shell(req: ShellExecRequest):
     else:
         exec_cwd = str(ALLOWED_WORK_DIR)
     async def stream():
-        import sys as _sys
-        if _sys.platform == "win32":
-            shell_args = ["powershell", "-NoProfile", "-Command", req.command]
-        else:
-            shell_args = ["bash", "-c", req.command]
         proc = await asyncio.create_subprocess_exec(
-            *shell_args,
+            "bash", "-c", req.command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=exec_cwd,
@@ -2454,17 +2453,6 @@ async def setup_page():
     return FileResponse("setup.html")
 
 
-def _get_git_email() -> str:
-    """git config --global user.email を取得。git が PATH にない場合は空文字を返す"""
-    try:
-        return subprocess.run(
-            ["git", "config", "--global", "user.email"],
-            capture_output=True, text=True,
-        ).stdout.strip()
-    except Exception:
-        return ""
-
-
 @app.get("/setup/current")
 async def setup_current():
     """現在の .env 値を返す（APIキーはマスク）"""
@@ -2475,7 +2463,7 @@ async def setup_current():
     env_path = Path(__file__).parent / ".env"
     raw = {}
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in env_path.read_text().splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
@@ -2543,7 +2531,8 @@ async def setup_current():
             "user":    raw.get("GITLAB_USER", ""),
             "pat":     mask(raw.get("GITLAB_PAT", "")),
             "pat_set": bool(raw.get("GITLAB_PAT")),
-            "email":   _get_git_email(),
+            "email":   subprocess.run(["git", "config", "--global", "user.email"],
+                           capture_output=True, text=True).stdout.strip(),
         },
         "searxng": {
             "url":     raw.get("SEARXNG_BASE_URL", "http://localhost:8888"),
@@ -2577,7 +2566,7 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
     env_path = Path(__file__).parent / ".env"
     raw: dict = {}
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in env_path.read_text().splitlines():
             line = line.strip()
             if "=" in line and not line.startswith("#"):
                 k, _, v = line.partition("=")
@@ -2671,7 +2660,7 @@ async def setup_save(req: SetupSaveRequest):
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in env_path.read_text().splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or not stripped:
                 existing_lines.append(line)  # コメント・空行は保持
@@ -2683,7 +2672,7 @@ async def setup_save(req: SetupSaveRequest):
         if not new_val or "***" in new_val:
             # 既存 .env から取得
             if env_path.exists():
-                for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                for line in env_path.read_text().splitlines():
                     if line.startswith(key_in_env + "="):
                         return line.partition("=")[2].strip()
             return ""
@@ -2816,22 +2805,14 @@ async def setup_save(req: SetupSaveRequest):
     if proxy_lines:
         lines += ["# プロキシバイパス"] + proxy_lines + [""]
 
-    env_path.write_text("\n".join(lines), encoding="utf-8")
+    env_path.write_text("\n".join(lines))
 
-    # サービスを再起動
-    if sys.platform == "win32":
-        # レスポンスを送信してから終了（_monitor が自動再起動する）
-        async def _delayed_exit():
-            await asyncio.sleep(0.5)
-            os._exit(0)
-        asyncio.create_task(_delayed_exit())
+    # systemd サービスを再起動
+    try:
+        subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
         return JSONResponse({"status": "ok"})
-    else:
-        try:
-            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
-            return JSONResponse({"status": "ok"})
-        except Exception as e:
-            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+    except Exception as e:
+        return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
 
 
 @app.get("/setup/ansible-creds")

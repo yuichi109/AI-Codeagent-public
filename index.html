@@ -305,6 +305,7 @@
   #editor-filetree { width: 220px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; overflow-y: auto; padding: 8px 0; }
   #editor-filetree .ft-dir { padding: 3px 10px; font-size: 12px; color: #89b4fa; font-weight: bold; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
   #editor-filetree .ft-dir:hover { color: #cdd6f4; background: #313244; }
+  #editor-filetree .ft-dir.active { background: #313244; color: #a6e3a1 !important; border-left: 3px solid #a6e3a1; }
   #editor-filetree .ft-arrow { font-size: 10px; color: #6c7086; flex-shrink: 0; }
   #editor-filetree .ft-file { padding: 3px 10px; font-size: 12px; color: #cdd6f4; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #editor-filetree .ft-file:hover { background: #313244; }
@@ -3258,6 +3259,12 @@
     if (!monacoLoaded) {
       loadMonaco();
     } else {
+      editorCurrentPath = null;
+      document.getElementById('editor-filename-label').textContent = 'ファイルを選択してください';
+      document.getElementById('editor-save-btn').disabled = true;
+      document.getElementById('editor-status').textContent = '';
+      monacoEditor.setModel(monaco.editor.createModel('', 'plaintext'));
+      document.querySelectorAll('#editor-filetree .ft-file.active').forEach(e => e.classList.remove('active'));
       refreshFileTree();
     }
   }
@@ -3411,6 +3418,7 @@
   }
 
   const ftExpandedDirs = new Set();
+  let ftSelectedDir = '';
 
   async function refreshFileTree() {
     const res = await fetch('/workspace/tree');
@@ -3423,6 +3431,7 @@
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
         if (!node[part]) node[part] = { _isDir: false, _path: parts.slice(0, i+1).join('/') };
+        if (item.is_dir && i === parts.length - 1) node[part]._isDir = true;
         if (i < parts.length - 1) node[part]._isDir = true;
         if (i < parts.length - 1) node = node[part];
       }
@@ -3452,6 +3461,9 @@
         children.className = 'ft-children';
         children.style.display = isOpen ? '' : 'none';
         el.onclick = () => {
+          ftSelectedDir = path;
+          document.querySelectorAll('#editor-filetree .ft-dir.active').forEach(e => e.classList.remove('active'));
+          el.classList.add('active');
           const open = ftExpandedDirs.has(path);
           if (open) { ftExpandedDirs.delete(path); children.style.display = 'none'; el.querySelector('.ft-arrow').textContent = '▶'; }
           else       { ftExpandedDirs.add(path);    children.style.display = '';     el.querySelector('.ft-arrow').textContent = '▼'; }
@@ -3510,7 +3522,8 @@
   }
 
   function editorNewFile() {
-    const name = prompt('ファイル名（workspace相対パス）:', 'new_file.txt');
+    const prefix = ftSelectedDir ? ftSelectedDir + '/' : '';
+    const name = prompt('ファイル名（workspace相対パス）:', prefix + 'new_file.txt');
     if (!name) return;
     editorCurrentPath = name;
     document.getElementById('editor-filename-label').textContent = name + ' (新規)';

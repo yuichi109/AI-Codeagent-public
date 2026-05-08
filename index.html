@@ -1201,9 +1201,17 @@
   }
 
   // ---- ドラッグアンドドロップでファイル添付 ----
-  window.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); document.body.classList.add('drag-over'); }, true);
-  window.addEventListener('dragleave', e => { e.stopPropagation(); if (e.relatedTarget === null) document.body.classList.remove('drag-over'); }, true);
+  // ftIsDragging=true の間はエディタ内部D&Dなので添付処理をスキップ
+  window.addEventListener('dragover', e => {
+    if (window.ftIsDragging) { e.preventDefault(); return; }
+    e.preventDefault(); e.stopPropagation(); document.body.classList.add('drag-over');
+  }, true);
+  window.addEventListener('dragleave', e => {
+    if (window.ftIsDragging) return;
+    e.stopPropagation(); if (e.relatedTarget === null) document.body.classList.remove('drag-over');
+  }, true);
   window.addEventListener('drop', async e => {
+    if (window.ftIsDragging) { e.preventDefault(); return; }
     e.preventDefault();
     e.stopPropagation();
     document.body.classList.remove('drag-over');
@@ -3561,8 +3569,8 @@
         }, { once: true });
         // D&D: フォルダはドラッグ元にも受け取り先にもなる
         el.draggable = true;
-        el.ondragstart = e => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; el.classList.add('ft-dragging'); e.stopPropagation(); };
-        el.ondragend = () => el.classList.remove('ft-dragging');
+        el.ondragstart = e => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; el.classList.add('ft-dragging'); window.ftIsDragging = true; e.stopPropagation(); };
+        el.ondragend = () => { el.classList.remove('ft-dragging'); window.ftIsDragging = false; };
         el.ondragover = e => { e.preventDefault(); e.stopPropagation(); el.classList.add('ft-drag-over'); };
         el.ondragleave = e => { if (!el.contains(e.relatedTarget)) el.classList.remove('ft-drag-over'); };
         el.ondrop = async e => {
@@ -3587,8 +3595,8 @@
         el.onclick = () => editorOpen(path, el);
         // D&D: ファイルはドラッグ元のみ
         el.draggable = true;
-        el.ondragstart = e => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; el.classList.add('ft-dragging'); };
-        el.ondragend = () => el.classList.remove('ft-dragging');
+        el.ondragstart = e => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; el.classList.add('ft-dragging'); window.ftIsDragging = true; };
+        el.ondragend = () => { el.classList.remove('ft-dragging'); window.ftIsDragging = false; };
         container.appendChild(el);
       }
     }

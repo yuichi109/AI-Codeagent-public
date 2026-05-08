@@ -5,6 +5,73 @@
 
 ---
 
+## 2026-05-08
+
+### Monaco エディタ大幅改善（コミット: e276f29〜1c8e976）
+
+- 空ディレクトリをファイルツリーに表示（`_isDir` フラグ付与）
+- エディタを開くたびにタブ・状態をリセット（前回ファイルが残らない）
+- ディレクトリ選択 → 新規ファイル作成時にパスプレフィックスを自動入力
+- ファイル保存後にファイルツリーを自動更新
+- 同名ファイル作成時に上書き確認ダイアログを表示
+- **マルチタブ対応**: `renderTabs()` / `switchTab()` / `closeTab()`、Monaco の `createModel()` / `setModel()` でタブごとにモデルを管理
+- **ドラッグ＆ドロップ移動**: ファイルツリー内で D&D によるファイル/フォルダ移動。`window.ftIsDragging` フラグでチャット添付ハンドラとの衝突を回避
+- `/workspace/move` エンドポイント追加（`server.py`、`shutil.move()` + パス検証）
+- **別タブで表示**: エディタボタンを `window.open('?editor=1', '_blank')` に変更
+- **未保存警告**: `beforeunload` イベントで未保存タブがあればブラウザ標準の確認ダイアログ
+
+### README 全面改訂・MIT ライセンス追加（コミット: b07113b, b40ad58, b63962a）
+
+- `README.md`: モデル構成・Windows版・全ツール・Monaco エディタ・RAG・セッション管理等を網羅した内容に全面書き直し
+- `LICENSE`: MIT ライセンスファイル新規追加（Copyright 2026 yuichi.matsuo）
+- `README.md` に shields.io バッジ追加（License / Python / FastAPI / Azure OpenAI / Platform）
+
+### エディタ補完モデル選択（チャットとは独立）（コミット: 5fd7cb4, a203c60）
+
+- エディタツールバーに補完用モデルのプルダウンを追加（「🤖 AI補完: ON」の隣）
+- チャット側のモデル設定とは完全独立、`/providers/deployments` から選択肢を自動取得
+- 選択は localStorage に保存。`server.py` の `EditorCompleteRequest` に `model` フィールドを追加
+
+### GitLab イシュー
+
+- **#42**: Monaco エディタ内インラインチャット機能（Cursor の Inline Chat 相当）登録
+
+---
+
+## 2026-05-07
+
+### セッション履歴アーカイブ・保護機能（コミット: 954efdf, 1750324）
+
+- セッション保存時に自動アーカイブ（sessions/ 20件超 → archive/、archive/ 100件超 → 削除）
+- ★/☆ 保護ボタン追加（保護フラグ付きセッションはアーカイブ対象外）
+- 📦 アーカイブボタンで履歴↔アーカイブ画面を切り替え
+- アーカイブセッションは読み取り専用・「↩ この会話を再開」ボタンで復元
+
+### RAG 知見データベースを main にマージ（コミット: a33306c）
+
+- `tools/rag_tools.py`: rag_save / rag_search / rag_update_status / rag_list
+- `setup.html`: RAG 有効化トグル追加
+- `.rag_db` を `.gitignore` に追加（社内情報が GitLab に同期されない）
+- rag_list に通し番号・短縮 ID を追加
+
+### RAG バグ修正（コミット: fcb0e19）
+
+- `prompts.py`: 明示指示なしに `rag_update_status` を呼ばないルールを追加
+- `tools/rag_tools.py`: 関連度 0.3 未満のヒットを除外
+
+### ALLOWED_WORK_DIRS 複数ディレクトリ対応（コミット: 0e8a17a）
+
+- `config.py`: `_normalize_to_wsl_path()` 追加（Windows/UNC パスを WSL パスに自動変換）
+- `tools/file_tools.py` / `tools/command_tools.py`: 複数許可ディレクトリに対応
+
+### ワークスペーススコープ固定機能（コミット: cb14829, b7f7b03）
+
+- ヘッダーにスコープバー常時表示、フォルダ選択モーダル
+- スコープ設定時にシステムプロンプトへ操作制限を注入
+- localStorage に保存（/clear・リロードでも維持）
+
+---
+
 ## 2026-05-05
 
 ### Responses API サブエージェント対応（コミット: c4670f7）
@@ -151,6 +218,11 @@
 
 | 日付 | 内容 |
 |---|---|
+| 2026-05-08 | Monaco エディタ大幅改善（マルチタブ・D&D・別タブ・未保存警告）、README全面改訂・MITライセンス、エディタ補完モデル独立選択 |
+| 2026-05-07 | セッション履歴アーカイブ・保護、RAGをmainにマージ、ALLOWED_WORK_DIRS複数対応、スコープ固定機能 |
+| 2026-05-05 | Responses APIサブエージェント対応 |
+| 2026-05-02 | write_pdf / Officeファイルツール追加（main移植） |
+| 2026-05-01 | AGENT.md / MEMORY.md設計・/memoryスキル、セッション履歴検索#41登録 |
 | 2026-04-28 | run_command 出力切り捨て改善（先頭+末尾）、リアルタイムストリーミング、バックグラウンドプロセス管理、タスクトレイ常駐（for_windows）、/setup UTF-8修正 |
 | 2026-04-24 | read_pdf ツール追加、/compact バグ修正、SUMMARY_TRIGGER 25に変更、setup.bat CRLF修正 |
 | 2026-04-23 | setup.bat winget 自動インストール、/boost スキル、docs/setup.md Windows版手順追加 |

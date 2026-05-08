@@ -130,3 +130,13 @@ AZURE_OPENAI_API_VERSION=2025-01-01-preview
 | [docs/changelog.md](docs/changelog.md) | 実装済み機能の変更履歴 |
 | [docs/roadmap.md](docs/roadmap.md) | 今後の実装予定 |
 | [docs/test-checklist.md](docs/test-checklist.md) | テスト確認項目 |
+
+---
+
+## 作者
+
+**yuichi.matsuo** — [@yuichi.matsuo](https://gitlab.com/yuichi.matsuo)
+
+## ライセンス
+
+[MIT License](LICENSE) © 2026 yuichi.matsuo

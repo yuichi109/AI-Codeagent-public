@@ -1196,36 +1196,40 @@ def _summarize_history(messages: list) -> str | None:
         return None
 
 
-def _gather_auto_context() -> str:
+def _gather_auto_context(workspace_scope: str = "") -> str:
     """workspace内のgit状態を自動収集する（Claude Code方式）"""
     parts = []
 
-    # ワークスペース直下のgitリポジトリを探して状態を収集
+    # スコープ指定時はそのフォルダのみ対象、未指定時はworkspace直下全体
+    try:
+        if workspace_scope:
+            targets = [ALLOWED_WORK_DIR / workspace_scope]
+        else:
+            targets = [p for p in sorted(ALLOWED_WORK_DIR.iterdir()) if p.is_dir() and not p.name.startswith('.')]
+    except Exception:
+        targets = []
+
     git_infos = []
     try:
-        for p in sorted(ALLOWED_WORK_DIR.iterdir()):
-            if not p.is_dir() or p.name.startswith('.'):
+        for p in targets:
+            if not p.is_dir():
                 continue
             git_dir = p / ".git"
             if not git_dir.exists():
                 continue
             info_lines = [f"[{p.name}]"]
-            # ブランチ名
             r = subprocess.run(["git", "branch", "--show-current"],
                 capture_output=True, text=True, timeout=5, cwd=str(p))
             if r.returncode == 0 and r.stdout.strip():
                 info_lines.append(f"branch: {r.stdout.strip()}")
-            # git status --short
             r = subprocess.run(["git", "status", "--short"],
                 capture_output=True, text=True, timeout=5, cwd=str(p))
             if r.returncode == 0 and r.stdout.strip():
                 info_lines.append("status:\n" + r.stdout.strip()[:400])
-            # git diff --stat
             r = subprocess.run(["git", "diff", "--stat"],
                 capture_output=True, text=True, timeout=5, cwd=str(p))
             if r.returncode == 0 and r.stdout.strip():
                 info_lines.append("diff --stat:\n" + r.stdout.strip()[:400])
-            # git log --oneline -5
             r = subprocess.run(["git", "log", "--oneline", "-5"],
                 capture_output=True, text=True, timeout=5, cwd=str(p))
             if r.returncode == 0 and r.stdout.strip():
@@ -1238,16 +1242,14 @@ def _gather_auto_context() -> str:
     if git_infos:
         parts.append("## Git Status\n" + "\n\n".join(git_infos[:5]))
 
-    # workspaceの1階層目ファイル一覧（gitなしのプロジェクトも含む）
+    # ファイル一覧（スコープ指定時はそのフォルダ直下、未指定時はworkspace直下）
     try:
-        entries = sorted(ALLOWED_WORK_DIR.iterdir())
-        names = []
-        for e in entries:
-            if e.name.startswith('.'):
-                continue
-            names.append(e.name + ("/" if e.is_dir() else ""))
+        list_base = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+        entries = sorted(list_base.iterdir())
+        names = [e.name + ("/" if e.is_dir() else "") for e in entries if not e.name.startswith('.')]
         if names:
-            parts.append("## Workspace\n" + "  ".join(names))
+            label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+            parts.append(f"## {label}\n" + "  ".join(names))
     except Exception:
         pass
 
@@ -1363,7 +1365,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     if bypass_approval and isinstance(user_content, str):
         user_content = f"[承認バイパスON: 確認・提案なしで即実行すること]\n{user_content}"
     # 自動コンテキスト収集（Claude Code方式: git status/diff/log をユーザーメッセージ先頭に注入）
-    auto_ctx = _gather_auto_context()
+    auto_ctx = _gather_auto_context(workspace_scope)
     if auto_ctx:
         if isinstance(user_content, list):
             user_content = [{"type": "text", "text": auto_ctx}] + user_content

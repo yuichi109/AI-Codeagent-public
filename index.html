@@ -3656,6 +3656,14 @@
     switchTab(editorTabs.length - 1);
   }
 
+  // エディタタブで未保存変更がある場合はタブを閉じる前に警告
+  window.addEventListener('beforeunload', e => {
+    if (editorTabs.some(t => t.modified)) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   // ?editor=1 で開いた場合はエディタを自動起動・専用UIに切り替え
   if (new URLSearchParams(location.search).get('editor') === '1') {
     document.getElementById('editor-close-btn').style.display = 'none';

@@ -209,6 +209,36 @@
   #cleanup-exec-btn:hover { background: #eb6f8e; }
   #cleanup-exec-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #cleanup-confirm-msg { font-size: 12px; color: #f38ba8; display: none; }
+  /* ---- ワークスペーススコープバー ---- */
+  #workspace-scope-bar { padding: 3px 20px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 8px; font-size: 12px; flex-shrink: 0; transition: background 0.4s, border-color 0.4s; }
+  #workspace-scope-bar.scoped { background: linear-gradient(90deg, #0d1f0f 0%, #181825 70%); border-bottom-color: #40a840; }
+  #scope-dot { width: 7px; height: 7px; border-radius: 50%; background: #45475a; flex-shrink: 0; transition: background 0.4s, box-shadow 0.4s; }
+  #workspace-scope-bar.scoped #scope-dot { background: #a6e3a1; box-shadow: 0 0 6px #a6e3a1, 0 0 12px #a6e3a150; animation: scope-pulse 2.4s ease-in-out infinite; }
+  @keyframes scope-pulse { 0%,100%{box-shadow:0 0 6px #a6e3a1,0 0 12px #a6e3a150} 50%{box-shadow:0 0 2px #a6e3a1,0 0 4px #a6e3a130} }
+  #scope-label { color: #6c7086; font-family: monospace; transition: color 0.4s, text-shadow 0.4s; }
+  #workspace-scope-bar.scoped #scope-label { color: #a6e3a1; text-shadow: 0 0 8px #a6e3a150; }
+  #scope-btn { padding: 2px 10px; background: #313244; color: #cdd6f4; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; }
+  #scope-btn:hover { background: #45475a; }
+  /* ---- ワークスペーススコープ選択モーダル ---- */
+  #scope-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; align-items: center; justify-content: center; }
+  #scope-overlay.open { display: flex; }
+  #scope-modal { background: #1e1e2e; border: 1px solid #313244; border-radius: 12px; width: 420px; max-width: 94vw; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  #scope-modal-header { padding: 14px 20px 10px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; }
+  #scope-modal-body { padding: 12px 20px; overflow-y: auto; flex: 1; }
+  #scope-hint { font-size: 12px; color: #6c7086; margin-bottom: 10px; }
+  .scope-dir-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: monospace; }
+  .scope-dir-item:hover { background: #313244; }
+  .scope-dir-item.active { background: #1e3a5f; color: #89b4fa; }
+  .scope-dir-item .sd-icon { font-size: 14px; }
+  #scope-new-input { width: 100%; box-sizing: border-box; padding: 6px 10px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; font-size: 13px; margin-top: 10px; outline: none; }
+  #scope-new-input:focus { border-color: #89b4fa; }
+  #scope-modal-footer { padding: 10px 20px; border-top: 1px solid #313244; display: flex; gap: 8px; align-items: center; }
+  #scope-clear-btn { padding: 6px 14px; background: #313244; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; margin-right: auto; }
+  #scope-clear-btn:hover { background: #45475a; }
+  #scope-close-btn { padding: 6px 14px; background: #313244; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #scope-close-btn:hover { background: #45475a; }
+  #scope-mkdir-btn { padding: 6px 14px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; }
+  #scope-mkdir-btn:hover { background: #89d390; }
   /* ---- Ansible プレイブック選択ウィジェット ---- */
   .ansible-chooser { background: #181825; border: 1px solid #45475a; border-radius: 10px; padding: 14px 16px; margin: 8px 0; max-width: 520px; }
   .ansible-chooser-title { font-size: 13px; font-weight: bold; color: #a6e3a1; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
@@ -350,6 +380,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
+<div id="workspace-scope-bar">
+  <span id="scope-dot"></span>
+  <span id="scope-label">📁 workspace/</span>
+  <button id="scope-btn" onclick="openWorkspaceScopeModal()">選択</button>
+</div>
 <div id="header">
   ⚛️ AI Code Agent
   <div id="header-right">
@@ -523,6 +558,21 @@
   </div>
 </div>
 
+<div id="scope-overlay" onclick="if(event.target===this)closeWorkspaceScopeModal()">
+  <div id="scope-modal">
+    <div id="scope-modal-header">📁 作業フォルダを選択</div>
+    <div id="scope-modal-body">
+      <div id="scope-hint">選択したフォルダのみをエージェントの操作対象にします。</div>
+      <div id="scope-dir-list"></div>
+      <input id="scope-new-input" placeholder="新規フォルダ名を入力して Enter または「作成」..." onkeydown="if(event.key==='Enter')createScopeDir()">
+    </div>
+    <div id="scope-modal-footer">
+      <button id="scope-clear-btn" onclick="clearWorkspaceScope()">全体に戻す（解除）</button>
+      <button id="scope-close-btn" onclick="closeWorkspaceScopeModal()">閉じる</button>
+      <button id="scope-mkdir-btn" onclick="createScopeDir()">フォルダ作成</button>
+    </div>
+  </div>
+</div>
 <div id="session-banner">
   <span id="session-banner-label">🕐 再開：</span><span id="session-banner-title"></span>
   <button id="session-banner-restore" onclick="restoreArchivedSession()">↩ この会話を再開</button>
@@ -630,6 +680,8 @@
   let history = [];   // API送信用 [{role, content}, ...]
   let turns   = [];   // 表示ターン管理 [{el, userText, aiText}, ...]
   let tokenSession = { prompt: 0, completion: 0, total: 0 };  // セッション累計トークン
+  const SCOPE_STORAGE_KEY = 'workspaceScope';
+  let currentWorkspaceScope = localStorage.getItem(SCOPE_STORAGE_KEY) || "";
   let pendingImages = [];  // 送信待ち画像 [{data, mime, url}, ...]
   let pendingFiles  = [];  // 送信待ちテキストファイル [{name, content, lang}, ...]
   let abortController = null;  // 生成中断用
@@ -1267,6 +1319,88 @@
     chat.innerHTML = '';
     updateTurnCount();
     updateTokenInfo(0, 0);
+  }
+
+  // ---- ワークスペーススコープ ----
+  function updateScopeBar() {
+    const bar   = document.getElementById('workspace-scope-bar');
+    const label = document.getElementById('scope-label');
+    const btn   = document.getElementById('scope-btn');
+    if (currentWorkspaceScope) {
+      localStorage.setItem(SCOPE_STORAGE_KEY, currentWorkspaceScope);
+      bar.classList.add('scoped');
+      label.textContent = `📁 workspace/${currentWorkspaceScope}`;
+      btn.textContent = '変更';
+    } else {
+      localStorage.removeItem(SCOPE_STORAGE_KEY);
+      bar.classList.remove('scoped');
+      label.textContent = '📁 workspace/';
+      btn.textContent = '選択';
+    }
+  }
+
+  async function openWorkspaceScopeModal() {
+    const overlay = document.getElementById('scope-overlay');
+    overlay.classList.add('open');
+    document.getElementById('scope-new-input').value = '';
+    await loadScopeDirList();
+  }
+
+  function closeWorkspaceScopeModal() {
+    document.getElementById('scope-overlay').classList.remove('open');
+  }
+
+  async function loadScopeDirList() {
+    const list = document.getElementById('scope-dir-list');
+    list.innerHTML = '<div style="font-size:12px;color:#6c7086;">読み込み中...</div>';
+    try {
+      const res = await fetch('/workspace/subdirs');
+      const data = await res.json();
+      if (data.error) { list.innerHTML = `<div style="color:#f38ba8;font-size:12px;">${data.error}</div>`; return; }
+      if (!data.dirs.length) {
+        list.innerHTML = '<div style="font-size:12px;color:#6c7086;">サブフォルダがありません。下の入力欄から作成できます。</div>';
+        return;
+      }
+      list.innerHTML = data.dirs.map(d => `
+        <div class="scope-dir-item${d === currentWorkspaceScope ? ' active' : ''}" onclick="selectScopeDir('${d}')">
+          <span class="sd-icon">📁</span>${d}
+        </div>`).join('');
+    } catch(e) {
+      list.innerHTML = `<div style="color:#f38ba8;font-size:12px;">取得失敗: ${e.message}</div>`;
+    }
+  }
+
+  function selectScopeDir(name) {
+    currentWorkspaceScope = name;
+    updateScopeBar();
+    closeWorkspaceScopeModal();
+  }
+
+  function clearWorkspaceScope() {
+    currentWorkspaceScope = "";
+    updateScopeBar();
+    closeWorkspaceScopeModal();
+  }
+
+  async function createScopeDir() {
+    const input = document.getElementById('scope-new-input');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      const res = await fetch('/workspace/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      input.value = '';
+      currentWorkspaceScope = data.name;
+      updateScopeBar();
+      closeWorkspaceScopeModal();
+    } catch(e) {
+      alert('作成失敗: ' + e.message);
+    }
   }
 
   // ---- セッション履歴パネル ----
@@ -2557,6 +2691,7 @@
           images: imagesToSend.map(i => ({ data: i.data, mime: i.mime })),
           bypass_approval: isBypassActive(),
           no_think: isNoThinkActive(),
+          workspace_scope: currentWorkspaceScope,
         }),
       });
 
@@ -2764,6 +2899,7 @@
 
   // ---- 起動時復元 ----
   loadHistory();
+  updateScopeBar();
 
   // ---- 音声入力 (Web Speech API) ----
   (function() {

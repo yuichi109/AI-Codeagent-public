@@ -1143,6 +1143,7 @@ class ChatRequest(BaseModel):
     images: list = []  # base64 画像リスト [{data: "base64...", mime: "image/png"}, ...]
     bypass_approval: bool = False
     no_think: bool = False
+    workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
@@ -1255,9 +1256,9 @@ def _gather_auto_context() -> str:
     return "<auto_context>\n" + "\n\n".join(parts) + "\n</auto_context>"
 
 
-async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False):
+async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = ""):
     try:
-        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think):
+        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think, workspace_scope):
             yield chunk
     except Exception as e:
         import traceback
@@ -1328,7 +1329,7 @@ def _sanitize_history(history: list) -> list:
     ]
 
 
-async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False):
+async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = ""):
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
 
@@ -1369,6 +1370,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         else:
             user_content = f"{auto_ctx}\n\n{user_content}"
     system_prompt = get_system_prompt(bypass_approval)
+    if workspace_scope:
+        system_prompt += f"\n\n## 作業ディレクトリ制限\n現在のセッションでは **workspace/{workspace_scope}/** のみを操作すること。このフォルダ外のファイルを読み書き・移動・削除してはならない。work_dir 指定時も必ず workspace/{workspace_scope}/ 以下のパスを使うこと。"
     if "5.4-mini" in _provider_config.get("model", ""):
         system_prompt += "\n\n絶対に同じ文章・段落を繰り返すな。一度出力した内容は再出力禁止。"
     messages = [{"role": "system", "content": system_prompt}] + trimmed + [{"role": "user", "content": user_content}]
@@ -1587,7 +1590,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     return StreamingResponse(
-        agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think),
+        agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope),
         media_type="text/event-stream",
     )
 
@@ -1889,6 +1892,35 @@ async def providers_config(req: ProviderConfigRequest):
 
 class CleanupRequest(BaseModel):
     paths: list
+
+
+@app.get("/workspace/subdirs")
+async def workspace_subdirs():
+    """workspace 直下のサブディレクトリ一覧を返す（スコープ選択モーダル用）"""
+    try:
+        dirs = sorted(p.name for p in ALLOWED_WORK_DIR.iterdir() if p.is_dir() and not p.name.startswith("."))
+        return JSONResponse({"dirs": dirs})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+class MkdirRequest(BaseModel):
+    name: str
+
+@app.post("/workspace/mkdir")
+async def workspace_mkdir(req: MkdirRequest):
+    """workspace 直下に新規ディレクトリを作成する（スコープ選択モーダル用）"""
+    name = req.name.strip().strip("/")
+    if not name or "/" in name or name.startswith("."):
+        return JSONResponse({"error": "無効なフォルダ名です"}, status_code=400)
+    target = ALLOWED_WORK_DIR / name
+    if target.exists():
+        return JSONResponse({"error": "既に存在します"}, status_code=400)
+    try:
+        target.mkdir()
+        return JSONResponse({"name": name})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/workspace/ls")

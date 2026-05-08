@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -7,6 +8,28 @@ try:
 except Exception:
     # .env のエンコーディングが壊れている場合は無視して起動（/setup で再設定可能）
     pass
+
+
+def _normalize_to_wsl_path(path_str: str) -> Path:
+    """Windows パス・UNC パスを WSL の Linux パスに変換する。
+    - C:\\Users\\foo  → /mnt/c/Users/foo
+    - \\\\wsl.localhost\\Ubuntu\\home\\foo → /home/foo
+    - 既に Linux パスならそのまま resolve
+    """
+    s = path_str.strip()
+    # Windows ドライブパス: C:\ または C:/
+    m = re.match(r'^([A-Za-z]):[/\\](.*)$', s)
+    if m:
+        drive = m.group(1).lower()
+        rest = m.group(2).replace('\\', '/')
+        return Path(f'/mnt/{drive}/{rest}').resolve()
+    # UNC WSL パス: \\wsl.localhost\Ubuntu\... または //wsl.localhost/Ubuntu/...
+    normalized = s.replace('\\', '/')
+    m2 = re.match(r'^//wsl(?:\.localhost)?/[^/]+(/.*)?$', normalized, re.IGNORECASE)
+    if m2:
+        rest = m2.group(1) or '/'
+        return Path(rest).resolve()
+    return Path(s).resolve()
 
 # Azure OpenAI（未設定時は空文字。セットアップウィザードで設定可能）
 AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY", "")
@@ -23,10 +46,24 @@ AZURE_OPENAI_DEPLOYMENTS: list[str] = (
 )
 AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
 
-# 作業ディレクトリ (絶対パスに正規化)
-_work_dir_raw = os.getenv("ALLOWED_WORK_DIR", "./workspace")
-ALLOWED_WORK_DIR: Path = Path(_work_dir_raw).resolve()
-ALLOWED_WORK_DIR.mkdir(parents=True, exist_ok=True)
+# 作業ディレクトリ（複数対応）
+# ALLOWED_WORK_DIRS=./workspace,C:\Users\foo\proj,/home/user/proj のようにカンマ区切りで指定
+# 未設定時は ALLOWED_WORK_DIR（後方互換）を使用
+_work_dirs_env = os.getenv("ALLOWED_WORK_DIRS", "")
+_work_dir_env  = os.getenv("ALLOWED_WORK_DIR", "./workspace")
+
+if _work_dirs_env:
+    ALLOWED_WORK_DIRS: list[Path] = [
+        _normalize_to_wsl_path(d.strip())
+        for d in _work_dirs_env.split(",") if d.strip()
+    ]
+else:
+    ALLOWED_WORK_DIRS = [_normalize_to_wsl_path(_work_dir_env)]
+
+# デフォルト作業ディレクトリ（後方互換・リストの先頭）
+ALLOWED_WORK_DIR: Path = ALLOWED_WORK_DIRS[0]
+# デフォルトの workspace のみ自動作成（外部プロジェクトは存在前提）
+ALLOWED_WORK_DIRS[0].mkdir(parents=True, exist_ok=True)
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
 

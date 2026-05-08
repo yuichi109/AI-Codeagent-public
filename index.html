@@ -3522,10 +3522,15 @@
     refreshFileTree();
   }
 
-  function editorNewFile() {
+  async function editorNewFile() {
     const prefix = ftSelectedDir ? ftSelectedDir + '/' : '';
     const name = prompt('ファイル名（workspace相対パス）:', prefix + 'new_file.txt');
     if (!name) return;
+    const check = await fetch('/workspace/file?path=' + encodeURIComponent(name));
+    if (check.ok) {
+      const existing = await check.json();
+      if (!existing.error && !confirm(`"${name}" は既に存在します。上書きしますか？`)) return;
+    }
     editorCurrentPath = name;
     document.getElementById('editor-filename-label').textContent = name + ' (新規)';
     document.getElementById('editor-save-btn').disabled = false;

@@ -3524,7 +3524,6 @@
     // ルートへのドロップ（workspace直下に移動）
     tree.ondragover = e => { e.preventDefault(); };
     tree.ondrop = async e => {
-      if (e.target !== tree) return; // フォルダ上のdropは各フォルダが処理
       e.preventDefault();
       const src = e.dataTransfer.getData('text/plain');
       if (!src || !src.includes('/')) return; // 既にルートにある

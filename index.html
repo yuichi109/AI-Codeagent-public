@@ -408,7 +408,7 @@
     <span id="provider-label"></span>
     <select id="model-select" title="Azureデプロイを切り替え" onchange="switchDeployment(this.value)" style="display:none"></select>
     <button id="shell-btn" onclick="toggleShellPanel()" title="シェル実行">🖥 シェル</button>
-    <button id="editor-btn" onclick="openEditorPanel()" title="テキストエディタ">📝 エディタ</button>
+    <button id="editor-btn" onclick="window.open('?editor=1','_blank')" title="テキストエディタ">📝 エディタ</button>
     <button id="sessions-btn" onclick="toggleSessionsPanel()">🕐 履歴</button>
     <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
@@ -535,6 +535,7 @@
     <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
     <button id="editor-ai-btn" onclick="toggleEditorAI()" title="AI補完（Tabで確定）">🤖 AI補完: OFF</button>
     <button id="editor-close-btn" onclick="closeEditorPanel()">✕ 閉じる</button>
+    <button id="editor-newtab-close-btn" onclick="window.close()" style="display:none;padding:4px 12px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">✕ タブを閉じる</button>
   </div>
   <div id="editor-body">
     <div id="editor-filetree"></div>
@@ -3653,6 +3654,14 @@
     model.onDidChangeContent(() => { tab.modified = true; renderTabs(); document.getElementById('editor-save-btn').disabled = false; });
     editorTabs.push(tab);
     switchTab(editorTabs.length - 1);
+  }
+
+  // ?editor=1 で開いた場合はエディタを自動起動・専用UIに切り替え
+  if (new URLSearchParams(location.search).get('editor') === '1') {
+    document.getElementById('editor-close-btn').style.display = 'none';
+    document.getElementById('editor-newtab-close-btn').style.display = '';
+    document.addEventListener('DOMContentLoaded', openEditorPanel);
+    openEditorPanel();
   }
 </script>
 </body>

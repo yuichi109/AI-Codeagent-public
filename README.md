@@ -1,5 +1,11 @@
 # AI Code Agent
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Azure OpenAI](https://img.shields.io/badge/Azure%20OpenAI-gpt--5.4--mini-0078d4?logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/ja-jp/products/ai-services/openai-service)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey?logo=linux&logoColor=white)](https://gitlab.com/yuichi.matsuo/AI-Codeagent)
+
 Azure OpenAI / Azure AI Foundry・Gemini・ローカル LLM に対応した、Web チャット UI で動かす自律コードエージェント。
 コードの生成・編集・実行から、ファイル操作・Web 調査・Office ファイル・GitLab 連携まで一気通貫で扱える。
 

@@ -2165,6 +2165,7 @@ class EditorCompleteRequest(BaseModel):
     code_after: str = ""
     language: str = "plaintext"
     filename: str = ""
+    model: str = ""
 
 @app.post("/editor/complete")
 async def editor_complete(req: EditorCompleteRequest):
@@ -2182,11 +2183,12 @@ async def editor_complete(req: EditorCompleteRequest):
         "- カーソル前のインデントは含めない（カーソルは既にその位置にある）\n"
         'JSON配列1件のみ: [{"insertText":"..."}]  JSONのみ返すこと。'
     )
+    complete_model = req.model.strip() if req.model and req.model.strip() else _provider_config["model"]
     try:
         client = _make_client()
         resp = await asyncio.to_thread(
             lambda: client.chat.completions.create(
-                model=_provider_config["model"],
+                model=complete_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_completion_tokens=800,
             )

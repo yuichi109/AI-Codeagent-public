@@ -299,6 +299,9 @@
   #editor-ai-btn { padding: 4px 12px; background: #45475a; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   #editor-ai-btn.on { background: #cba6f7; color: #1e1e2e; font-weight: bold; }
   #editor-ai-btn:hover { opacity: 0.85; }
+  #editor-complete-model { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; max-width: 160px; display: none; }
+  #editor-complete-model:hover { border-color: #cba6f7; }
+  #editor-complete-model:focus { outline: none; border-color: #cba6f7; }
   #editor-close-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   #editor-close-btn:hover { background: #f38ba8; color: #1e1e2e; }
   #editor-body { display: flex; flex: 1; overflow: hidden; }
@@ -534,6 +537,7 @@
     <button id="editor-new-btn" onclick="editorNewFile()">＋ 新規</button>
     <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
     <button id="editor-ai-btn" onclick="toggleEditorAI()" title="AI補完（Tabで確定）">🤖 AI補完: OFF</button>
+    <select id="editor-complete-model" title="補完用モデル（チャットとは独立）" onchange="localStorage.setItem('editorCompleteModel', this.value)"></select>
     <button id="editor-close-btn" onclick="closeEditorPanel()">✕ 閉じる</button>
     <button id="editor-newtab-close-btn" onclick="window.close()" style="display:none;padding:4px 12px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">✕ タブを閉じる</button>
   </div>
@@ -3272,13 +3276,36 @@
   function updateEditorAIBtn() {
     const btn = document.getElementById('editor-ai-btn');
     if (!btn) return;
+    const sel = document.getElementById('editor-complete-model');
     if (editorAIEnabled) {
       btn.textContent = '🤖 AI補完: ON';
       btn.classList.add('on');
+      if (sel && sel.options.length > 0) sel.style.display = '';
     } else {
       btn.textContent = '🤖 AI補完: OFF';
       btn.classList.remove('on');
+      if (sel) sel.style.display = 'none';
     }
+  }
+
+  async function loadEditorCompleteModels() {
+    try {
+      const pv = await fetch('/providers/current').then(r => r.json());
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini') return;
+      const data = await fetch('/providers/deployments').then(r => r.json());
+      const sel = document.getElementById('editor-complete-model');
+      if (!sel) return;
+      const saved = localStorage.getItem('editorCompleteModel') || data.current;
+      sel.innerHTML = '';
+      data.deployments.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        if (d === saved) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      if (editorAIEnabled && data.deployments.length > 0) sel.style.display = '';
+    } catch(e) { /* 無視 */ }
   }
 
   function renderTabs() {
@@ -3336,6 +3363,7 @@
   function openEditorPanel() {
     document.getElementById('editor-panel').classList.add('open');
     updateEditorAIBtn();
+    loadEditorCompleteModels();
     if (!monacoLoaded) {
       loadMonaco();
     } else {
@@ -3466,10 +3494,12 @@
               const timer = setTimeout(async () => {
                 if (token.isCancellationRequested) { resolve({ items: [] }); return; }
                 try {
+                  const completeSel = document.getElementById('editor-complete-model');
+                  const completeModel = completeSel && completeSel.value ? completeSel.value : null;
                   const res = await fetch('/editor/complete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code_before, code_after, language, filename }),
+                    body: JSON.stringify({ code_before, code_after, language, filename, model: completeModel }),
                   });
                   if (token.isCancellationRequested) { resolve({ items: [] }); return; }
                   const data = await res.json();

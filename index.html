@@ -3519,6 +3519,7 @@
     status.style.color = '#a6e3a1';
     document.getElementById('editor-save-btn').disabled = true;
     setTimeout(() => { status.textContent = ''; }, 2000);
+    refreshFileTree();
   }
 
   function editorNewFile() {

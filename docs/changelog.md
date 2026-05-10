@@ -7,6 +7,12 @@
 
 ## 2026-05-10
 
+### Ansible Azure リファレンス追加（`docs/ansible-azure-reference.md`）
+
+- `spec2325705/bk-yuichi.matsuo` にあるAzureスナップショット関連Ansibleコードの場所を記録
+- Windows単体VM用に改変する際のフロー・対応表を整理
+- GitLab APIでの検索方法も記載（グローバル検索無効のためプロジェクトID指定が必要）
+
 ### マルチエージェント設計書（`docs/multi-agent-dispatch-design.md`）大幅加筆
 
 コード変更なし・設計ドキュメントのみ。

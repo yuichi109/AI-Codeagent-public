@@ -325,7 +325,12 @@
   .editor-tab .tab-dot { color: #f9e2af; flex-shrink: 0; font-size: 10px; }
   .editor-tab .tab-close { flex-shrink: 0; opacity: 0.4; font-size: 13px; line-height: 1; }
   .editor-tab .tab-close:hover { opacity: 1; color: #f38ba8; }
+  #editor-main-area { display: flex; flex: 1; overflow: hidden; }
   #editor-container { flex: 1; overflow: hidden; }
+  #editor-preview-pane { flex: 1; overflow-y: auto; padding: 16px 24px; background: #1e1e2e; border-left: 1px solid #313244; font-size: 14px; line-height: 1.7; color: #cdd6f4; display: none; }
+  #editor-preview-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; display: none; }
+  #editor-preview-btn.on { background: #89b4fa; color: #1e1e2e; font-weight: bold; }
+  #editor-preview-btn:hover { opacity: 0.85; }
   .ft-drag-over { background: #313244 !important; outline: 2px dashed #89b4fa !important; }
   .ft-dragging { opacity: 0.4; }
   #editor-status { font-size: 12px; color: #a6e3a1; padding: 0 8px; }
@@ -536,6 +541,7 @@
     <span id="editor-status"></span>
     <button id="editor-new-btn" onclick="editorNewFile()">＋ 新規</button>
     <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
+    <button id="editor-preview-btn" onclick="toggleEditorPreview()" title="Markdownプレビュー">👁 プレビュー</button>
     <button id="editor-ai-btn" onclick="toggleEditorAI()" title="AI補完（Tabで確定）">🤖 AI補完: OFF</button>
     <select id="editor-complete-model" title="補完用モデル（チャットとは独立）" onchange="localStorage.setItem('editorCompleteModel', this.value)"></select>
     <button id="editor-close-btn" onclick="closeEditorPanel()">✕ 閉じる</button>
@@ -545,7 +551,10 @@
     <div id="editor-filetree"></div>
     <div id="editor-right">
       <div id="editor-tabs"></div>
-      <div id="editor-container"></div>
+      <div id="editor-main-area">
+        <div id="editor-container"></div>
+        <div id="editor-preview-pane" class="markdown-body"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -3267,6 +3276,46 @@
   let editorTabs = [];
   let editorActiveTabIdx = -1;
   let editorAIEnabled = localStorage.getItem('editorAIEnabled') === 'true';
+  let editorPreviewMode = false;
+
+  function isMarkdownPath(path) {
+    return path && path.split('.').pop().toLowerCase() === 'md';
+  }
+
+  function updateEditorPreviewBtn() {
+    const btn = document.getElementById('editor-preview-btn');
+    if (!btn) return;
+    const isMd = isMarkdownPath(editorCurrentPath);
+    btn.style.display = isMd ? 'inline-block' : 'none';
+    if (!isMd && editorPreviewMode) {
+      editorPreviewMode = false;
+      document.getElementById('editor-preview-pane').style.display = 'none';
+      btn.classList.remove('on');
+      btn.textContent = '👁 プレビュー';
+    }
+  }
+
+  function refreshEditorPreview() {
+    if (!editorPreviewMode || !monacoEditor) return;
+    const pane = document.getElementById('editor-preview-pane');
+    pane.innerHTML = renderMarkdown(monacoEditor.getValue());
+  }
+
+  function toggleEditorPreview() {
+    editorPreviewMode = !editorPreviewMode;
+    const pane = document.getElementById('editor-preview-pane');
+    const btn = document.getElementById('editor-preview-btn');
+    if (editorPreviewMode) {
+      pane.style.display = 'block';
+      btn.classList.add('on');
+      btn.textContent = '👁 プレビュー: ON';
+      refreshEditorPreview();
+    } else {
+      pane.style.display = 'none';
+      btn.classList.remove('on');
+      btn.textContent = '👁 プレビュー';
+    }
+  }
 
   function toggleEditorAI() {
     editorAIEnabled = !editorAIEnabled;
@@ -3335,6 +3384,8 @@
     const fileEl = document.querySelector(`#editor-filetree [data-path="${tab.path}"]`);
     if (fileEl) fileEl.classList.add('active');
     renderTabs();
+    updateEditorPreviewBtn();
+    refreshEditorPreview();
   }
 
   function closeTab(idx) {
@@ -3351,6 +3402,7 @@
       monacoEditor.setModel(monaco.editor.createModel('', 'plaintext'));
       document.querySelectorAll('#editor-filetree .ft-file.active').forEach(e => e.classList.remove('active'));
       renderTabs();
+      updateEditorPreviewBtn();
     } else {
       switchTab(Math.min(idx, editorTabs.length - 1));
     }
@@ -3412,6 +3464,7 @@
           if (editorCurrentPath) {
             document.getElementById('editor-save-btn').disabled = false;
           }
+          refreshEditorPreview();
         });
 
         // Enter キーの全行インデント制御

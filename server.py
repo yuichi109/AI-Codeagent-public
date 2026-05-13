@@ -2205,6 +2205,60 @@ async def editor_complete(req: EditorCompleteRequest):
         return JSONResponse({"error": str(e), "items": []}, status_code=500)
 
 
+class InlineChatRequest(BaseModel):
+    messages: list
+    current_code: str = ""
+    language: str = "plaintext"
+    filename: str = ""
+    model: str = ""
+    is_selection: bool = False
+
+@app.post("/editor/chat")
+async def editor_chat(req: InlineChatRequest):
+    """インラインチャット。現在のコードを文脈として往復チャット（ツールなし）。"""
+    chat_model = req.model.strip() if req.model and req.model.strip() else _provider_config["model"]
+    system = (
+        f"あなたはエキスパートプログラマーのアシスタントです。"
+        f"ユーザーが今開いているファイル（言語: {req.language}、ファイル名: {req.filename or '不明'}）について質問・作業しています。\n"
+        "- コードの説明・修正・生成の依頼に応えてください。\n"
+        "- コードを提案する場合は必ずコードブロック（```lang\n...\n```）で囲んでください。\n"
+        "- 簡潔に、要点を絞って回答してください。\n"
+        "- 日本語で回答してください。"
+    )
+    if req.current_code:
+        lang = req.language or "plaintext"
+        if req.is_selection:
+            system += (
+                f"\n\n以下はユーザーが選択した範囲のコードです:\n```{lang}\n{req.current_code[:3000]}\n```\n"
+                "コードを修正する場合は、この選択範囲全体を変更済みの状態で返してください（変更箇所だけでなく選択範囲全体を返すこと）。ファイル全体は返さないでください。"
+            )
+        else:
+            total_lines = len(req.current_code.splitlines())
+            system += (
+                f"\n\n現在のコード（ファイル全体・{total_lines}行）:\n```{lang}\n{req.current_code[:6000]}\n```\n"
+                f"【重要】コードを修正・追加する場合は、必ず{total_lines}行すべてを含むファイル全体を変更済みの状態で返してください。"
+                "スニペットや一部だけを返すことは絶対にしないでください。説明文や挿入指示も不要です。コードブロックのみ返してください。"
+            )
+
+    messages = [{"role": "system", "content": system}]
+    for msg in req.messages:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+
+    try:
+        client = _make_client()
+        resp = await asyncio.to_thread(
+            lambda: client.chat.completions.create(
+                model=chat_model,
+                messages=messages,
+                max_completion_tokens=2000,
+            )
+        )
+        reply = resp.choices[0].message.content.strip()
+        return JSONResponse({"reply": reply})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/workspace/cleanup")
 async def workspace_cleanup(req: CleanupRequest):
     """保護リストにないファイル・ディレクトリを削除する"""

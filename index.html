@@ -331,6 +331,50 @@
   #editor-preview-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; display: none; }
   #editor-preview-btn.on { background: #89b4fa; color: #1e1e2e; font-weight: bold; }
   #editor-preview-btn:hover { opacity: 0.85; }
+  /* ---- インラインチャットペイン ---- */
+  #inline-chat-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #inline-chat-btn.on { background: #cba6f7; color: #1e1e2e; font-weight: bold; }
+  #inline-chat-btn:hover { opacity: 0.85; }
+  #inline-chat-pane { width: 340px; flex-shrink: 0; background: #181825; border-left: 1px solid #313244; display: none; flex-direction: column; }
+  #inline-chat-pane.open { display: flex; }
+  #inline-chat-header { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #313244; flex-shrink: 0; }
+  #inline-chat-header-title { font-size: 13px; font-weight: bold; color: #cba6f7; flex: 1; white-space: nowrap; }
+  #inline-chat-model { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 5px; padding: 2px 5px; font-size: 11px; cursor: pointer; max-width: 130px; }
+  #inline-chat-model:focus { outline: none; border-color: #cba6f7; }
+  #inline-chat-clear-btn { padding: 2px 8px; background: #313244; color: #6c7086; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; flex-shrink: 0; }
+  #inline-chat-clear-btn:hover { background: #45475a; color: #cdd6f4; }
+  #inline-chat-close-btn { padding: 2px 6px; background: none; border: none; color: #6c7086; cursor: pointer; font-size: 15px; flex-shrink: 0; line-height: 1; }
+  #inline-chat-close-btn:hover { color: #f38ba8; }
+  #inline-chat-messages { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  #inline-chat-messages::-webkit-scrollbar { width: 4px; }
+  #inline-chat-messages::-webkit-scrollbar-thumb { background: #45475a; border-radius: 2px; }
+  .ic-msg { font-size: 13px; line-height: 1.65; }
+  .ic-msg-user { align-self: flex-end; max-width: 90%; background: #313244; border: 1px solid #45475a; border-radius: 10px 10px 3px 10px; padding: 8px 12px; color: #cdd6f4; white-space: pre-wrap; word-break: break-word; }
+  .ic-msg-ai { align-self: flex-start; width: 100%; color: #cdd6f4; border-left: 3px solid #cba6f7; padding-left: 10px; }
+  .ic-msg-ai pre { font-size: 12px; overflow-x: auto; }
+  .ic-apply-btn { display: inline-block; margin-top: 6px; padding: 3px 10px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold; }
+  .ic-apply-btn:hover { background: #94e2c8; }
+  .ic-msg-error { align-self: flex-start; color: #f38ba8; font-size: 12px; font-style: italic; }
+  #inline-chat-input-area { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-top: 1px solid #313244; flex-shrink: 0; }
+  #inline-chat-input { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 7px; padding: 7px 10px; font-size: 13px; font-family: inherit; resize: none; outline: none; line-height: 1.5; min-height: 60px; max-height: 120px; overflow-y: auto; }
+  #inline-chat-input:focus { border-color: #cba6f7; }
+  #inline-chat-send-btn { align-self: flex-end; padding: 4px 16px; background: #cba6f7; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
+  #inline-chat-send-btn:hover { background: #b48ead; }
+  #inline-chat-send-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
+  #inline-chat-thinking { align-self: flex-start; color: #6c7086; font-size: 12px; font-style: italic; display: none; }
+  #inline-chat-mode-btn { padding: 2px 7px; background: #313244; color: #6c7086; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; flex-shrink: 0; white-space: nowrap; }
+  #inline-chat-mode-btn:hover { background: #45475a; color: #cdd6f4; }
+  /* サイドモード リサイズハンドル */
+  #inline-chat-resize-handle { width: 5px; cursor: col-resize; background: transparent; flex-shrink: 0; display: none; transition: background 0.15s; }
+  #inline-chat-resize-handle:hover, #inline-chat-resize-handle.active { background: #cba6f7; }
+  /* フロートモード */
+  #inline-chat-pane.float { position: fixed; z-index: 300; border-radius: 10px; border: 1px solid #45475a; box-shadow: 0 8px 40px rgba(0,0,0,0.6); min-width: 260px; min-height: 200px; }
+  #inline-chat-pane.float #inline-chat-header { cursor: move; border-radius: 10px 10px 0 0; user-select: none; }
+  #inline-chat-float-resize { position: absolute; bottom: 0; right: 0; width: 22px; height: 22px; cursor: se-resize; display: none; border-radius: 0 0 10px 0; background: rgba(89,90,112,0.4); }
+  #inline-chat-float-resize::after { content: ''; display: block; width: 100%; height: 100%; background: radial-gradient(circle, #89b4fa 1.5px, transparent 1.5px) 5px 14px / 20px 20px no-repeat, radial-gradient(circle, #89b4fa 1.5px, transparent 1.5px) 10px 9px / 20px 20px no-repeat, radial-gradient(circle, #89b4fa 1.5px, transparent 1.5px) 15px 4px / 20px 20px no-repeat; }
+  #inline-chat-pane.float #inline-chat-float-resize { display: block; }
+  #inline-chat-float-resize:hover { background: rgba(203,166,247,0.25); }
+  #inline-chat-float-resize:hover::after { background: radial-gradient(circle, #cba6f7 1.5px, transparent 1.5px) 5px 14px / 20px 20px no-repeat, radial-gradient(circle, #cba6f7 1.5px, transparent 1.5px) 10px 9px / 20px 20px no-repeat, radial-gradient(circle, #cba6f7 1.5px, transparent 1.5px) 15px 4px / 20px 20px no-repeat; }
   .ft-drag-over { background: #313244 !important; outline: 2px dashed #89b4fa !important; }
   .ft-dragging { opacity: 0.4; }
   #editor-status { font-size: 12px; color: #a6e3a1; padding: 0 8px; }
@@ -544,6 +588,7 @@
     <button id="editor-preview-btn" onclick="toggleEditorPreview()" title="Markdownプレビュー">👁 プレビュー</button>
     <button id="editor-ai-btn" onclick="toggleEditorAI()" title="AI補完（Tabで確定）">🤖 AI補完: OFF</button>
     <select id="editor-complete-model" title="補完用モデル（チャットとは独立）" onchange="localStorage.setItem('editorCompleteModel', this.value)"></select>
+    <button id="inline-chat-btn" onclick="toggleInlineChat()" title="インラインチャット (Ctrl+Shift+K)">💬 チャット</button>
     <button id="editor-close-btn" onclick="closeEditorPanel()">✕ 閉じる</button>
     <button id="editor-newtab-close-btn" onclick="window.close()" style="display:none;padding:4px 12px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">✕ タブを閉じる</button>
   </div>
@@ -554,6 +599,24 @@
       <div id="editor-main-area">
         <div id="editor-container"></div>
         <div id="editor-preview-pane" class="markdown-body"></div>
+        <div id="inline-chat-resize-handle"></div>
+        <div id="inline-chat-pane">
+          <div id="inline-chat-header">
+            <span id="inline-chat-header-title">💬 インラインチャット</span>
+            <select id="inline-chat-model" title="チャット用モデル"></select>
+            <button id="inline-chat-mode-btn" onclick="toggleInlineChatMode()" title="サイド/フロート切り替え">⧉ フロート</button>
+            <button id="inline-chat-clear-btn" onclick="clearInlineChat()" title="会話をリセット">クリア</button>
+            <button id="inline-chat-close-btn" onclick="closeInlineChat()">✕</button>
+          </div>
+          <div id="inline-chat-messages">
+            <div id="inline-chat-thinking">考え中...</div>
+          </div>
+          <div id="inline-chat-input-area">
+            <textarea id="inline-chat-input" placeholder="コードについて質問・指示... (Ctrl+Enter で送信)" rows="3"></textarea>
+            <button id="inline-chat-send-btn" onclick="sendInlineChat()">送信</button>
+          </div>
+          <div id="inline-chat-float-resize" title="ドラッグでリサイズ"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -3358,6 +3421,300 @@
     } catch(e) { /* 無視 */ }
   }
 
+  // ===== インラインチャット =====
+  let inlineChatOpen = false;
+  let inlineChatMessages = [];
+  let inlineChatMode = localStorage.getItem('inlineChatMode') || 'side';
+
+  async function loadInlineChatModels() {
+    try {
+      const pv = await fetch('/providers/current').then(r => r.json());
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini') return;
+      const data = await fetch('/providers/deployments').then(r => r.json());
+      const sel = document.getElementById('inline-chat-model');
+      if (!sel) return;
+      const saved = localStorage.getItem('inlineChatModel') || data.current;
+      sel.innerHTML = '';
+      data.deployments.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        if (d === saved) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = () => localStorage.setItem('inlineChatModel', sel.value);
+    } catch(e) { /* 無視 */ }
+  }
+
+  function _updateResizeHandle() {
+    const h = document.getElementById('inline-chat-resize-handle');
+    if (h) h.style.display = (inlineChatOpen && inlineChatMode === 'side') ? 'block' : 'none';
+  }
+
+  function setInlineChatMode(mode) {
+    inlineChatMode = mode;
+    localStorage.setItem('inlineChatMode', mode);
+    const pane = document.getElementById('inline-chat-pane');
+    const modeBtn = document.getElementById('inline-chat-mode-btn');
+    if (mode === 'float') {
+      pane.classList.add('float');
+      if (modeBtn) modeBtn.textContent = '⊟ サイド';
+      const saved = JSON.parse(localStorage.getItem('inlineChatFloatPos') || 'null');
+      if (saved) {
+        pane.style.left = saved.left + 'px';
+        pane.style.top = saved.top + 'px';
+        pane.style.width = saved.width + 'px';
+        pane.style.height = saved.height + 'px';
+      } else {
+        pane.style.left = Math.max(0, window.innerWidth - 420) + 'px';
+        pane.style.top = '60px';
+        pane.style.width = '400px';
+        pane.style.height = '520px';
+      }
+    } else {
+      pane.classList.remove('float');
+      pane.style.left = pane.style.top = pane.style.height = '';
+      if (modeBtn) modeBtn.textContent = '⧉ フロート';
+      const savedWidth = localStorage.getItem('inlineChatSideWidth');
+      pane.style.width = (savedWidth || '340') + 'px';
+    }
+    _updateResizeHandle();
+  }
+
+  function toggleInlineChatMode() {
+    setInlineChatMode(inlineChatMode === 'side' ? 'float' : 'side');
+  }
+
+  function toggleInlineChat() {
+    if (inlineChatOpen) {
+      closeInlineChat();
+    } else {
+      openInlineChat();
+    }
+  }
+
+  function openInlineChat() {
+    inlineChatOpen = true;
+    document.getElementById('inline-chat-pane').classList.add('open');
+    document.getElementById('inline-chat-btn').classList.add('on');
+    loadInlineChatModels();
+    setInlineChatMode(inlineChatMode);
+    setTimeout(() => document.getElementById('inline-chat-input').focus(), 50);
+  }
+
+  function closeInlineChat() {
+    inlineChatOpen = false;
+    document.getElementById('inline-chat-pane').classList.remove('open');
+    document.getElementById('inline-chat-btn').classList.remove('on');
+    _updateResizeHandle();
+  }
+
+  function clearInlineChat() {
+    inlineChatMessages = [];
+    const container = document.getElementById('inline-chat-messages');
+    container.innerHTML = '<div id="inline-chat-thinking" style="display:none">考え中...</div>';
+  }
+
+  function _icGetCurrentCode() {
+    if (!monacoEditor) return { code: '', isSelection: false };
+    const model = monacoEditor.getModel();
+    const sel = monacoEditor.getSelection();
+    if (sel && !sel.isEmpty()) {
+      return { code: model.getValueInRange(sel), isSelection: true };
+    }
+    return { code: model.getValue(), isSelection: false };
+  }
+
+  function _icStripCodeBlocks(text) {
+    return text.replace(/```[\s\S]*?```/g, '[コード省略]').trim();
+  }
+
+  function _icAppendMessage(role, contentHtml, rawCode, ctx) {
+    const container = document.getElementById('inline-chat-messages');
+    const thinking = document.getElementById('inline-chat-thinking');
+    const div = document.createElement('div');
+    div.className = 'ic-msg ' + (role === 'user' ? 'ic-msg-user' : 'ic-msg-ai');
+    div.innerHTML = contentHtml;
+    if (rawCode) {
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'ic-apply-btn';
+      applyBtn.textContent = '✓ 適用';
+      applyBtn.onclick = () => _icApplyCode(rawCode, ctx);
+      div.appendChild(applyBtn);
+    }
+    container.insertBefore(div, thinking);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function _icExtractCode(text) {
+    const m = text.match(/```(?:\w+)?\n([\s\S]*?)```/);
+    return m ? m[1] : null;
+  }
+
+  function _icApplyCode(code, ctx) {
+    if (!monacoEditor) return;
+    const model = monacoEditor.getModel();
+    // 選択なしのとき、返ってきたコードが元より大幅に短ければ警告
+    if (!ctx?.isSelection) {
+      const origLines = model.getLineCount();
+      const newLines = code.split('\n').length;
+      if (origLines > 10 && newLines < origLines * 0.5) {
+        if (!confirm(`⚠️ 返ってきたコードは ${newLines} 行ですが、現在のファイルは ${origLines} 行あります。\nこのまま適用するとファイルの大部分が失われます。続けますか？`)) return;
+      }
+    }
+    const range = ctx?.isSelection ? monacoEditor.getSelection() : model.getFullModelRange();
+    model.pushEditOperations([], [{ range, text: code }], () => null);
+    document.getElementById('editor-save-btn').disabled = false;
+  }
+
+  async function sendInlineChat() {
+    const input = document.getElementById('inline-chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const sendBtn = document.getElementById('inline-chat-send-btn');
+    const thinking = document.getElementById('inline-chat-thinking');
+    input.value = '';
+    sendBtn.disabled = true;
+
+    _icAppendMessage('user', escHtml(text).replace(/\n/g, '<br>'), null);
+    inlineChatMessages.push({ role: 'user', content: text });
+
+    thinking.style.display = 'block';
+    document.getElementById('inline-chat-messages').scrollTop = 9999;
+
+    const ctx = _icGetCurrentCode();
+    const lang = monacoEditor?.getModel()?.getLanguageId() || 'plaintext';
+    const filename = editorCurrentPath || '';
+    const modelSel = document.getElementById('inline-chat-model');
+    const chosenModel = modelSel?.value || '';
+
+    try {
+      const res = await fetch('/editor/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: inlineChatMessages,
+          current_code: ctx.code,
+          language: lang,
+          filename,
+          model: chosenModel,
+          is_selection: ctx.isSelection,
+        }),
+      });
+      const data = await res.json();
+      thinking.style.display = 'none';
+      if (data.error) {
+        const errDiv = document.createElement('div');
+        errDiv.className = 'ic-msg ic-msg-error';
+        errDiv.textContent = '⚠️ ' + data.error;
+        document.getElementById('inline-chat-messages').insertBefore(errDiv, thinking);
+      } else {
+        const reply = data.reply;
+        // 履歴にはコードブロックを省略して蓄積を防ぐ
+        inlineChatMessages.push({ role: 'assistant', content: _icStripCodeBlocks(reply) });
+        const rawCode = _icExtractCode(reply);
+        _icAppendMessage('assistant', renderMarkdown(reply), rawCode, ctx);
+      }
+    } catch(e) {
+      thinking.style.display = 'none';
+      const errDiv = document.createElement('div');
+      errDiv.className = 'ic-msg ic-msg-error';
+      errDiv.textContent = '⚠️ ' + e.message;
+      document.getElementById('inline-chat-messages').insertBefore(errDiv, document.getElementById('inline-chat-thinking'));
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  document.getElementById('inline-chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+      e.preventDefault();
+      const btns = document.getElementById('inline-chat-messages').querySelectorAll('.ic-apply-btn');
+      if (btns.length > 0) btns[btns.length - 1].click();
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendInlineChat();
+    }
+  });
+
+  // ---- フロートモード: タイトルバーでドラッグ移動 ----
+  let _icFloatDrag = null;
+  document.getElementById('inline-chat-header').addEventListener('mousedown', e => {
+    if (inlineChatMode !== 'float') return;
+    if (e.target.closest('button') || e.target.closest('select')) return;
+    const pane = document.getElementById('inline-chat-pane');
+    _icFloatDrag = {
+      startX: e.clientX, startY: e.clientY,
+      startLeft: parseInt(pane.style.left) || 0,
+      startTop: parseInt(pane.style.top) || 0,
+    };
+    e.preventDefault();
+  });
+
+  // ---- フロートモード: 右下コーナーでリサイズ ----
+  let _icFloatResize = null;
+  document.getElementById('inline-chat-float-resize').addEventListener('mousedown', e => {
+    const pane = document.getElementById('inline-chat-pane');
+    _icFloatResize = {
+      startX: e.clientX, startY: e.clientY,
+      startWidth: parseInt(pane.style.width) || 400,
+      startHeight: parseInt(pane.style.height) || 520,
+    };
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  // ---- サイドモード: 境界線ドラッグでリサイズ ----
+  let _icSideResize = null;
+  document.getElementById('inline-chat-resize-handle').addEventListener('mousedown', e => {
+    if (inlineChatMode !== 'side') return;
+    const pane = document.getElementById('inline-chat-pane');
+    _icSideResize = {
+      startX: e.clientX,
+      startWidth: parseInt(pane.style.width) || 340,
+    };
+    document.getElementById('inline-chat-resize-handle').classList.add('active');
+    e.preventDefault();
+  });
+
+  // ---- マウス移動・リリース（共通）----
+  document.addEventListener('mousemove', e => {
+    if (_icFloatDrag) {
+      const pane = document.getElementById('inline-chat-pane');
+      pane.style.left = Math.max(0, _icFloatDrag.startLeft + e.clientX - _icFloatDrag.startX) + 'px';
+      pane.style.top  = Math.max(0, _icFloatDrag.startTop  + e.clientY - _icFloatDrag.startY) + 'px';
+    }
+    if (_icFloatResize) {
+      const pane = document.getElementById('inline-chat-pane');
+      pane.style.width  = Math.max(260, _icFloatResize.startWidth  + e.clientX - _icFloatResize.startX) + 'px';
+      pane.style.height = Math.max(200, _icFloatResize.startHeight + e.clientY - _icFloatResize.startY) + 'px';
+    }
+    if (_icSideResize) {
+      const pane = document.getElementById('inline-chat-pane');
+      const newW = Math.max(220, Math.min(700, _icSideResize.startWidth - (e.clientX - _icSideResize.startX)));
+      pane.style.width = newW + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (_icFloatDrag || _icFloatResize) {
+      const pane = document.getElementById('inline-chat-pane');
+      localStorage.setItem('inlineChatFloatPos', JSON.stringify({
+        left: parseInt(pane.style.left), top: parseInt(pane.style.top),
+        width: parseInt(pane.style.width), height: parseInt(pane.style.height),
+      }));
+      _icFloatDrag = _icFloatResize = null;
+    }
+    if (_icSideResize) {
+      const pane = document.getElementById('inline-chat-pane');
+      localStorage.setItem('inlineChatSideWidth', parseInt(pane.style.width));
+      document.getElementById('inline-chat-resize-handle').classList.remove('active');
+      _icSideResize = null;
+    }
+  });
+
   function renderTabs() {
     const bar = document.getElementById('editor-tabs');
     bar.innerHTML = '';
@@ -3465,6 +3822,13 @@
             document.getElementById('editor-save-btn').disabled = false;
           }
           refreshEditorPreview();
+        });
+
+        monacoEditor.addAction({
+          id: 'inline-chat-toggle',
+          label: 'インラインチャットを開く/閉じる',
+          keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyK],
+          run: () => toggleInlineChat(),
         });
 
         // Enter キーの全行インデント制御

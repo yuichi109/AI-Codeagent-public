@@ -1998,6 +1998,13 @@ async def workspace_upload(file: UploadFile = FastAPIFile(...)):
 @app.post("/workspace/write-raw")
 async def workspace_write_raw(req: RawWriteRequest):
     """LLMを経由せずコンテンツをそのままworkspaceに書き込む"""
+    if req.path.lower().endswith(".ps1"):
+        # PowerShell 5.1はBOMなしUTF-8を認識しないためBOM付きで保存
+        from tools.file_tools import _resolve_safe_path
+        target = _resolve_safe_path(req.path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(req.content, encoding="utf-8-sig")
+        return JSONResponse({"result": {"message": f"{req.path} に書き込みました"}})
     result = write_file(req.path, req.content)
     return JSONResponse({"result": result})
 

@@ -364,6 +364,13 @@
   .ic-apply-btn:hover { background: #94e2c8; }
   .ic-msg-error { align-self: flex-start; color: #f38ba8; font-size: 12px; font-style: italic; }
   #inline-chat-input-area { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-top: 1px solid #313244; flex-shrink: 0; }
+  #ic-mode-row { display: flex; align-items: center; justify-content: space-between; }
+  #ic-mode-btns { display: flex; gap: 3px; }
+  .ic-mode-btn { padding: 2px 8px; background: #313244; color: #6c7086; border: 1px solid #45475a; border-radius: 4px; cursor: pointer; font-size: 11px; }
+  .ic-mode-btn:hover { background: #45475a; color: #cdd6f4; }
+  .ic-mode-btn.active { background: #45475a; color: #cdd6f4; border-color: #6c7086; }
+  .ic-mode-btn[data-mode="smart"].active { color: #a6e3a1; border-color: #a6e3a1; }
+  .ic-mode-btn[data-mode="default"].active { color: #89b4fa; border-color: #89b4fa; }
   #inline-chat-input { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 7px; padding: 7px 10px; font-size: 13px; font-family: inherit; resize: none; outline: none; line-height: 1.5; min-height: 60px; max-height: 120px; overflow-y: auto; }
   #inline-chat-input:focus { border-color: #cba6f7; }
   #inline-chat-send-btn { align-self: flex-end; padding: 4px 16px; background: #cba6f7; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
@@ -626,7 +633,14 @@
           </div>
           <div id="inline-chat-input-area">
             <textarea id="inline-chat-input" placeholder="コードについて質問・指示... (Ctrl+Enter で送信)" rows="3"></textarea>
-            <button id="inline-chat-send-btn" onclick="sendInlineChat()">送信</button>
+            <div id="ic-mode-row">
+              <div id="ic-mode-btns">
+                <button class="ic-mode-btn" data-mode="auto" onclick="setIcForceMode('auto')" title="キーワード検出で自動切り替え">自動</button>
+                <button class="ic-mode-btn" data-mode="smart" onclick="setIcForceMode('smart')" title="常に上位モデルを使用">上位▲</button>
+                <button class="ic-mode-btn" data-mode="default" onclick="setIcForceMode('default')" title="常にデフォルトモデルを使用">下位▼</button>
+              </div>
+              <button id="inline-chat-send-btn" onclick="sendInlineChat()">送信</button>
+            </div>
           </div>
           <div id="inline-chat-float-resize" title="ドラッグでリサイズ"></div>
         </div>
@@ -3439,6 +3453,15 @@
   let inlineChatMessages = [];
   let inlineChatMode = localStorage.getItem('inlineChatMode') || 'side';
   let _icDeployments = [];
+  let _icForceMode = localStorage.getItem('icForceMode') || 'auto';
+
+  function setIcForceMode(mode) {
+    _icForceMode = mode;
+    localStorage.setItem('icForceMode', mode);
+    document.querySelectorAll('.ic-mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  }
 
   function _icPopulateSelect(sel, deployments, savedKey) {
     const saved = localStorage.getItem(savedKey) || deployments[0] || '';
@@ -3527,6 +3550,7 @@
     document.getElementById('inline-chat-pane').classList.add('open');
     document.getElementById('inline-chat-btn').classList.add('on');
     loadInlineChatModels();
+    setIcForceMode(_icForceMode);
     setInlineChatMode(inlineChatMode);
     setTimeout(() => document.getElementById('inline-chat-input').focus(), 50);
   }
@@ -3563,10 +3587,12 @@
   }
 
   function _icPickModel(tier) {
-    if (tier !== 'smart') return null;
     const defModel = localStorage.getItem('icDefaultModel') || '';
     const smartModel = localStorage.getItem('icSmartModel') || '';
     if (!smartModel || smartModel === defModel) return null;
+    if (_icForceMode === 'smart') return smartModel;
+    if (_icForceMode === 'default') return null;
+    if (tier !== 'smart') return null;
     return smartModel;
   }
 

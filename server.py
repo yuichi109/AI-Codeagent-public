@@ -2188,7 +2188,8 @@ async def workspace_run_shell(path: str):
     suffix = resolved.suffix.lower()
     if IS_WINDOWS:
         if suffix == ".ps1":
-            cmd = [_find_powershell_exe(), "-ExecutionPolicy", "Bypass", "-File", str(resolved)]
+            cmd = [_find_powershell_exe(), "-ExecutionPolicy", "Bypass", "-NoProfile",
+                   "-Command", f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '{resolved}'"]
         elif suffix == ".sh":
             bash = _find_git_bash()
             if not bash:
@@ -2236,7 +2237,8 @@ async def workspace_exec_shell(req: ShellExecRequest):
         exec_cwd = str(ALLOWED_WORK_DIR)
 
     if IS_WINDOWS:
-        cmd = [_find_powershell_exe(), "-NoProfile", "-Command", req.command]
+        cmd = [_find_powershell_exe(), "-NoProfile", "-Command",
+               f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {req.command}"]
     else:
         cmd = ["bash", "-c", req.command]
 

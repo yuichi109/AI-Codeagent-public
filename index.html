@@ -392,7 +392,14 @@
   #inline-chat-float-resize:hover::after { background: radial-gradient(circle, #cba6f7 1.5px, transparent 1.5px) 5px 14px / 20px 20px no-repeat, radial-gradient(circle, #cba6f7 1.5px, transparent 1.5px) 10px 9px / 20px 20px no-repeat, radial-gradient(circle, #cba6f7 1.5px, transparent 1.5px) 15px 4px / 20px 20px no-repeat; }
   .ft-drag-over { background: #313244 !important; outline: 2px dashed #89b4fa !important; }
   .ft-dragging { opacity: 0.4; }
+  #ft-context-menu { display: none; position: fixed; z-index: 9999; background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px; padding: 4px 0; box-shadow: 0 4px 16px rgba(0,0,0,0.5); min-width: 140px; }
+  #ft-context-menu.open { display: block; }
+  #ft-context-menu button { display: block; width: 100%; padding: 7px 14px; background: none; border: none; color: #cdd6f4; font-size: 13px; text-align: left; cursor: pointer; }
+  #ft-context-menu button:hover { background: #313244; color: #f38ba8; }
   #editor-status { font-size: 12px; color: #a6e3a1; padding: 0 8px; }
+  #editor-eol-btn { padding: 3px 9px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 5px; cursor: pointer; font-size: 11px; font-family: monospace; }
+  #editor-eol-btn:hover:not(:disabled) { background: #45475a; color: #fab387; border-color: #fab387; }
+  #editor-eol-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   /* ---- セッション履歴パネル ---- */
   #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #sessions-btn:hover { background: #89dceb; color: #1e1e2e; }
@@ -598,6 +605,8 @@
     <span id="editor-toolbar-title">📝 エディタ</span>
     <span id="editor-filename-label">ファイルを選択してください</span>
     <span id="editor-status"></span>
+    <button id="editor-eol-btn" onclick="toggleEOL()" title="改行コードを切り替え" disabled>LF</button>
+    <button id="editor-search-btn" onclick="editorOpenSearch()" title="検索・置換 (Ctrl+F / Ctrl+H)" disabled style="padding:4px 10px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">🔍</button>
     <button id="editor-new-btn" onclick="editorNewFile()">＋ 新規</button>
     <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
     <button id="editor-preview-btn" onclick="toggleEditorPreview()" title="Markdownプレビュー">👁 プレビュー</button>
@@ -665,6 +674,12 @@
 </div>
 
 <!-- ワークスペース掃除 確認モーダル -->
+<div id="ft-context-menu">
+  <button onclick="ftRenameItem()">✏ 名前変更</button>
+  <button id="ft-ctx-duplicate" onclick="ftDuplicateItem()">📋 複製</button>
+  <button id="ft-ctx-download" onclick="ftDownloadItem()">⬇ ダウンロード</button>
+  <button onclick="ftDeleteItem()">🗑 削除</button>
+</div>
 <div id="cleanup-overlay">
   <div id="cleanup-modal">
     <div id="cleanup-modal-header">🧹 ワークスペース掃除 — 削除確認</div>
@@ -3275,6 +3290,8 @@
     const input = document.getElementById('shell-input');
     const command = input.value.trim();
     if (!command) return;
+    shellHistoryPush(command);
+    shellHistoryIdx = -1;
     if (shellAbortController) shellAbortController.abort();
     shellAbortController = new AbortController();
 
@@ -3346,12 +3363,44 @@
     }
   }
 
-  // textarea: Enter送信 / Shift+Enter改行 / 高さ自動調整
+  // textarea: Enter送信 / Shift+Enter改行 / 高さ自動調整 / ↑↓コマンド履歴
+  const shellHistory = [];
+  let shellHistoryIdx = -1;
+  let shellHistoryDraft = '';
+
+  function shellHistoryPush(cmd) {
+    if (!cmd) return;
+    if (shellHistory[shellHistory.length - 1] === cmd) return; // 直前と同じなら追加しない
+    shellHistory.push(cmd);
+    if (shellHistory.length > 200) shellHistory.shift();
+    shellHistoryIdx = -1;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const inp = document.getElementById('shell-input');
     if (!inp) return;
     inp.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); shellExec(); }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        shellExec();
+      } else if (e.key === 'ArrowUp' && !e.shiftKey) {
+        if (shellHistory.length === 0) return;
+        e.preventDefault();
+        if (shellHistoryIdx === -1) shellHistoryDraft = inp.value;
+        shellHistoryIdx = Math.min(shellHistoryIdx + 1, shellHistory.length - 1);
+        inp.value = shellHistory[shellHistory.length - 1 - shellHistoryIdx];
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+      } else if (e.key === 'ArrowDown' && !e.shiftKey) {
+        if (shellHistoryIdx === -1) return;
+        e.preventDefault();
+        shellHistoryIdx--;
+        inp.value = shellHistoryIdx === -1 ? shellHistoryDraft : shellHistory[shellHistory.length - 1 - shellHistoryIdx];
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+      }
     });
     inp.addEventListener('input', () => {
       inp.style.height = 'auto';
@@ -3822,6 +3871,8 @@
     document.getElementById('editor-filename-label').textContent = tab.path + (tab.isNew ? ' (新規)' : '');
     document.getElementById('editor-save-btn').disabled = !tab.modified;
     document.getElementById('editor-status').textContent = '';
+    document.getElementById('editor-search-btn').disabled = false;
+    updateEolBtn();
     document.querySelectorAll('#editor-filetree .ft-file').forEach(e => e.classList.remove('active'));
     const fileEl = document.querySelector(`#editor-filetree [data-path="${tab.path}"]`);
     if (fileEl) fileEl.classList.add('active');
@@ -3841,6 +3892,8 @@
       document.getElementById('editor-filename-label').textContent = 'ファイルを選択してください';
       document.getElementById('editor-save-btn').disabled = true;
       document.getElementById('editor-status').textContent = '';
+      document.getElementById('editor-search-btn').disabled = true;
+      updateEolBtn(true);
       monacoEditor.setModel(monaco.editor.createModel('', 'plaintext'));
       document.querySelectorAll('#editor-filetree .ft-file.active').forEach(e => e.classList.remove('active'));
       renderTabs();
@@ -3848,6 +3901,98 @@
     } else {
       switchTab(Math.min(idx, editorTabs.length - 1));
     }
+  }
+
+  function editorOpenSearch() {
+    monacoEditor?.focus();
+    monacoEditor?.getAction('actions.find')?.run();
+  }
+
+  async function ftRenameItem() {
+    if (!ftContextTarget) return;
+    document.getElementById('ft-context-menu').classList.remove('open');
+    const { path, isDir } = ftContextTarget;
+    const parts = path.split('/');
+    const oldName = parts[parts.length - 1];
+    const newName = prompt('新しい名前:', oldName);
+    if (!newName || newName === oldName) return;
+    const res = await fetch('/workspace/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src: path, newname: newName }),
+    });
+    const data = await res.json();
+    if (data.error) { alert('リネーム失敗: ' + data.error); return; }
+    const newPath = data.new_path;
+    // 開いているタブのパスを更新
+    editorTabs.forEach((t, i) => {
+      if (t.path === path || t.path.startsWith(path + '/')) {
+        t.path = t.path.replace(path, newPath);
+        if (i === editorActiveTabIdx) {
+          editorCurrentPath = t.path;
+          document.getElementById('editor-filename-label').textContent = t.path + (t.isNew ? ' (新規)' : '');
+        }
+      }
+    });
+    renderTabs();
+    refreshFileTree();
+  }
+
+  async function ftDuplicateItem() {
+    if (!ftContextTarget) return;
+    document.getElementById('ft-context-menu').classList.remove('open');
+    const { path } = ftContextTarget;
+    const res = await fetch('/workspace/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src: path }),
+    });
+    const data = await res.json();
+    if (data.error) { alert('複製失敗: ' + data.error); return; }
+    refreshFileTree();
+  }
+
+  async function ftDownloadItem() {
+    if (!ftContextTarget) return;
+    document.getElementById('ft-context-menu').classList.remove('open');
+    const { path, isDir } = ftContextTarget;
+    if (isDir) { alert('フォルダはダウンロードできません'); return; }
+    // 開いているタブがあればその内容を使う、なければサーバーから取得
+    const tab = editorTabs.find(t => t.path === path);
+    let content;
+    if (tab) {
+      content = tab.model.getValue();
+    } else {
+      const res = await fetch('/workspace/file?path=' + encodeURIComponent(path));
+      const data = await res.json();
+      if (data.error) { alert('取得失敗: ' + data.error); return; }
+      content = data.content;
+    }
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = path.split('/').pop();
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function updateEolBtn(disabled = false) {
+    const btn = document.getElementById('editor-eol-btn');
+    if (disabled || !monacoEditor) { btn.disabled = true; btn.textContent = 'LF'; return; }
+    const eol = monacoEditor.getModel()?.getEOL();
+    btn.disabled = false;
+    btn.textContent = eol === '\r\n' ? 'CRLF' : 'LF';
+  }
+  function toggleEOL() {
+    const model = monacoEditor?.getModel();
+    if (!model) return;
+    const isCRLF = model.getEOL() === '\r\n';
+    model.setEOL(isCRLF ? monaco.editor.EndOfLineSequence.LF : monaco.editor.EndOfLineSequence.CRLF);
+    updateEolBtn();
+    if (editorActiveTabIdx >= 0) editorTabs[editorActiveTabIdx].modified = true;
+    document.getElementById('editor-save-btn').disabled = false;
+    renderTabs();
   }
 
   // エディタパネル上でのブラウザデフォルトのファイル開き動作を全域で抑止
@@ -4118,6 +4263,7 @@
           if (data.error) { alert(data.error); return; }
           refreshFileTree();
         };
+        el.oncontextmenu = e => ftShowContextMenu(e, path, true);
         container.appendChild(el);
         container.appendChild(children);
       } else {
@@ -4133,8 +4279,58 @@
         el.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.stopPropagation(); };
         el.ondragstart = e => { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; el.classList.add('ft-dragging'); window.ftIsDragging = true; };
         el.ondragend = () => { el.classList.remove('ft-dragging'); window.ftIsDragging = false; };
+        el.oncontextmenu = e => ftShowContextMenu(e, path, false);
         container.appendChild(el);
       }
+    }
+  }
+
+  let ftContextTarget = null;
+  function ftShowContextMenu(e, path, isDir) {
+    e.preventDefault();
+    e.stopPropagation();
+    ftContextTarget = { path, isDir };
+    document.getElementById('ft-ctx-duplicate').style.display = isDir ? 'none' : '';
+    document.getElementById('ft-ctx-download').style.display = isDir ? 'none' : '';
+    const menu = document.getElementById('ft-context-menu');
+    menu.classList.add('open');
+    const x = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
+    const y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+  }
+  document.addEventListener('click', () => {
+    document.getElementById('ft-context-menu')?.classList.remove('open');
+  });
+  document.addEventListener('contextmenu', e => {
+    if (!e.target.closest('#ft-context-menu')) {
+      document.getElementById('ft-context-menu')?.classList.remove('open');
+    }
+  });
+  async function ftDeleteItem() {
+    if (!ftContextTarget) return;
+    document.getElementById('ft-context-menu').classList.remove('open');
+    const { path, isDir } = ftContextTarget;
+    const label = isDir ? `フォルダ「${path}」とその中身` : `ファイル「${path}」`;
+    if (!confirm(`${label} を削除しますか？\nこの操作は元に戻せません。`)) return;
+    const res = await fetch('/workspace/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: [path] }),
+    });
+    const data = await res.json();
+    if (data.errors && data.errors.length > 0) {
+      alert('削除失敗: ' + data.errors.map(e => e.error).join(', '));
+    } else {
+      // 削除したファイルが開いていたらタブを閉じる
+      if (!isDir) {
+        const idx = editorTabs.findIndex(t => t.path === path);
+        if (idx >= 0) closeTab(idx);
+      } else {
+        const toClose = editorTabs.map((t, i) => i).filter(i => editorTabs[i].path === path || editorTabs[i].path.startsWith(path + '/'));
+        for (let i = toClose.length - 1; i >= 0; i--) closeTab(toClose[i]);
+      }
+      refreshFileTree();
     }
   }
 

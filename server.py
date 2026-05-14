@@ -2031,6 +2031,59 @@ async def workspace_tree():
     return JSONResponse({"files": result})
 
 
+@app.post("/workspace/copy")
+async def workspace_copy(body: dict):
+    """エディタ用: ファイルを複製（同じディレクトリに _copy サフィックスで作成）"""
+    import shutil
+    from tools.file_tools import _resolve_safe_path
+    src_rel = body.get("src", "").strip("/")
+    if not src_rel:
+        return JSONResponse({"error": "src が必要です"}, status_code=400)
+    try:
+        src_path = _resolve_safe_path(src_rel)
+        if not src_path.exists() or not src_path.is_file():
+            return JSONResponse({"error": "ファイルが見つかりません"}, status_code=404)
+        stem = src_path.stem
+        suffix = src_path.suffix
+        new_path = src_path.parent / f"{stem}_copy{suffix}"
+        n = 2
+        while new_path.exists():
+            new_path = src_path.parent / f"{stem}_copy{n}{suffix}"
+            n += 1
+        shutil.copy2(str(src_path), str(new_path))
+        rel = str(new_path.relative_to(ALLOWED_WORK_DIR)).replace("\\", "/")
+        return JSONResponse({"ok": True, "new_path": rel})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/workspace/rename")
+async def workspace_rename(body: dict):
+    """エディタ用: ファイル/フォルダの名前変更"""
+    import shutil
+    from tools.file_tools import _resolve_safe_path
+    src_rel = body.get("src", "").strip("/")
+    newname = body.get("newname", "").strip()
+    if not src_rel or not newname:
+        return JSONResponse({"error": "src と newname が必要です"}, status_code=400)
+    if "/" in newname or "\\" in newname:
+        return JSONResponse({"error": "名前にスラッシュは使えません"}, status_code=400)
+    try:
+        src_path = _resolve_safe_path(src_rel)
+        if not src_path.exists():
+            return JSONResponse({"error": "ファイルが見つかりません"}, status_code=404)
+        new_path = src_path.parent / newname
+        if not str(new_path.resolve()).startswith(str(ALLOWED_WORK_DIR)):
+            return JSONResponse({"error": "パストラバーサル検出"}, status_code=400)
+        if new_path.exists():
+            return JSONResponse({"error": f"{newname} は既に存在します"}, status_code=409)
+        shutil.move(str(src_path), str(new_path))
+        rel = str(new_path.relative_to(ALLOWED_WORK_DIR)).replace("\\", "/")
+        return JSONResponse({"ok": True, "new_path": rel})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 @app.post("/workspace/move")
 async def workspace_move(body: dict):
     """エディタ用: ファイル/フォルダを移動"""

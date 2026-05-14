@@ -2,6 +2,7 @@ import asyncio
 import json
 import shutil
 import subprocess
+import sys
 import requests
 from datetime import datetime
 import httpx
@@ -2060,12 +2061,15 @@ async def workspace_move(body: dict):
 
 @app.get("/workspace/shells")
 async def workspace_shells():
-    """workspace内の .sh ファイルを再帰的に列挙する"""
+    """workspace内の .sh / .ps1 ファイルを再帰的に列挙する"""
     result = []
     try:
-        for p in sorted(ALLOWED_WORK_DIR.rglob("*.sh")):
-            rel = p.relative_to(ALLOWED_WORK_DIR)
-            result.append(str(rel).replace("\\", "/"))
+        patterns = ["*.sh", "*.ps1"] if IS_WINDOWS else ["*.sh"]
+        for pattern in patterns:
+            for p in sorted(ALLOWED_WORK_DIR.rglob(pattern)):
+                rel = p.relative_to(ALLOWED_WORK_DIR)
+                result.append(str(rel).replace("\\", "/"))
+        result.sort()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return JSONResponse({"scripts": result})
@@ -2096,9 +2100,30 @@ async def workspace_ls(path: str = ""):
     return JSONResponse({"entries": entries, "current": str(base.relative_to(ALLOWED_WORK_DIR)).replace("\\", "/"), "parent": parent})
 
 
+_GIT_BASH_CANDIDATES = [
+    r"C:\Program Files\Git\bin\bash.exe",
+    r"C:\Program Files (x86)\Git\bin\bash.exe",
+]
+
+def _find_git_bash() -> str | None:
+    found = shutil.which("bash.exe")
+    if found:
+        return found
+    for p in _GIT_BASH_CANDIDATES:
+        if Path(p).exists():
+            return p
+    return None
+
+def _find_powershell_exe() -> str:
+    from tools.windows_tools import _find_powershell
+    ps = _find_powershell()
+    return ps or "powershell.exe"
+
+IS_WINDOWS = sys.platform == "win32"
+
 @app.get("/workspace/run-shell")
 async def workspace_run_shell(path: str):
-    """指定した .sh スクリプトをサンドボックスなし・ユーザー権限で実行し、出力をSSEストリームで返す"""
+    """指定した .sh / .ps1 スクリプトを実行し、出力をSSEストリームで返す"""
     from tools.file_tools import _resolve_safe_path
     try:
         resolved = _resolve_safe_path(path)
@@ -2106,19 +2131,33 @@ async def workspace_run_shell(path: str):
         return JSONResponse({"error": str(e)}, status_code=400)
     if not resolved.exists() or not resolved.is_file():
         return JSONResponse({"error": "File not found"}, status_code=404)
-    if resolved.suffix != ".sh":
-        return JSONResponse({"error": ".sh ファイルのみ実行できます"}, status_code=400)
+
+    suffix = resolved.suffix.lower()
+    if IS_WINDOWS:
+        if suffix == ".ps1":
+            cmd = [_find_powershell_exe(), "-ExecutionPolicy", "Bypass", "-File", str(resolved)]
+        elif suffix == ".sh":
+            bash = _find_git_bash()
+            if not bash:
+                return JSONResponse({"error": "Git Bash が見つかりません。Git for Windows をインストールしてください。"}, status_code=400)
+            cmd = [bash, str(resolved)]
+        else:
+            return JSONResponse({"error": ".sh / .ps1 ファイルのみ実行できます"}, status_code=400)
+    else:
+        if suffix != ".sh":
+            return JSONResponse({"error": ".sh ファイルのみ実行できます"}, status_code=400)
+        cmd = ["bash", str(resolved)]
 
     async def stream():
         proc = await asyncio.create_subprocess_exec(
-            "bash", str(resolved),
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(resolved.parent),
         )
         yield f"data: {json.dumps({'type': 'start', 'path': path})}\n\n"
         async for line in proc.stdout:
-            text = line.decode("utf-8", errors="replace").rstrip("\n")
+            text = line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
             yield f"data: {json.dumps({'type': 'line', 'text': text})}\n\n"
         await proc.wait()
         yield f"data: {json.dumps({'type': 'done', 'returncode': proc.returncode})}\n\n"
@@ -2133,7 +2172,7 @@ class ShellExecRequest(BaseModel):
 
 @app.post("/workspace/exec-shell")
 async def workspace_exec_shell(req: ShellExecRequest):
-    """任意のシェルコマンドをサンドボックスなし・ユーザー権限で実行し、出力をSSEストリームで返す"""
+    """任意のコマンドを実行し、出力をSSEストリームで返す（Windows版はPowerShell使用）"""
     from tools.file_tools import _resolve_safe_path
     if req.cwd:
         try:
@@ -2142,16 +2181,22 @@ async def workspace_exec_shell(req: ShellExecRequest):
             exec_cwd = str(ALLOWED_WORK_DIR)
     else:
         exec_cwd = str(ALLOWED_WORK_DIR)
+
+    if IS_WINDOWS:
+        cmd = [_find_powershell_exe(), "-NoProfile", "-Command", req.command]
+    else:
+        cmd = ["bash", "-c", req.command]
+
     async def stream():
         proc = await asyncio.create_subprocess_exec(
-            "bash", "-c", req.command,
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=exec_cwd,
         )
         yield f"data: {json.dumps({'type': 'start', 'command': req.command})}\n\n"
         async for line in proc.stdout:
-            text = line.decode("utf-8", errors="replace").rstrip("\n")
+            text = line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
             yield f"data: {json.dumps({'type': 'line', 'text': text})}\n\n"
         await proc.wait()
         yield f"data: {json.dumps({'type': 'done', 'returncode': proc.returncode})}\n\n"

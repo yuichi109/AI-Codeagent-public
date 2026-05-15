@@ -3516,7 +3516,7 @@
   async function loadEditorCompleteModels() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini') return;
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai') return;
       const data = await fetch('/providers/deployments').then(r => r.json());
       const sel = document.getElementById('editor-complete-model');
       if (!sel) return;
@@ -3565,7 +3565,7 @@
   async function loadInlineChatModels() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini') return;
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai') return;
       const data = await fetch('/providers/deployments').then(r => r.json());
       _icDeployments = data.deployments;
       const defSel = document.getElementById('ic-default-model');

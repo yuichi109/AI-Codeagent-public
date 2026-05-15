@@ -5,6 +5,62 @@
 
 ---
 
+## 2026-05-15
+
+### 本家 OpenAI API プロバイダー対応（Issue #46）
+
+コミット: c31d883（main / for_windows 両ブランチ push 済み）
+
+**変更ファイル:** config.py / server.py / setup.html / index.html / .env.example
+
+#### config.py
+- `OPENAI_API_KEY` / `OPENAI_MODEL`（デフォルト: `gpt-5.4`）/ `OPENAI_MODELS` を追加
+
+#### server.py
+- `_OPENAI_DEFAULT_MODELS` 定数追加: `["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4.5", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"]`
+- `_make_client()` / `_make_async_client()` に `openai` タイプを追加（`OpenAI` / `AsyncOpenAI` を `trust_env=False` で初期化）
+- `/providers/presets`・`/providers/preset`・`/providers/config`・`/providers/deployments`・`/providers/deployment` に openai ケースを追加
+- `/setup/current`・`/setup/fetch-models`（`/v1/models` を呼び出し gpt*/o* に絞り込み）・`/setup/save` に openai 対応を追加
+
+#### setup.html
+- プロバイダータイプに `openai`（OpenAI (api.openai.com)）を追加
+- OpenAI SVG ロゴ追加
+- `renderFields()` に openai ケース追加（API キーフィールド + モデル選択 + 🔍 自動取得ボタン）
+
+#### index.html
+- OpenAI SVG ロゴ追加
+- `loadFoundryInstances()` / `loadCurrentProvider()` / `presetToType()` / `syncPresetUI()` / `onPresetChange()` に openai ケースを追加
+- `switchToOpenAIPreset()` 関数追加（Gemini プリセット切り替えと同パターン）
+- プロバイダー表示ラベルに "OpenAI" を追加
+
+#### .env.example
+- `OPENAI_API_KEY` / `OPENAI_MODEL=gpt-5.4` / `OPENAI_MODELS` のコメント付きサンプルを追加
+
+### バグ修正: OpenAI プロバイダー使用時のインラインチャット モデル選択不可
+
+コミット: 053378d（main / for_windows 両ブランチ push 済み）
+
+- `index.html` の `loadInlineChatModels()`（旧 line 3568）で openai タイプを早期 return の除外対象に追加
+  - 修正前: `if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini') return;`
+  - 修正後: `... && pv.type !== 'openai') return;`
+
+### GitLab イシュー整理
+
+- **#46** OpenAI プロバイダー対応 → **クローズ**（本セッションで実装完了）
+- **#47** Anthropic プロバイダー → **クローズ**（要件なし・OpenRouter 経由でも Anthropic API 単体追加のメリット薄）
+- **#50** 画像生成対応（gpt-image-2）→ **新規登録**（テキスト→画像生成 + img2img ユースケース含む）
+- **#51** Windows版 セットアップ保存後の再起動が正常動作しない →  **新規登録**
+- **#46, #48, #49, #50, #51** にラベル追加（enhancement / bug + priority::low/medium）
+
+### 調査・確認メモ
+
+- **OpenAI API 利用開始**: 従量課金（クレジット先払い方式）。Tier 1 は gpt-5.4 が 10,000 TPM 上限。システムプロンプトが大きい用途には gpt-5.4-nano か gpt-4o-mini 推奨
+- **モデル日付サフィックス**: `gpt-5.4-nano-2026-03-17` のような日付付きモデルはスナップショット（固定バージョン）。日付なし = 最新エイリアス（OpenAI 公式確認済み）
+- **Azure Model Router**: OpenRouter.ai とは別物。Azure 独自のモデルルーティング機能（East US 2 / Sweden Central のみ）。追加料金は 15% プレミアム（Azure 公式価格ページで確認済み）
+- **gpt-image-2 料金**: 低品質 $0.006 / 中品質 $0.053 / 高品質 $0.211（1024×1024 per image）。img2img（元画像 → 清書・スタイル変換）にも対応
+
+---
+
 ## 2026-05-14（セッション3）
 
 ### Windows版 シェルパネル・エディタ 文字化け修正（`for_windows` ブランチのみ）

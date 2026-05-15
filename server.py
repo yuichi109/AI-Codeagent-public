@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL
 from prompts import get_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
@@ -23,6 +23,18 @@ _GEMINI_DEFAULT_MODELS = [
     "gemini-2.0-flash-lite",
     "gemini-1.5-pro",
     "gemini-1.5-flash",
+]
+
+# OpenAI デフォルトモデル一覧（OPENAI_MODELS 未設定時のフォールバック）
+_OPENAI_DEFAULT_MODELS = [
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-4.5",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o3",
+    "o4-mini",
 ]
 from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
@@ -102,6 +114,12 @@ def _make_client():
             api_key=_provider_config["api_key"],
             http_client=httpx.Client(trust_env=False),
         )
+    elif _provider_config["type"] == "openai":
+        # 本家 OpenAI (api.openai.com)
+        return OpenAI(
+            api_key=_provider_config["api_key"],
+            http_client=httpx.Client(trust_env=False),
+        )
     else:
         # "openai_compatible" (ローカルLLM等) は OpenAI互換クライアント
         return OpenAI(
@@ -124,6 +142,11 @@ def _make_async_client():
     elif _provider_config["type"] == "gemini":
         return AsyncOpenAI(
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=_provider_config["api_key"],
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    elif _provider_config["type"] == "openai":
+        return AsyncOpenAI(
             api_key=_provider_config["api_key"],
             http_client=httpx.AsyncClient(trust_env=False),
         )
@@ -1708,6 +1731,8 @@ async def providers_deployments():
         deployments = inst["models"] if inst else FOUNDRY_MODELS
     elif _provider_config["type"] == "gemini":
         deployments = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
+    elif _provider_config["type"] == "openai":
+        deployments = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
     else:
         deployments = AZURE_OPENAI_DEPLOYMENTS
     return JSONResponse({
@@ -1729,6 +1754,8 @@ async def providers_set_deployment(req: DeploymentRequest):
         allowed = inst["models"] if inst else FOUNDRY_MODELS
     elif _provider_config["type"] == "gemini":
         allowed = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
+    elif _provider_config["type"] == "openai":
+        allowed = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
     else:
         allowed = AZURE_OPENAI_DEPLOYMENTS
     if req.model not in allowed:
@@ -1804,6 +1831,8 @@ async def providers_presets():
         ],
         "gemini": bool(GEMINI_API_KEY),
         "gemini_models": GEMINI_MODELS or _GEMINI_DEFAULT_MODELS,
+        "openai": bool(OPENAI_API_KEY),
+        "openai_models": OPENAI_MODELS or _OPENAI_DEFAULT_MODELS,
     })
 
 
@@ -1843,6 +1872,20 @@ async def providers_set_preset(req: PresetRequest):
             "api_version": "",
             "tools_enabled": True,
         }
+    elif req.preset == "openai":
+        if not OPENAI_API_KEY:
+            return JSONResponse({"error": ".env に OPENAI_API_KEY が未設定です"}, status_code=400)
+        default_model = OPENAI_MODEL or (OPENAI_MODELS[0] if OPENAI_MODELS else _OPENAI_DEFAULT_MODELS[0])
+        _provider_config = {
+            "type": "openai",
+            "preset_id": "openai",
+            "name": "OpenAI",
+            "url": "https://api.openai.com/v1",
+            "api_key": OPENAI_API_KEY,
+            "model": default_model,
+            "api_version": "",
+            "tools_enabled": True,
+        }
     else:
         return JSONResponse({"error": f"不明なプリセット: {req.preset}"}, status_code=400)
     _save_provider_config(_provider_config)
@@ -1870,6 +1913,9 @@ async def providers_config(req: ProviderConfigRequest):
         elif ".cognitiveservices.azure.com" in req.url:
             provider_type = "foundry"
             api_version = FOUNDRY_API_VERSION
+        elif "api.openai.com" in req.url:
+            provider_type = "openai"
+            api_version = ""
         else:
             provider_type = "openai_compatible"
             api_version = _default_provider_config["api_version"]
@@ -2657,6 +2703,16 @@ async def setup_current():
             "models":      raw.get("GEMINI_MODELS", ""),
         })
 
+    # 本家 OpenAI
+    if raw.get("OPENAI_API_KEY"):
+        providers.append({
+            "type":        "openai",
+            "api_key":     mask(raw.get("OPENAI_API_KEY", "")),
+            "api_key_set": bool(raw.get("OPENAI_API_KEY")),
+            "model":       raw.get("OPENAI_MODEL", "gpt-4.5"),
+            "models":      raw.get("OPENAI_MODELS", ""),
+        })
+
     return JSONResponse({
         "providers": providers,
         "agent": {
@@ -2764,6 +2820,20 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
             models = [m["name"].replace("models/", "") for m in data.get("models", [])
                       if "generateContent" in m.get("supportedGenerationMethods", [])]
 
+        elif type == "openai":
+            api_key = raw.get("OPENAI_API_KEY", "")
+            if not api_key:
+                return JSONResponse({"error": "OPENAI_API_KEY が未設定です"}, status_code=400)
+            resp = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            models = sorted([m["id"] for m in data.get("data", []) if "gpt" in m["id"] or m["id"].startswith("o")])
+
         else:
             return JSONResponse({"error": f"未対応のtype: {type}"}, status_code=400)
 
@@ -2791,7 +2861,7 @@ async def setup_save(req: SetupSaveRequest):
     # 既存 .env を読んで「既知キー以外のコメント行・カスタム行」を保持
     existing_lines = []
     known_prefixes = (
-        "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
+        "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "OPENAI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
         "RAG_ENABLED", "RAG_EMBED_",
         "no_proxy", "NO_PROXY",
@@ -2860,6 +2930,22 @@ async def setup_save(req: SetupSaveRequest):
                 "# Google Gemini",
                 f"GEMINI_API_KEY={api_key_val(prov.get('api_key',''), 'GEMINI_API_KEY')}",
                 f"GEMINI_MODELS={models_str}",
+                "",
+            ]
+        elif ptype == "openai":
+            sel_model = prov.get('model', '')
+            models_str = prov.get('models', '')
+            if sel_model and models_str:
+                parts = [m.strip() for m in models_str.split(',') if m.strip()]
+                ordered = [sel_model] + [m for m in parts if m != sel_model]
+                models_str = ','.join(ordered)
+            elif sel_model:
+                models_str = sel_model
+            lines += [
+                "# 本家 OpenAI",
+                f"OPENAI_API_KEY={api_key_val(prov.get('api_key',''), 'OPENAI_API_KEY')}",
+                f"OPENAI_MODEL={sel_model}",
+                f"OPENAI_MODELS={models_str}",
                 "",
             ]
 

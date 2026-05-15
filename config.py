@@ -115,6 +115,15 @@ FOUNDRY_INSTANCES: list[dict] = _parse_foundry_instances()
 # エージェント名（自己紹介時に使う架空の名前）
 AGENT_NAME: str = os.getenv("AGENT_NAME", "")
 
+# 本家 OpenAI (省略可)
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL: str   = os.getenv("OPENAI_MODEL", "gpt-5.4")
+_openai_models_raw = os.getenv("OPENAI_MODELS", "")
+OPENAI_MODELS: list[str] = (
+    [m.strip() for m in _openai_models_raw.split(",") if m.strip()]
+    if _openai_models_raw else []
+)
+
 # Google Gemini (省略可)
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 _gemini_models_raw = os.getenv("GEMINI_MODELS", "")

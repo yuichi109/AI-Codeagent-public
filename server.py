@@ -674,7 +674,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_pptx",
-            "description": "PowerPoint ファイル (.pptx) を新規作成・上書きします。",
+            "description": "PowerPoint ファイル (.pptx) を新規作成・上書きします。テキスト・画像・テキスト+画像の3種類のスライドレイアウトに対応。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -682,7 +682,7 @@ TOOLS = [
                     "slides": {
                         "type": "array",
                         "items": {"type": "object"},
-                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\"}",
+                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\", \"image_path\": \"workspace相対パス\"}。image_path のみ→画像スライド（中央配置）、content+image_path→左テキスト・右画像、content のみ→テキストスライド。image_path は必ず workspace 相対パスで指定すること（例: GRAAA/AI_Output_Images/generated_xxx.png）。",
                     },
                     "title": {"type": "string", "description": "プレゼンテーション全体のタイトル（省略可）"},
                 },

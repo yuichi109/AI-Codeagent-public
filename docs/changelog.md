@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-05-18
+
+### 画像生成機能の強化（Issue #50 完了）
+
+コミット: 02506be（main push 済み）
+
+**変更ファイル:** config.py / server.py / setup.html / index.html / tools/image_tools.py
+
+#### 主な変更内容
+- **ワークスペーススコープ対応**: 画像保存先をスコープ配下に変更（例: `GRAAA/AI_Output_Images/generated_xxx.png`）。`_save_to_workspace()` に `workspace_scope` パラメータ追加、server.py でツール実行前に注入
+- **保存ディレクトリ名変更**: `images/` → `AI_Output_Images/`（プロジェクト変数との衝突回避）
+- **セッション履歴にツールブロック永続表示**: リロード後もツール呼び出し・結果・画像がすべて復元される。`_restoreToolBlocks()` ヘルパー追加、`loadHistory()`・`_renderSessionContent()` を更新
+- **`/workspace/image` エンドポイント追加**: PNG等バイナリファイルを `FileResponse` で配信
+- **セットアップ画面「引き継ぐ」トグル**: 全プロバイダー共通。ON=チャット設定流用、OFF=画像生成専用エンドポイント・APIキーを別途指定。Azure/Foundry はエンドポイント・APIキー・APIバージョンも独立設定可能
+- **タイムアウト調整**: 高解像度（1536×1024・1024×1536・1792×1024・1024×1792）は600秒、それ以外は300秒。ステータスラインに「画像生成中...（タイムアウト: 300秒）」表示
+
+#### config.py
+- `IMAGE_INHERIT`・`IMAGE_OPENAI_API_KEY`・`IMAGE_GEMINI_API_KEY`・`IMAGE_AZURE_*`・`IMAGE_FOUNDRY_*` を追加
+
+#### tools/image_tools.py
+- `_make_client()` を `IMAGE_INHERIT` フラグで分岐（引き継ぐ/別途指定）
+- `_save_to_workspace()` にスコープ対応を追加
+- `generate_image()`・`edit_image()` に `_workspace_scope` パラメータ追加
+
+### GitLab イシュー
+- **#50** 画像生成対応 → **クローズ予定**（テスト確認済み）
+- **ウォーターマーク機能** → 新規イシュー登録予定（Pillow で後処理焼き込み）
+
+---
+
+### write_pptx 画像埋め込み対応
+
+コミット: （本セッション末尾、main push 済み）
+
+**変更ファイル:** tools/office_tools.py / server.py
+
+#### office_tools.py
+- `write_pptx()` に画像埋め込みを追加。スライドごとに以下の3レイアウトに対応:
+  - `image_path`（または `image`）のみ → 画像中央配置
+  - `content`（または `text`）+ `image_path` → 左テキスト・右画像
+  - `content` のみ → 従来のテキストスライド
+  - `elements` 配列形式（`{"type":"image","path":"..."}` のモデル独自形式）もフォールバックで対応
+- `read_pptx()` に `image_count` フィールドを追加（`shape_type == 13` で判定）
+
+#### server.py
+- `write_pptx` ツール説明を更新（image_path フィールドの使い方を明記）
+
+---
+
 ## 2026-05-15
 
 ### 本家 OpenAI API プロバイダー対応（Issue #46）

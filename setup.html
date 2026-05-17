@@ -267,6 +267,54 @@
     </div>
   </div>
 
+  <!-- 画像生成 -->
+  <div class="section collapsed" id="sec-image-gen">
+    <div class="section-header" onclick="toggleSection('sec-image-gen')">
+      🎨 画像生成 <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="row">
+        <div class="field">
+          <label>プロバイダー</label>
+          <select id="img-provider" onchange="onImageProviderChange()">
+            <option value="openai">OpenAI（推奨）</option>
+            <option value="gemini">Gemini</option>
+            <option value="azure">Azure OpenAI ⚠️ 東日本非対応</option>
+            <option value="foundry">Azure AI Foundry ⚠️ 東日本非対応</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>モデル</label>
+          <select id="img-model">
+            <option value="gpt-image-2">gpt-image-2</option>
+            <option value="gpt-image-1">gpt-image-1</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>デフォルト品質</label>
+          <select id="img-quality">
+            <option value="medium">medium（バランス）</option>
+            <option value="low">low（高速・安価）</option>
+            <option value="high">high（高品質）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>デフォルトサイズ</label>
+          <select id="img-size">
+            <option value="1024x1024">1024×1024（正方形）</option>
+            <option value="1024x1536">1024×1536（縦長）</option>
+            <option value="1536x1024">1536×1024（横長）</option>
+            <option value="auto">auto</option>
+          </select>
+        </div>
+      </div>
+      <span class="hint">チャット用プロバイダーとは独立して設定できます。Azure は Japan East 未対応のため海外リージョン利用時のみ有効です。</span>
+    </div>
+  </div>
+
   <!-- SearXNG / 検索 -->
   <div class="section" id="sec-searxng">
     <div class="section-header" onclick="toggleSection('sec-searxng')">
@@ -509,6 +557,24 @@ function onRagEnabledChange() {
     : '無効（RAG検索をスキップする）';
 }
 
+// ---- 画像生成プロバイダー変更 ----
+const _IMAGE_MODELS = {
+  openai:  ['gpt-image-2', 'gpt-image-1'],
+  gemini:  ['gemini-2.5-flash-image'],
+  azure:   ['gpt-image-1', 'dall-e-3'],
+  foundry: ['gpt-image-1'],
+};
+function onImageProviderChange() {
+  const provider = document.getElementById('img-provider').value;
+  const models = _IMAGE_MODELS[provider] || [];
+  const sel = document.getElementById('img-model');
+  const current = sel.value;
+  sel.innerHTML = models.map(m =>
+    `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
+  ).join('');
+  if (!sel.value && models.length) sel.value = models[0];
+}
+
 // ---- RAG 埋め込みモード切り替え ----
 function onRagModeChange() {
   const mode = document.getElementById('rag-mode').value;
@@ -617,6 +683,16 @@ async function loadConfig() {
       onRagEnabledChange();
       onRagModeChange();
     }
+
+    // 画像生成
+    if (d.image_gen) {
+      const ig = d.image_gen;
+      document.getElementById('img-provider').value = ig.provider || 'openai';
+      onImageProviderChange();
+      document.getElementById('img-model').value   = ig.model || 'gpt-image-2';
+      document.getElementById('img-quality').value = ig.quality || 'medium';
+      document.getElementById('img-size').value    = ig.size || '1024x1024';
+    }
   } catch(e) {
     document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
   }
@@ -673,6 +749,12 @@ async function saveConfig() {
       api_key:     document.getElementById('rag-api-key').value,
       deployment:  document.getElementById('rag-deployment').value,
       api_version: document.getElementById('rag-api-version').value,
+    },
+    image_gen: {
+      provider: document.getElementById('img-provider').value,
+      model:    document.getElementById('img-model').value,
+      quality:  document.getElementById('img-quality').value,
+      size:     document.getElementById('img-size').value,
     },
   };
 

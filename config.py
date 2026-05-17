@@ -158,3 +158,9 @@ RAG_EMBED_ENDPOINT: str     = os.getenv("RAG_EMBED_ENDPOINT", "")
 RAG_EMBED_API_KEY: str      = os.getenv("RAG_EMBED_API_KEY", "")
 RAG_EMBED_DEPLOYMENT: str   = os.getenv("RAG_EMBED_DEPLOYMENT", "")
 RAG_EMBED_API_VERSION: str  = os.getenv("RAG_EMBED_API_VERSION", "2024-12-01-preview")
+
+# 画像生成設定（チャット用プロバイダーとは独立）
+IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai")
+IMAGE_MODEL: str    = os.getenv("IMAGE_MODEL", "gpt-image-2")
+IMAGE_QUALITY: str  = os.getenv("IMAGE_QUALITY", "medium")
+IMAGE_SIZE: str     = os.getenv("IMAGE_SIZE", "1024x1024")

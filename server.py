@@ -54,6 +54,7 @@ from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
+from tools.image_tools import generate_image, edit_image, IMAGE_MODELS_BY_PROVIDER
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -225,6 +226,8 @@ TOOL_REGISTRY = {
     "rag_search": rag_search,
     "rag_update_status": rag_update_status,
     "rag_list": rag_list,
+    "generate_image": generate_image,
+    "edit_image": edit_image,
 }
 
 if RESPONSES_API_ENABLED:
@@ -867,6 +870,38 @@ TOOLS = [
                     "status": {"type": "string", "enum": ["active", "deprecated", "all"], "description": "ステータスフィルタ（デフォルト: active）", "default": "active"},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "テキストプロンプトから画像を生成します。「〇〇の画像を作って」「〇〇を描いて」などの依頼に使います。セットアップ画面で設定したプロバイダー/モデルを使用します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "生成したい画像の詳細な説明（英語推奨）"},
+                    "size": {"type": "string", "enum": ["1024x1024", "1024x1536", "1536x1024"], "description": "画像サイズ（省略時はセットアップ設定値）"},
+                    "quality": {"type": "string", "enum": ["low", "medium", "high"], "description": "画質（省略時はセットアップ設定値）"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_image",
+            "description": "ワークスペース内の画像を編集・清書します（img2img）。ユーザーが下絵や手書きラフをアップロードした場合に使います。OpenAI または Gemini が必要です。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string", "description": "ワークスペース内の元画像ファイルパス"},
+                    "prompt": {"type": "string", "description": "編集内容の指示（例: 'Clean up this sketch into a professional illustration'）"},
+                    "size": {"type": "string", "enum": ["1024x1024", "1024x1536", "1536x1024"], "description": "出力サイズ（省略時はセットアップ設定値）"},
+                },
+                "required": ["image_path", "prompt"],
             },
         },
     },
@@ -1551,6 +1586,22 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                     result_data = json.loads(result)
                     if "playbooks" in result_data:
                         yield f"data: {json.dumps({'type': 'ansible_chooser', 'playbooks': result_data['playbooks'], 'creds_exists': result_data.get('creds_exists', False), 'creds_filled': result_data.get('creds_filled', False)})}\n\n"
+                except Exception:
+                    pass
+
+            # generate_image / edit_image: 画像をUIに送信（base64をLLM履歴から除去）
+            if name in ("generate_image", "edit_image"):
+                try:
+                    result_data = json.loads(result)
+                    if result_data.get("image_base64"):
+                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'model': result_data.get('model', '')})}\n\n"
+                        tool_result_for_msg = json.dumps({
+                            "message": result_data.get("message", "画像を生成しました"),
+                            "prompt": result_data.get("prompt"),
+                            "provider": result_data.get("provider"),
+                            "model": result_data.get("model"),
+                            "note": "生成画像はUIに表示済みです",
+                        }, ensure_ascii=False)
                 except Exception:
                     pass
 
@@ -2750,6 +2801,12 @@ async def setup_current():
             "deployment":  raw.get("RAG_EMBED_DEPLOYMENT", ""),
             "api_version": raw.get("RAG_EMBED_API_VERSION", "2024-02-01"),
         },
+        "image_gen": {
+            "provider": raw.get("IMAGE_PROVIDER", "openai"),
+            "model":    raw.get("IMAGE_MODEL", "gpt-image-2"),
+            "quality":  raw.get("IMAGE_QUALITY", "medium"),
+            "size":     raw.get("IMAGE_SIZE", "1024x1024"),
+        },
     })
 
 
@@ -2851,6 +2908,7 @@ class SetupSaveRequest(BaseModel):
     searxng: dict
     responses_api: dict = {}
     rag_embed: dict = {}
+    image_gen: dict = {}
 
 
 @app.post("/setup/save")
@@ -2864,6 +2922,7 @@ async def setup_save(req: SetupSaveRequest):
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "OPENAI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
         "RAG_ENABLED", "RAG_EMBED_",
+        "IMAGE_",
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -3022,6 +3081,18 @@ async def setup_save(req: SetupSaveRequest):
         if re_key:
             lines.append(f"RAG_EMBED_API_KEY={re_key}")
         lines.append("")
+
+    # 画像生成設定
+    ig = req.image_gen
+    if ig:
+        lines += [
+            "# 画像生成設定",
+            f"IMAGE_PROVIDER={ig.get('provider', 'openai')}",
+            f"IMAGE_MODEL={ig.get('model', 'gpt-image-2')}",
+            f"IMAGE_QUALITY={ig.get('quality', 'medium')}",
+            f"IMAGE_SIZE={ig.get('size', '1024x1024')}",
+            "",
+        ]
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

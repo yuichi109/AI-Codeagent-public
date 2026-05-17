@@ -804,6 +804,12 @@
       case 'code_lint':    return `Linting ${short || path}`;
       case 'todo_update':  return `Updating tasks`;
       case 'todo_read':    return `Reading tasks`;
+      case 'generate_image':
+      case 'edit_image': {
+        const _HIGH_RES = new Set(['1536x1024','1024x1536','1792x1024','1024x1792']);
+        const sec = _HIGH_RES.has(args?.size) ? 600 : 300;
+        return `画像生成中... （タイムアウト: ${sec}秒）`;
+      }
       default:             return `Running ${name}`;
     }
   }
@@ -1440,6 +1446,7 @@
         const modelName = savedModels[turnIdx] || null;
         const turnEl = createTurnEl();
         appendMsg(turnEl, 'user', u.content);
+        _restoreToolBlocks(turnEl, history, i + 1, j);
         if (aiText) {
           const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
           if (modelName && aiMsgEl._labelEl) {
@@ -1645,6 +1652,7 @@
       const modelName = savedModels[turnIdx] || null;
       const turnEl = createTurnEl();
       appendMsg(turnEl, 'user', u.content);
+      _restoreToolBlocks(turnEl, data.history, i + 1, j);
       if (aiText) {
         const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
         if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
@@ -1881,6 +1889,74 @@
     } catch(_) {}
     // JSON でない通常テキスト
     showPre(resultText);
+  }
+
+  function _appendRestoredImage(parent, toolData) {
+    const savedPath = toolData.saved_path;
+    if (!savedPath) return;
+    const imgWrap = document.createElement('div');
+    imgWrap.style.cssText = 'margin: 8px 0 4px 0;';
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size: 11px; color: #6c7086; margin-bottom: 4px;';
+    const promptShort = toolData.prompt ? toolData.prompt.slice(0, 60) + (toolData.prompt.length > 60 ? '…' : '') : '生成画像';
+    label.textContent = `🎨 ${promptShort}`;
+    const img = document.createElement('img');
+    img.src = `/workspace/image?path=${encodeURIComponent(savedPath)}`;
+    img.alt = toolData.prompt || '生成画像';
+    img.style.cssText = 'max-width: 100%; max-height: 600px; border-radius: 8px; border: 1px solid #313244; display: block; cursor: pointer;';
+    img.title = 'クリックで新しいタブで開く';
+    img.onclick = () => window.open(img.src, '_blank');
+    const dl = document.createElement('a');
+    dl.href = img.src;
+    dl.download = savedPath.split('/').pop() || 'image.png';
+    dl.style.cssText = 'font-size: 11px; color: #89b4fa; margin-top: 4px; display: inline-block;';
+    dl.textContent = '⬇ ダウンロード';
+    imgWrap.appendChild(label);
+    imgWrap.appendChild(img);
+    imgWrap.appendChild(dl);
+    parent.appendChild(imgWrap);
+  }
+
+  function _restoreToolBlocks(turnEl, msgs, start, end) {
+    // tool_call_id → result content のマップを作成
+    const resultMap = {};
+    for (let k = start; k < end; k++) {
+      const m = msgs[k];
+      if (m?.role === 'tool' && m.tool_call_id) resultMap[m.tool_call_id] = m.content;
+    }
+    // assistant(tool_calls) ごとにツールグループを生成
+    for (let k = start; k < end; k++) {
+      const m = msgs[k];
+      if (m?.role !== 'assistant' || !Array.isArray(m.tool_calls) || m.tool_calls.length === 0) continue;
+      const grp = document.createElement('details');
+      grp.className = 'tool-group';
+      grp.open = false;
+      const s = document.createElement('summary');
+      const toolNames = m.tool_calls.map(tc => tc.function?.name || '');
+      const c = {};
+      for (const n of toolNames) c[n] = (c[n] || 0) + 1;
+      const parts = Object.entries(c).map(([n, cnt]) => cnt > 1 ? `${n}×${cnt}` : n).join(' · ');
+      s.textContent = `🔧 ${toolNames.length}個のツールを実行 · ${parts}`;
+      grp.appendChild(s);
+      const inner = document.createElement('div');
+      inner.className = 'tool-group-inner';
+      grp.appendChild(inner);
+      turnEl.appendChild(grp);
+      for (const tc of m.tool_calls) {
+        const name = tc.function?.name || '';
+        let args = {};
+        try { args = JSON.parse(tc.function?.arguments || '{}'); } catch(_) {}
+        const resultEl = addToolBlock(inner, name, args);
+        const resultContent = resultMap[tc.id];
+        if (resultContent) {
+          setResult(resultEl, name, resultContent);
+          try {
+            const td = JSON.parse(resultContent);
+            if (td.saved_path) _appendRestoredImage(inner, td);
+          } catch(_) {}
+        }
+      }
+    }
   }
 
   function addToolBlock(parent, name, args) {
@@ -3004,7 +3080,15 @@
             img.alt = data.prompt || '生成画像';
             img.style.cssText = 'max-width: 100%; max-height: 600px; border-radius: 8px; border: 1px solid var(--surface1); display: block; cursor: pointer;';
             img.title = 'クリックで新しいタブで開く';
-            img.onclick = () => window.open(img.src, '_blank');
+            img.onclick = () => {
+              const [header, b64] = img.src.split(',');
+              const mime = header.split(':')[1].split(';')[0];
+              const bytes = atob(b64);
+              const arr = new Uint8Array(bytes.length);
+              for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+              const url = URL.createObjectURL(new Blob([arr], { type: mime }));
+              window.open(url, '_blank');
+            };
             const dl = document.createElement('a');
             dl.href = img.src;
             dl.download = `generated_${Date.now()}.png`;

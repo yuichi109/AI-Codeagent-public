@@ -164,3 +164,14 @@ IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai")
 IMAGE_MODEL: str    = os.getenv("IMAGE_MODEL", "gpt-image-2")
 IMAGE_QUALITY: str  = os.getenv("IMAGE_QUALITY", "medium")
 IMAGE_SIZE: str     = os.getenv("IMAGE_SIZE", "1024x1024")
+# チャット設定を引き継ぐ場合は true（デフォルト）、別途指定する場合は false
+IMAGE_INHERIT: bool = os.getenv("IMAGE_INHERIT", "true").lower() == "true"
+# 引き継がない場合の画像生成専用設定
+IMAGE_OPENAI_API_KEY: str    = os.getenv("IMAGE_OPENAI_API_KEY", "")
+IMAGE_GEMINI_API_KEY: str    = os.getenv("IMAGE_GEMINI_API_KEY", "")
+IMAGE_AZURE_ENDPOINT: str    = os.getenv("IMAGE_AZURE_ENDPOINT", "")
+IMAGE_AZURE_API_KEY: str     = os.getenv("IMAGE_AZURE_API_KEY", "")
+IMAGE_AZURE_API_VERSION: str = os.getenv("IMAGE_AZURE_API_VERSION", "")
+IMAGE_FOUNDRY_ENDPOINT: str    = os.getenv("IMAGE_FOUNDRY_ENDPOINT", "")
+IMAGE_FOUNDRY_API_KEY: str     = os.getenv("IMAGE_FOUNDRY_API_KEY", "")
+IMAGE_FOUNDRY_API_VERSION: str = os.getenv("IMAGE_FOUNDRY_API_VERSION", "")

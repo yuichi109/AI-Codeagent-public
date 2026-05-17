@@ -311,7 +311,63 @@
           </select>
         </div>
       </div>
-      <span class="hint">チャット用プロバイダーとは独立して設定できます。Azure は Japan East 未対応のため海外リージョン利用時のみ有効です。</span>
+      <!-- 引き継ぎトグル -->
+      <div class="toggle-row" style="margin-top:4px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="img-inherit" checked onchange="onImageInheritChange()">
+          <span class="toggle-slider"></span>
+        </label>
+        <span style="font-size:13px;">チャット設定を引き継ぐ</span>
+      </div>
+      <span class="hint" id="img-inherit-hint">チャット用に設定済みの API キー・エンドポイントを画像生成にも使用します</span>
+      <!-- 別途指定フィールド（OpenAI） -->
+      <div id="img-fields-openai" style="display:none;" class="img-override-fields">
+        <div class="field">
+          <label>API キー（画像生成専用）</label>
+          <input id="img-openai-api-key" type="password" placeholder="sk-...（未設定）" autocomplete="off">
+          <span class="hint">画像生成専用の API キーを指定します。チャット設定とは独立して動作します</span>
+        </div>
+      </div>
+      <!-- 別途指定フィールド（Gemini） -->
+      <div id="img-fields-gemini" style="display:none;" class="img-override-fields">
+        <div class="field">
+          <label>API キー（画像生成専用）</label>
+          <input id="img-gemini-api-key" type="password" placeholder="（未設定）" autocomplete="off">
+          <span class="hint">画像生成専用の API キーを指定します。チャット設定とは独立して動作します</span>
+        </div>
+      </div>
+      <!-- 別途指定フィールド（Azure） -->
+      <div id="img-fields-azure" style="display:none;" class="img-override-fields">
+        <div class="field">
+          <label>エンドポイント（画像生成専用）</label>
+          <input id="img-azure-endpoint" type="text" placeholder="https://xxx.openai.azure.com">
+        </div>
+        <div class="field">
+          <label>API キー（画像生成専用）</label>
+          <input id="img-azure-api-key" type="password" placeholder="（未設定）" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>API バージョン</label>
+          <input id="img-azure-api-version" type="text" placeholder="2024-02-01">
+          <span class="hint">画像生成専用のエンドポイントと API キーを指定します。Japan East は画像生成非対応のため、海外リージョンのエンドポイントを入力してください</span>
+        </div>
+      </div>
+      <!-- 別途指定フィールド（Foundry） -->
+      <div id="img-fields-foundry" style="display:none;" class="img-override-fields">
+        <div class="field">
+          <label>エンドポイント（画像生成専用）</label>
+          <input id="img-foundry-endpoint" type="text" placeholder="https://xxx.cognitiveservices.azure.com/">
+        </div>
+        <div class="field">
+          <label>API キー（画像生成専用）</label>
+          <input id="img-foundry-api-key" type="password" placeholder="（未設定）" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>API バージョン</label>
+          <input id="img-foundry-api-version" type="text" placeholder="2024-12-01-preview">
+          <span class="hint">画像生成専用のエンドポイントと API キーを指定します。Japan East は画像生成非対応のため、海外リージョンのエンドポイントを入力してください</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -573,6 +629,22 @@ function onImageProviderChange() {
     `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
   ).join('');
   if (!sel.value && models.length) sel.value = models[0];
+  onImageInheritChange();
+}
+function onImageInheritChange() {
+  const inherit = document.getElementById('img-inherit').checked;
+  const provider = document.getElementById('img-provider').value;
+  const hint = document.getElementById('img-inherit-hint');
+  // 全フィールドを非表示にしてから必要なものだけ表示
+  ['openai','gemini','azure','foundry'].forEach(p => {
+    document.getElementById(`img-fields-${p}`).style.display = 'none';
+  });
+  if (inherit) {
+    hint.textContent = 'チャット用に設定済みの API キー・エンドポイントを画像生成にも使用します';
+  } else {
+    hint.textContent = '';
+    document.getElementById(`img-fields-${provider}`).style.display = 'block';
+  }
 }
 
 // ---- RAG 埋め込みモード切り替え ----
@@ -692,6 +764,23 @@ async function loadConfig() {
       document.getElementById('img-model').value   = ig.model || 'gpt-image-2';
       document.getElementById('img-quality').value = ig.quality || 'medium';
       document.getElementById('img-size').value    = ig.size || '1024x1024';
+      document.getElementById('img-inherit').checked = (ig.inherit !== 'false');
+      // 別途指定フィールドの復元
+      const setKey = (id, isSet) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.value = isSet ? '***' : '';
+        el.placeholder = isSet ? '（設定済み — 変更する場合のみ入力）' : '（未設定）';
+      };
+      setKey('img-openai-api-key',  ig.openai_api_key_set);
+      setKey('img-gemini-api-key',  ig.gemini_api_key_set);
+      setKey('img-azure-api-key',   ig.azure_api_key_set);
+      setKey('img-foundry-api-key', ig.foundry_api_key_set);
+      document.getElementById('img-azure-endpoint').value    = ig.azure_endpoint    || '';
+      document.getElementById('img-azure-api-version').value = ig.azure_api_version || '';
+      document.getElementById('img-foundry-endpoint').value    = ig.foundry_endpoint    || '';
+      document.getElementById('img-foundry-api-version').value = ig.foundry_api_version || '';
+      onImageInheritChange();
     }
   } catch(e) {
     document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
@@ -751,10 +840,19 @@ async function saveConfig() {
       api_version: document.getElementById('rag-api-version').value,
     },
     image_gen: {
-      provider: document.getElementById('img-provider').value,
-      model:    document.getElementById('img-model').value,
-      quality:  document.getElementById('img-quality').value,
-      size:     document.getElementById('img-size').value,
+      provider:          document.getElementById('img-provider').value,
+      model:             document.getElementById('img-model').value,
+      quality:           document.getElementById('img-quality').value,
+      size:              document.getElementById('img-size').value,
+      inherit:           document.getElementById('img-inherit').checked ? 'true' : 'false',
+      openai_api_key:    document.getElementById('img-openai-api-key').value,
+      gemini_api_key:    document.getElementById('img-gemini-api-key').value,
+      azure_endpoint:    document.getElementById('img-azure-endpoint').value,
+      azure_api_key:     document.getElementById('img-azure-api-key').value,
+      azure_api_version: document.getElementById('img-azure-api-version').value,
+      foundry_endpoint:    document.getElementById('img-foundry-endpoint').value,
+      foundry_api_key:     document.getElementById('img-foundry-api-key').value,
+      foundry_api_version: document.getElementById('img-foundry-api-version').value,
     },
   };
 

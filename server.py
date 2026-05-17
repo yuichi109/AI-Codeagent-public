@@ -55,6 +55,7 @@ from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
+from tools.image_tools import generate_image, edit_image, IMAGE_MODELS_BY_PROVIDER
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -226,6 +227,8 @@ TOOL_REGISTRY = {
     "rag_search": rag_search,
     "rag_update_status": rag_update_status,
     "rag_list": rag_list,
+    "generate_image": generate_image,
+    "edit_image": edit_image,
 }
 
 if RESPONSES_API_ENABLED:
@@ -672,7 +675,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_pptx",
-            "description": "PowerPoint ファイル (.pptx) を新規作成・上書きします。",
+            "description": "PowerPoint ファイル (.pptx) を新規作成・上書きします。テキスト・画像・テキスト+画像の3種類のスライドレイアウトに対応。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -680,7 +683,7 @@ TOOLS = [
                     "slides": {
                         "type": "array",
                         "items": {"type": "object"},
-                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\"}",
+                        "description": "スライドのリスト。各要素: {\"title\": \"タイトル\", \"content\": \"本文（改行区切り）\", \"image_path\": \"workspace相対パス\"}。image_path のみ→画像スライド（中央配置）、content+image_path→左テキスト・右画像、content のみ→テキストスライド。image_path は必ず workspace 相対パスで指定すること（例: GRAAA/AI_Output_Images/generated_xxx.png）。",
                     },
                     "title": {"type": "string", "description": "プレゼンテーション全体のタイトル（省略可）"},
                 },
@@ -871,6 +874,38 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "テキストプロンプトから画像を生成します。「〇〇の画像を作って」「〇〇を描いて」などの依頼に使います。セットアップ画面で設定したプロバイダー/モデルを使用します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "生成したい画像の詳細な説明（英語推奨）"},
+                    "size": {"type": "string", "enum": ["1024x1024", "1024x1536", "1536x1024"], "description": "画像サイズ。ユーザーが明示的に指定した場合のみ設定し、それ以外は必ず省略すること"},
+                    "quality": {"type": "string", "enum": ["low", "medium", "high"], "description": "画質。ユーザーが明示的に指定した場合のみ設定し、それ以外は必ず省略すること"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_image",
+            "description": "ワークスペース内の画像を編集・清書します（img2img）。ユーザーが下絵や手書きラフをアップロードした場合に使います。OpenAI または Gemini が必要です。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string", "description": "ワークスペース内の元画像ファイルパス"},
+                    "prompt": {"type": "string", "description": "編集内容の指示（例: 'Clean up this sketch into a professional illustration'）"},
+                    "size": {"type": "string", "enum": ["1024x1024", "1024x1536", "1536x1024"], "description": "出力サイズ。ユーザーが明示的に指定した場合のみ設定し、それ以外は必ず省略すること"},
+                },
+                "required": ["image_path", "prompt"],
+            },
+        },
+    },
 ]
 
 if RESPONSES_API_ENABLED:
@@ -991,7 +1026,10 @@ def execute_tool(name: str, arguments: dict) -> str:
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
     # ツール引数で指定されたタイムアウトがあればそれに合わせて待つ（+10秒のマージン）
-    if name == "web_research":
+    if name in ("generate_image", "edit_image"):
+        _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}
+        timeout = 600 if arguments.get("size") in _HIGH_RES else 300
+    elif name == "web_research":
         timeout = 60
     elif name == "run_powershell" and "timeout_seconds" in arguments:
         timeout = int(arguments["timeout_seconds"]) + 10
@@ -1501,6 +1539,12 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         for name, args, _ in parsed_calls:
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
+        # 画像ツールにワークスペーススコープを注入（保存先をスコープ配下にするため）
+        _IMAGE_TOOLS = {"generate_image", "edit_image"}
+        for _i, (_name, _args, _) in enumerate(parsed_calls):
+            if _name in _IMAGE_TOOLS and workspace_scope:
+                _args["_workspace_scope"] = workspace_scope
+
         # ツールを実行（run_commandはストリーミング、他は並列）
         _STREAMING_TOOLS = {"run_command"}
         if any(name in _STREAMING_TOOLS for name, _, _ in parsed_calls):
@@ -1552,6 +1596,23 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                     result_data = json.loads(result)
                     if "playbooks" in result_data:
                         yield f"data: {json.dumps({'type': 'ansible_chooser', 'playbooks': result_data['playbooks'], 'creds_exists': result_data.get('creds_exists', False), 'creds_filled': result_data.get('creds_filled', False)})}\n\n"
+                except Exception:
+                    pass
+
+            # generate_image / edit_image: 画像をUIに送信（base64をLLM履歴から除去）
+            if name in ("generate_image", "edit_image"):
+                try:
+                    result_data = json.loads(result)
+                    if result_data.get("image_base64"):
+                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'model': result_data.get('model', '')})}\n\n"
+                        tool_result_for_msg = json.dumps({
+                            "message": result_data.get("message", "画像を生成しました"),
+                            "prompt": result_data.get("prompt"),
+                            "provider": result_data.get("provider"),
+                            "model": result_data.get("model"),
+                            "saved_path": result_data.get("saved_path"),
+                            "note": "生成画像はUIに表示済みです",
+                        }, ensure_ascii=False)
                 except Exception:
                     pass
 
@@ -2065,6 +2126,21 @@ async def workspace_file_read(path: str):
             return JSONResponse({"error": "File not found"}, status_code=404)
         content = resolved.read_text(encoding="utf-8", errors="replace")
         return JSONResponse({"content": content, "path": path})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/workspace/image")
+async def workspace_image_serve(path: str):
+    """ワークスペースの画像ファイルをバイナリで返す（PNG/JPG等）"""
+    import mimetypes
+    from tools.file_tools import _resolve_safe_path
+    try:
+        resolved = _resolve_safe_path(path)
+        if not resolved.exists() or not resolved.is_file():
+            return JSONResponse({"error": "File not found"}, status_code=404)
+        mt = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+        return FileResponse(str(resolved), media_type=mt)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -2804,6 +2880,21 @@ async def setup_current():
             "deployment":  raw.get("RAG_EMBED_DEPLOYMENT", ""),
             "api_version": raw.get("RAG_EMBED_API_VERSION", "2024-02-01"),
         },
+        "image_gen": {
+            "provider":         raw.get("IMAGE_PROVIDER", "openai"),
+            "model":            raw.get("IMAGE_MODEL", "gpt-image-2"),
+            "quality":          raw.get("IMAGE_QUALITY", "medium"),
+            "size":             raw.get("IMAGE_SIZE", "1024x1024"),
+            "inherit":          raw.get("IMAGE_INHERIT", "true"),
+            "openai_api_key_set":   bool(raw.get("IMAGE_OPENAI_API_KEY")),
+            "gemini_api_key_set":   bool(raw.get("IMAGE_GEMINI_API_KEY")),
+            "azure_endpoint":       raw.get("IMAGE_AZURE_ENDPOINT", ""),
+            "azure_api_key_set":    bool(raw.get("IMAGE_AZURE_API_KEY")),
+            "azure_api_version":    raw.get("IMAGE_AZURE_API_VERSION", ""),
+            "foundry_endpoint":     raw.get("IMAGE_FOUNDRY_ENDPOINT", ""),
+            "foundry_api_key_set":  bool(raw.get("IMAGE_FOUNDRY_API_KEY")),
+            "foundry_api_version":  raw.get("IMAGE_FOUNDRY_API_VERSION", ""),
+        },
     })
 
 
@@ -2905,6 +2996,7 @@ class SetupSaveRequest(BaseModel):
     searxng: dict
     responses_api: dict = {}
     rag_embed: dict = {}
+    image_gen: dict = {}
 
 
 @app.post("/setup/save")
@@ -2912,12 +3004,22 @@ async def setup_save(req: SetupSaveRequest):
     """フォームの値を .env に書き込んでサービスを再起動する"""
     env_path = Path(__file__).parent / ".env"
 
+    # 既存 .env を全キー辞書として読み込む（フォールバック用）
+    existing_raw: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                existing_raw[k.strip()] = v.strip()
+
     # 既存 .env を読んで「既知キー以外のコメント行・カスタム行」を保持
     existing_lines = []
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "OPENAI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
         "RAG_ENABLED", "RAG_EMBED_",
+        "IMAGE_",
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -2928,16 +3030,15 @@ async def setup_save(req: SetupSaveRequest):
             elif not any(stripped.startswith(p) for p in known_prefixes):
                 existing_lines.append(line)  # 未知キーも保持
 
+    def env_val(new_val: str, env_key: str, default: str = "") -> str:
+        """新値が空・未送信の場合は既存 .env 値 → デフォルト値の順でフォールバック。
+        APIキーのマスク値（***）も既存値で補完する。"""
+        if new_val and "***" not in new_val:
+            return new_val
+        return existing_raw.get(env_key, default)
+
     def api_key_val(new_val: str, key_in_env: str) -> str:
-        """新値が空または *** を含む場合は既存値を維持"""
-        if not new_val or "***" in new_val:
-            # 既存 .env から取得
-            if env_path.exists():
-                for line in env_path.read_text().splitlines():
-                    if line.startswith(key_in_env + "="):
-                        return line.partition("=")[2].strip()
-            return ""
-        return new_val
+        return env_val(new_val, key_in_env, "")
 
     lines = ["# AI Code Agent 設定ファイル（/setup で生成）", ""]
 
@@ -3076,6 +3177,39 @@ async def setup_save(req: SetupSaveRequest):
         if re_key:
             lines.append(f"RAG_EMBED_API_KEY={re_key}")
         lines.append("")
+
+    # 画像生成設定
+    ig = req.image_gen or {}
+    ig_inherit = ig.get("inherit", "true")
+    lines += [
+        "# 画像生成設定",
+        f"IMAGE_PROVIDER={env_val(ig.get('provider',''), 'IMAGE_PROVIDER', 'openai')}",
+        f"IMAGE_MODEL={env_val(ig.get('model',''), 'IMAGE_MODEL', 'gpt-image-2')}",
+        f"IMAGE_QUALITY={env_val(ig.get('quality',''), 'IMAGE_QUALITY', 'medium')}",
+        f"IMAGE_SIZE={env_val(ig.get('size',''), 'IMAGE_SIZE', '1024x1024')}",
+        f"IMAGE_INHERIT={ig_inherit if ig_inherit else 'true'}",
+    ]
+    if ig.get("azure_endpoint"):
+        lines.append(f"IMAGE_AZURE_ENDPOINT={ig['azure_endpoint']}")
+    if ig.get("azure_api_version"):
+        lines.append(f"IMAGE_AZURE_API_VERSION={ig['azure_api_version']}")
+    if ig.get("foundry_endpoint"):
+        lines.append(f"IMAGE_FOUNDRY_ENDPOINT={ig['foundry_endpoint']}")
+    if ig.get("foundry_api_version"):
+        lines.append(f"IMAGE_FOUNDRY_API_VERSION={ig['foundry_api_version']}")
+    ig_openai_key = env_val(ig.get("openai_api_key", ""), "IMAGE_OPENAI_API_KEY")
+    if ig_openai_key:
+        lines.append(f"IMAGE_OPENAI_API_KEY={ig_openai_key}")
+    ig_gemini_key = env_val(ig.get("gemini_api_key", ""), "IMAGE_GEMINI_API_KEY")
+    if ig_gemini_key:
+        lines.append(f"IMAGE_GEMINI_API_KEY={ig_gemini_key}")
+    ig_azure_key = env_val(ig.get("azure_api_key", ""), "IMAGE_AZURE_API_KEY")
+    if ig_azure_key:
+        lines.append(f"IMAGE_AZURE_API_KEY={ig_azure_key}")
+    ig_foundry_key = env_val(ig.get("foundry_api_key", ""), "IMAGE_FOUNDRY_API_KEY")
+    if ig_foundry_key:
+        lines.append(f"IMAGE_FOUNDRY_API_KEY={ig_foundry_key}")
+    lines.append("")
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

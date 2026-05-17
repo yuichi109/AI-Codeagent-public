@@ -271,7 +271,7 @@ def edit_xlsx(path: str, sheet: str = None, row: int = None, col: int = None,
 
 def read_pptx(path: str) -> dict:
     """
-    PowerPoint ファイル (.pptx) を読み込み、スライドのテキストを返します。
+    PowerPoint ファイル (.pptx) を読み込み、スライドのテキストと画像情報を返します。
 
     path: workspace 相対パス (例: slides/presentation.pptx)
     """
@@ -289,16 +289,21 @@ def read_pptx(path: str) -> dict:
         slides = []
         for i, slide in enumerate(prs.slides):
             texts = []
+            image_count = 0
             for shape in slide.shapes:
                 if shape.has_text_frame:
                     for para in shape.text_frame.paragraphs:
                         text = para.text.strip()
                         if text:
                             texts.append(text)
+                # shape_type 13 = PICTURE
+                if getattr(shape, "shape_type", None) == 13:
+                    image_count += 1
             slides.append({
                 "slide_number": i + 1,
                 "texts": texts,
                 "text": "\n".join(texts),
+                "image_count": image_count,
             })
 
         return {
@@ -316,12 +321,19 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
     PowerPoint ファイル (.pptx) を作成・上書きします。
 
     path: workspace 相対パス (例: output/presentation.pptx)
-    slides: [{"title": "スライドタイトル", "content": "本文（改行区切り）"}, ...]
+    slides: スライド定義のリスト。各要素は以下のフィールドを持つ:
+      - title: スライドタイトル（省略可）
+      - content: 本文テキスト（改行区切り、省略可）
+      - image_path: 埋め込む画像の workspace 相対パス（省略可）
+        例: "GRAAA/AI_Output_Images/generated_xxx.png"
+      ※ content のみ → テキストスライド
+      ※ image_path のみ → 画像のみスライド（中央配置）
+      ※ content + image_path → 左テキスト・右画像のレイアウト
     title: プレゼンテーション全体のタイトル（最初のスライドに使用、省略可）
     """
     try:
         from pptx import Presentation
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches, Pt, Emu
     except ImportError:
         return {"error": "python-pptx がインストールされていません。run_command('pip install python-pptx') でインストールしてください。"}
 
@@ -330,8 +342,19 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
 
         prs = Presentation()
-        title_layout = prs.slide_layouts[0]
-        content_layout = prs.slide_layouts[1]
+        title_layout    = prs.slide_layouts[0]
+        content_layout  = prs.slide_layouts[1]
+        blank_layout    = prs.slide_layouts[6]
+
+        sw = prs.slide_width   # スライド幅 (EMU)
+        sh = prs.slide_height  # スライド高さ (EMU)
+        margin = Inches(0.4)
+
+        def _add_image(slide, img_path: str, left, top, width, height):
+            img_target = _resolve_safe_path(img_path)
+            if not img_target.exists():
+                raise FileNotFoundError(f"画像ファイルが見つかりません: {img_path}")
+            slide.shapes.add_picture(str(img_target), left, top, width, height)
 
         count = 0
         if title:
@@ -342,10 +365,62 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
             count += 1
 
         for s in slides:
-            slide_title = s.get("title", "")
-            slide_content = s.get("content", "")
+            slide_title   = s.get("title", "")
+            # content / text どちらのキーも受け付ける
+            slide_content = s.get("content", "") or s.get("text", "")
+            # image_path / image どちらのキーも受け付ける
+            image_path    = s.get("image_path", "") or s.get("image", "")
+            # elements 形式のフォールバック: [{"type":"image","path":"..."}]
+            if not image_path:
+                for el in s.get("elements", []):
+                    if el.get("type") == "image" and el.get("path"):
+                        image_path = el["path"]
+                        break
 
-            if slide_content:
+            if slide_content and image_path:
+                # 左テキスト・右画像レイアウト
+                slide = prs.slides.add_slide(blank_layout)
+                title_top = margin
+                title_h   = Inches(0.7)
+                if slide_title:
+                    txb = slide.shapes.add_textbox(margin, title_top, sw - margin * 2, title_h)
+                    txb.text_frame.text = slide_title
+                    txb.text_frame.paragraphs[0].runs[0].font.size = Pt(24)
+                    txb.text_frame.paragraphs[0].runs[0].font.bold = True
+                content_top = title_top + title_h + Inches(0.1)
+                content_h   = sh - content_top - margin
+                half_w      = (sw - margin * 3) // 2
+                # テキストボックス（左半分）
+                txb2 = slide.shapes.add_textbox(margin, content_top, half_w, content_h)
+                tf = txb2.text_frame
+                tf.word_wrap = True
+                for i, line in enumerate(slide_content.splitlines()):
+                    if i == 0:
+                        tf.paragraphs[0].text = line
+                    else:
+                        tf.add_paragraph().text = line
+                # 画像（右半分）
+                img_left = margin * 2 + half_w
+                _add_image(slide, image_path, img_left, content_top, half_w, content_h)
+
+            elif image_path:
+                # 画像のみスライド（中央配置）
+                slide = prs.slides.add_slide(blank_layout)
+                if slide_title:
+                    title_h = Inches(0.7)
+                    txb = slide.shapes.add_textbox(margin, margin, sw - margin * 2, title_h)
+                    txb.text_frame.text = slide_title
+                    txb.text_frame.paragraphs[0].runs[0].font.size = Pt(24)
+                    txb.text_frame.paragraphs[0].runs[0].font.bold = True
+                    img_top = margin + title_h + Inches(0.1)
+                else:
+                    img_top = margin
+                img_h = sh - img_top - margin
+                img_w = sw - margin * 2
+                _add_image(slide, image_path, margin, img_top, img_w, img_h)
+
+            elif slide_content:
+                # テキストのみスライド
                 slide = prs.slides.add_slide(content_layout)
                 slide.shapes.title.text = slide_title
                 tf = slide.placeholders[1].text_frame
@@ -356,12 +431,15 @@ def write_pptx(path: str, slides: list, title: str = "") -> dict:
                     else:
                         tf.add_paragraph().text = line
             else:
+                # タイトルのみスライド
                 slide = prs.slides.add_slide(title_layout)
                 slide.shapes.title.text = slide_title
             count += 1
 
         prs.save(str(target))
         return {"path": str(target), "slides_written": count, "error": None}
+    except FileNotFoundError as e:
+        return {"error": str(e)}
     except Exception as e:
         return {"error": f"PowerPoint 書き込みエラー: {e}"}
 

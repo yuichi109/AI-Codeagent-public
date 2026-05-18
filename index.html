@@ -104,6 +104,33 @@
   #srcimg-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #srcimg-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #srcimg-btn.active { color: #89b4fa; border-color: #89b4fa; font-weight: bold; }
+  #srcimg-clear-btn { padding: 2px 6px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-left: none; border-radius: 0 6px 6px 0; cursor: pointer; font-size: 12px; line-height: 1.6; transition: color 0.15s, background 0.15s; margin-left: -2px; }
+  #srcimg-clear-btn:hover { color: #f38ba8; border-color: #f38ba8; background: #3d2030; }
+  #srcimg-btn.active { border-radius: 6px 0 0 6px; }
+  /* Draw.io パネル */
+  #drawio-panel { display:none; position:fixed; inset:0; background:#1e1e2e; z-index:8500; flex-direction:column; }
+  #drawio-panel.open { display:flex; }
+  #drawio-toolbar { display:flex; align-items:center; gap:8px; padding:6px 12px; background:#181825; border-bottom:1px solid #45475a; flex-shrink:0; }
+  #drawio-toolbar span { font-size:14px; color:#cdd6f4; font-weight:bold; margin-right:4px; }
+  #drawio-filename { background:#313244; color:#cdd6f4; border:1px solid #45475a; border-radius:6px; padding:4px 10px; font-size:13px; width:220px; }
+  #drawio-filename:focus { outline:none; border-color:#89b4fa; }
+  .drawio-tb-btn { padding:4px 12px; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+  #drawio-new-btn { background:#45475a; color:#cdd6f4; }
+  #drawio-open-btn { background:#45475a; color:#cdd6f4; }
+  #drawio-save-btn { background:#89b4fa; color:#1e1e2e; font-weight:bold; }
+  #drawio-close-btn { background:#f38ba8; color:#1e1e2e; margin-left:auto; }
+  .drawio-tb-btn:hover { opacity:0.85; }
+  #drawio-status { font-size:11px; color:#6c7086; }
+  #drawio-iframe { flex:1; border:none; width:100%; }
+  #drawio-picker-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9100; align-items:center; justify-content:center; }
+  #drawio-picker-modal.open { display:flex; }
+  #drawio-picker-dialog { background:#1e1e2e; border:1px solid #45475a; border-radius:12px; padding:20px; width:420px; max-width:92vw; max-height:70vh; display:flex; flex-direction:column; gap:12px; }
+  #drawio-picker-dialog h3 { margin:0; font-size:15px; color:#cdd6f4; }
+  #drawio-picker-list { overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+  .drawio-pick-item { padding:8px 12px; background:#313244; border-radius:7px; color:#cdd6f4; font-size:13px; cursor:pointer; border:1px solid transparent; }
+  .drawio-pick-item:hover { border-color:#89b4fa; color:#89b4fa; }
+  .drawio-open-btn { display:block; margin:8px 0 4px; padding:5px 12px; background:#313244; color:#89b4fa; border:1px solid #89b4fa; border-radius:6px; cursor:pointer; font-size:12px; }
+  .drawio-open-btn:hover { background:#3d4166; }
   /* 生成元画像モーダル */
   #srcimg-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9000; align-items:center; justify-content:center; }
   #srcimg-modal.open { display:flex; }
@@ -129,6 +156,8 @@
   #srcimg-confirm-btn { background:#89b4fa; color:#1e1e2e; font-weight:bold; }
   #srcimg-confirm-btn:disabled { background:#45475a; color:#6c7086; cursor:not-allowed; }
   #srcimg-cancel-btn { background:#45475a; color:#cdd6f4; }
+  #srcimg-paste-btn { background:#313244; color:#cdd6f4; border:1px solid #45475a; border-radius:7px; padding:6px 14px; font-size:12px; cursor:pointer; width:100%; text-align:center; transition:border-color 0.15s,background 0.15s; flex-shrink:0; }
+  #srcimg-paste-btn:hover { border-color:#89b4fa; background:#3d3f5a; }
   @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(243,139,168,0.6); } 50% { box-shadow: 0 0 0 6px rgba(243,139,168,0); } }
   #send { padding: 6px 16px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -515,6 +544,7 @@
     <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
     <button id="todo-btn" onclick="toggleTodoPanel()">📋 タスク<span id="todo-badge"></span></button>
+    <button id="drawio-btn" onclick="toggleDrawioPanel()" title="Draw.io 作図エディタ">✏️ Draw.io</button>
     <button id="cleanup-btn" onclick="openCleanupDirect()" title="ワークスペース掃除・保護リスト編集">🧹</button>
     <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
   </div>
@@ -760,7 +790,7 @@
           <button onclick="doRawWrite()" style="padding:4px 10px;border-radius:6px;background:var(--blue);color:#fff;border:none;cursor:pointer;font-size:13px;">保存</button>
           <button onclick="toggleRawWriteBar()" style="padding:4px 8px;border-radius:6px;background:var(--surface1);color:var(--text);border:none;cursor:pointer;font-size:13px;">✕</button>
         </div>
-        <button id="srcimg-btn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定">🖼 生成元画像</button>
+        <button id="srcimg-btn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定">🖼 生成元画像</button><button id="srcimg-clear-btn" onclick="clearSrcImg()" title="生成元画像の参照を解除" style="display:none">×</button>
         <button id="bypass-btn" onclick="toggleBypass()" title="承認バイパス: ONにすると確認なしで即実行">🔒 承認</button>
       </div>
       <div id="input-right">
@@ -798,6 +828,7 @@
 
   function setAiContent(el, text) {
     el.innerHTML = renderMarkdown(text);
+    if (typeof _injectDrawioButtons === 'function') _injectDrawioButtons(el);
   }
 
   // ---- スピナー＋状態表示 ----
@@ -4593,6 +4624,34 @@
   }
 </script>
 
+<!-- Draw.io パネル -->
+<div id="drawio-panel">
+  <div id="drawio-toolbar">
+    <span>✏️ Draw.io</span>
+    <button class="drawio-tb-btn" id="drawio-new-btn" onclick="drawioNew()">新規</button>
+    <button class="drawio-tb-btn" id="drawio-open-btn" onclick="drawioOpenPicker()">開く</button>
+    <input id="drawio-filename" type="text" placeholder="ファイル名.drawio" spellcheck="false">
+    <button class="drawio-tb-btn" id="drawio-save-btn" onclick="drawioSave()">💾 保存</button>
+    <span id="drawio-status"></span>
+    <button class="drawio-tb-btn" id="drawio-close-btn" onclick="toggleDrawioPanel()">✕ 閉じる</button>
+  </div>
+  <iframe id="drawio-iframe"
+    src="https://embed.diagrams.net/?embed=1&spin=1&modified=unsavedChanges&proto=json&lang=ja&ui=kennedy"
+    allow="clipboard-read; clipboard-write">
+  </iframe>
+</div>
+
+<!-- Draw.io ファイル選択モーダル -->
+<div id="drawio-picker-modal" onclick="if(event.target===this)closeDrawioPicker()">
+  <div id="drawio-picker-dialog">
+    <h3>📂 .drawio ファイルを選択</h3>
+    <div id="drawio-picker-list"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px">
+      <button onclick="closeDrawioPicker()" style="padding:5px 14px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px">キャンセル</button>
+    </div>
+  </div>
+</div>
+
 <!-- 生成元画像モーダル -->
 <div id="srcimg-modal" onclick="if(event.target===this)closeSrcImgModal()">
   <div id="srcimg-dialog">
@@ -4604,10 +4663,11 @@
       ondragleave="this.classList.remove('dragover')"
       ondrop="handleSrcImgDrop(event)">
       <img id="srcimg-drop-preview">
-      <span id="srcimg-drop-hint">新しい画像をドロップ<br><small>またはクリックして選択</small></span>
+      <span id="srcimg-drop-hint">新しい画像をドロップ<br><small>またはクリックして選択 / Ctrl+V で貼り付け</small></span>
       <span id="srcimg-drop-filename"></span>
     </div>
     <input id="srcimg-file-input" type="file" accept="image/*" style="display:none" onchange="handleSrcImgSelect(event)">
+    <button id="srcimg-paste-btn" onclick="handleSrcImgPaste()">📋 クリップボードから貼り付け</button>
     <!-- アップロード済み一覧 -->
     <div id="srcimg-existing-section" style="display:none">
       <div id="srcimg-existing-label">📁 アップロード済み（クリックで選択）</div>
@@ -4644,6 +4704,52 @@
   function closeSrcImgModal() {
     document.getElementById('srcimg-modal').classList.remove('open');
   }
+
+  function clearSrcImg() {
+    const srcBtn = document.getElementById('srcimg-btn');
+    srcBtn.classList.remove('active');
+    srcBtn.title = 'edit_image の元ネタ画像を指定';
+    document.getElementById('srcimg-clear-btn').style.display = 'none';
+    if (_srcImgNote) {
+      const input = document.getElementById('input');
+      input.value = input.value.replace(_srcImgNote, '').trim();
+      input.dispatchEvent(new Event('input'));
+      _srcImgNote = null;
+    }
+  }
+
+  function _clipboardFileName(mimeType) {
+    const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+    return `clipboard_${Date.now()}.${ext}`;
+  }
+
+  async function handleSrcImgPaste() {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          const file = new File([blob], _clipboardFileName(imgType), { type: imgType });
+          _setSrcImgFile(file);
+          return;
+        }
+      }
+      alert('クリップボードに画像がありません');
+    } catch(e) {
+      alert('クリップボードへのアクセスが拒否されました。\nCtrl+V でも貼り付けできます。');
+    }
+  }
+
+  function _handleGlobalPaste(e) {
+    if (!document.getElementById('srcimg-modal').classList.contains('open')) return;
+    const item = Array.from(e.clipboardData?.items || []).find(i => i.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    const blob = item.getAsFile();
+    if (blob) _setSrcImgFile(new File([blob], _clipboardFileName(item.type), { type: item.type }));
+  }
+  document.addEventListener('paste', _handleGlobalPaste);
 
   async function _loadExistingImages() {
     const grid = document.getElementById('srcimg-existing-grid');
@@ -4751,6 +4857,7 @@
       const srcBtn = document.getElementById('srcimg-btn');
       srcBtn.classList.add('active');
       srcBtn.title = `生成元画像: ${path}`;
+      document.getElementById('srcimg-clear-btn').style.display = '';
       // チャット入力：前のノートがあれば差し替え、なければ末尾に追加
       const input = document.getElementById('input');
       const note = `（元ネタ画像をワークスペースに保存しました。必ず edit_image ツールを使い、image_path="${path}" を指定してください）`;
@@ -4767,6 +4874,186 @@
       btn.textContent = 'この画像を使う';
       btn.disabled = false;
     }
+  }
+</script>
+
+<script>
+  /* ===== Draw.io パネル ===== */
+  let _drawioReady = false;
+  let _drawioCurrentXml = null;
+  let _drawioPendingLoad = null;
+
+  function _drawioIframe() { return document.getElementById('drawio-iframe'); }
+
+  function _drawioPost(msg) {
+    const ifrm = _drawioIframe();
+    if (ifrm && ifrm.contentWindow) ifrm.contentWindow.postMessage(JSON.stringify(msg), '*');
+  }
+
+  function _drawioLoad(xml) {
+    // AIが出力する literal \n をDraw.io改行エスケープに変換
+    const sanitized = xml.replace(/\\n/g, '&#xa;');
+    _drawioPost({ action: 'load', xml: sanitized });
+  }
+
+  const _DRAWIO_BLANK = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>';
+
+  function toggleDrawioPanel() {
+    const panel = document.getElementById('drawio-panel');
+    const btn = document.getElementById('drawio-btn');
+    const isOpen = panel.classList.toggle('open');
+    btn.classList.toggle('active', isOpen);
+    if (isOpen) {
+      document.getElementById('drawio-filename').value = '';
+      _drawioCurrentXml = null;
+      if (_drawioReady) {
+        _drawioLoad(_DRAWIO_BLANK);
+        _drawioSetStatus('新規ダイアグラム');
+      } else {
+        const ifrm = _drawioIframe();
+        ifrm.src = ifrm.src;
+      }
+    }
+  }
+
+  function drawioNew() {
+    document.getElementById('drawio-filename').value = '';
+    _drawioCurrentXml = null;
+    _drawioLoad(_DRAWIO_BLANK);
+    _drawioSetStatus('新規ダイアグラム');
+  }
+
+  async function drawioOpenPicker() {
+    const list = document.getElementById('drawio-picker-list');
+    list.innerHTML = '<div style="color:#6c7086;font-size:13px;padding:8px">読み込み中...</div>';
+    document.getElementById('drawio-picker-modal').classList.add('open');
+    try {
+      const scope = (typeof currentWorkspaceScope !== 'undefined' && currentWorkspaceScope) ? currentWorkspaceScope : '';
+      const res = await fetch(`/workspace/tree${scope ? '?scope=' + encodeURIComponent(scope) : ''}`);
+      const data = await res.json();
+      const files = (data.files || data.tree || []).filter(f => (typeof f === 'string' ? f : f.path || '').endsWith('.drawio'));
+      list.innerHTML = '';
+      if (!files.length) {
+        list.innerHTML = '<div style="color:#6c7086;font-size:13px;padding:8px">.drawio ファイルが見つかりません</div>';
+        return;
+      }
+      files.forEach(f => {
+        const path = typeof f === 'string' ? f : (f.path || f);
+        const item = document.createElement('div');
+        item.className = 'drawio-pick-item';
+        item.textContent = path;
+        item.onclick = () => drawioOpenFile(path);
+        list.appendChild(item);
+      });
+    } catch(e) {
+      list.innerHTML = `<div style="color:#f38ba8;font-size:13px;padding:8px">取得失敗: ${e.message}</div>`;
+    }
+  }
+
+  function closeDrawioPicker() {
+    document.getElementById('drawio-picker-modal').classList.remove('open');
+  }
+
+  async function drawioOpenFile(path) {
+    closeDrawioPicker();
+    try {
+      const res = await fetch(`/workspace/file?path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      const xml = data.content || data;
+      document.getElementById('drawio-filename').value = path.split('/').pop();
+      if (!document.getElementById('drawio-panel').classList.contains('open')) toggleDrawioPanel();
+      if (_drawioReady) {
+        _drawioLoad(xml);
+      } else {
+        _drawioPendingLoad = xml;
+      }
+      _drawioSetStatus(path);
+    } catch(e) { alert(`開けませんでした: ${e.message}`); }
+  }
+
+  async function drawioSave() {
+    // exportアクションでXMLを取得してから保存
+    _drawioPost({ action: 'export', format: 'xml', xml: '' });
+  }
+
+  async function _drawioDoSave(xml) {
+    let filename = document.getElementById('drawio-filename').value.trim();
+    if (!filename) {
+      filename = prompt('保存ファイル名を入力してください（例: diagram.drawio）', 'diagram.drawio');
+      if (!filename) return;
+      document.getElementById('drawio-filename').value = filename;
+    }
+    if (!filename.endsWith('.drawio')) filename += '.drawio';
+    document.getElementById('drawio-filename').value = filename;
+    try {
+      const scope = (typeof currentWorkspaceScope !== 'undefined' && currentWorkspaceScope) ? currentWorkspaceScope + '/' : '';
+      const path = scope + filename;
+      const res = await fetch('/workspace/write-raw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, content: xml })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      _drawioSetStatus(`保存済: ${path}`);
+    } catch(e) { alert(`保存失敗: ${e.message}`); }
+  }
+
+  function _drawioSetStatus(msg) {
+    document.getElementById('drawio-status').textContent = msg;
+  }
+
+  // Draw.io iframe からのメッセージ受信
+  window.addEventListener('message', e => {
+    if (!e.data || typeof e.data !== 'string') return;
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (!msg.event) return;
+
+    if (msg.event === 'init') {
+      _drawioReady = true;
+      const xml = _drawioPendingLoad || _DRAWIO_BLANK;
+      _drawioLoad(xml);
+      _drawioPendingLoad = null;
+    } else if (msg.event === 'save') {
+      _drawioCurrentXml = msg.xml;
+      _drawioDoSave(msg.xml);
+    } else if (msg.event === 'export') {
+      _drawioCurrentXml = msg.data || msg.xml;
+      _drawioDoSave(_drawioCurrentXml);
+    } else if (msg.event === 'load') {
+      _drawioSetStatus('読み込み完了');
+    } else if (msg.event === 'exit') {
+      if (document.getElementById('drawio-panel').classList.contains('open')) toggleDrawioPanel();
+    }
+  });
+
+  // iframe 再ロード時にリセット
+  document.getElementById('drawio-iframe').addEventListener('load', () => {
+    _drawioReady = false;
+  });
+
+  // AIの返答から Draw.io XML を検出して「Draw.io で開く」ボタンを追加
+  function _injectDrawioButtons(container) {
+    container.querySelectorAll('pre code').forEach(code => {
+      const text = code.textContent || '';
+      if (!text.includes('<mxGraphModel')) return;
+      const pre = code.closest('pre');
+      if (!pre || pre.querySelector('.drawio-open-btn')) return;
+      const btn = document.createElement('button');
+      btn.className = 'drawio-open-btn';
+      btn.textContent = '✏️ Draw.io で開く';
+      btn.onclick = () => {
+        if (!document.getElementById('drawio-panel').classList.contains('open')) toggleDrawioPanel();
+        if (_drawioReady) {
+          _drawioLoad(text.trim());
+        } else {
+          _drawioPendingLoad = text.trim();
+        }
+        _drawioSetStatus('AIが生成したダイアグラム');
+      };
+      pre.appendChild(btn);
+    });
   }
 </script>
 </body>

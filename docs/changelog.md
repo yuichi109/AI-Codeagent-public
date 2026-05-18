@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-05-18（追記）
+
+### 画像生成プロバイダー改善（コミット: 7db17a3）
+
+**変更ファイル:** setup.html / tools/image_tools.py / server.py / index.html
+
+#### 主な変更内容
+- **Azure/Foundry モデル名をテキスト入力化**: setup.html で Azure/Foundry 選択時はプルダウンではなく自由テキスト入力（任意のデプロイ名を指定可）
+- **Azure/Foundry の Bearer 認証対応**: `_make_client()` で `azure_ad_token` を使用（Global Standard デプロイメントに対応）
+- **`max_retries=0` 追加**: 認証エラー等が即座に返るよう修正（従来は300秒タイムアウトまで待っていた）
+- **`edit_image` を Azure/Foundry でも使用可能に**: プロバイダーガードを撤廃
+- **生成画像にプロバイダー/モデルバッジ表示**: チャット画面・リロード復元時ともに表示（例: `azure / gpt-image-1.5`）
+- **ファイルツリーで画像ファイルをクリック → 新タブで表示**: Monaco エディタで文字化けしていた問題を解消（png/jpg/jpeg/gif/webp/bmp/svg/ico 対応）
+- **`/workspace/image` に `Content-Disposition: inline; filename` を付与**: 右クリック保存時に正しいファイル名・拡張子で保存されるよう修正
+
+---
+
 ## 2026-05-18
 
 ### 画像生成機能の強化（Issue #50 完了）

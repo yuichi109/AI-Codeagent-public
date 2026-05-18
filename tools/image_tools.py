@@ -122,7 +122,8 @@ def _apply_watermark_to_b64(b64: str, text: str, position: str, color: str, opac
     base = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
     w, h = base.size
 
-    font_size = font_size if font_size > 0 else max(20, int(min(w, h) * 0.04))
+    # font_size が 0 または小さすぎる（< 12）場合は自動（短辺の4%）
+    font_size = font_size if font_size >= 12 else max(20, int(min(w, h) * 0.04))
     try:
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
     except OSError:
@@ -158,11 +159,12 @@ def _apply_watermark_to_b64(b64: str, text: str, position: str, color: str, opac
 
 
 def apply_auto_watermark(b64: str, workspace_scope: str = "") -> tuple[str, str]:
-    """設定に基づき自動ウォーターマークを適用。(b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。"""
+    """設定に基づき自動ウォーターマークを適用。(watermarked_b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。"""
     if not WATERMARK_ENABLED:
         return b64, ""
     new_b64 = _apply_watermark_to_b64(b64, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE)
-    return new_b64, ""
+    saved_path = _save_to_workspace(new_b64, "watermarked", workspace_scope)
+    return new_b64, saved_path
 
 
 def watermark_image(

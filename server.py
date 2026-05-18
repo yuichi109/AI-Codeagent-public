@@ -1625,10 +1625,12 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         # generate_image / edit_image の場合は自動ウォーターマークを適用
                         display_b64 = result_data["image_base64"]
                         if name in ("generate_image", "edit_image"):
-                            display_b64, _ = apply_auto_watermark(display_b64, workspace_scope)
-                            if display_b64 != result_data["image_base64"]:
-                                result_data["image_base64"] = display_b64
-                                result_data["saved_path"] = _
+                            wm_b64, wm_path = apply_auto_watermark(display_b64, workspace_scope)
+                            if wm_b64 != display_b64:
+                                display_b64 = wm_b64
+                                result_data["image_base64"] = wm_b64
+                                if wm_path:
+                                    result_data["saved_path"] = wm_path
                         yield f"data: {json.dumps({'type': 'image_generated', 'image': display_b64, 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'provider': result_data.get('provider', ''), 'model': result_data.get('model', '')})}\n\n"
                         tool_result_for_msg = json.dumps({
                             "message": result_data.get("message", "画像を生成しました"),
@@ -2113,16 +2115,17 @@ class RawWriteRequest(BaseModel):
     content: str
 
 @app.post("/workspace/upload")
-async def workspace_upload(file: UploadFile = FastAPIFile(...)):
-    """ファイルをworkspaceにアップロードして保存する。バイナリファイル（PDF・Office等）対応。"""
+async def workspace_upload(file: UploadFile = FastAPIFile(...), folder: str = ""):
+    """ファイルをworkspaceにアップロードして保存する。バイナリファイル（PDF・Office等）対応。folder を指定するとサブフォルダに保存。"""
     from tools.file_tools import _resolve_safe_path
     try:
         filename = Path(file.filename).name  # パストラバーサル防止
-        target = _resolve_safe_path(filename)
+        rel = f"{folder}/{filename}" if folder else filename
+        target = _resolve_safe_path(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
         content = await file.read()
         target.write_bytes(content)
-        return JSONResponse({"path": filename, "size": len(content), "error": None})
+        return JSONResponse({"path": rel, "size": len(content), "error": None})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -2169,6 +2172,41 @@ async def workspace_image_serve(path: str):
         return FileResponse(str(resolved), media_type=mt, headers=headers)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.delete("/workspace/file")
+async def workspace_file_delete(path: str):
+    """ワークスペース内のファイルを削除する"""
+    from tools.file_tools import _resolve_safe_path
+    try:
+        target = _resolve_safe_path(path)
+        if not target.exists():
+            return JSONResponse({"error": "File not found"}, status_code=404)
+        target.unlink()
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/workspace/temp-images")
+async def workspace_temp_images(scope: str = ""):
+    """TEMP フォルダ内の画像ファイル一覧を返す（生成元画像選択用）"""
+    from tools.file_tools import _resolve_safe_path
+    IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+    try:
+        folder = f"{scope}/TEMP" if scope else "TEMP"
+        temp_dir = _resolve_safe_path(folder)
+        if not temp_dir.exists():
+            return JSONResponse({"images": []})
+        images = sorted(
+            [f for f in temp_dir.iterdir() if f.is_file() and f.suffix.lower() in IMAGE_EXTS],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        rel_paths = [f"{folder}/{f.name}" for f in images]
+        return JSONResponse({"images": rel_paths})
+    except Exception as e:
+        return JSONResponse({"images": [], "error": str(e)})
 
 
 @app.get("/workspace/tree")

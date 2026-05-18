@@ -101,6 +101,34 @@
   #bypass-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 14px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #bypass-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #bypass-btn.active { color: #a6e3a1; border-color: #a6e3a1; font-weight: bold; }
+  #srcimg-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
+  #srcimg-btn:hover { color: #cdd6f4; border-color: #6c7086; }
+  #srcimg-btn.active { color: #89b4fa; border-color: #89b4fa; font-weight: bold; }
+  /* 生成元画像モーダル */
+  #srcimg-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9000; align-items:center; justify-content:center; }
+  #srcimg-modal.open { display:flex; }
+  #srcimg-dialog { background:#1e1e2e; border:1px solid #45475a; border-radius:12px; padding:20px; width:480px; max-width:92vw; max-height:85vh; display:flex; flex-direction:column; gap:14px; overflow:hidden; }
+  #srcimg-dialog h3 { margin:0; font-size:15px; color:#cdd6f4; flex-shrink:0; }
+  #srcimg-dropzone { border:2px dashed #45475a; border-radius:10px; min-height:110px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#6c7086; font-size:13px; cursor:pointer; transition:border-color 0.15s, background 0.15s; flex-shrink:0; }
+  #srcimg-dropzone.dragover { border-color:#89b4fa; background:#313244; color:#89b4fa; }
+  #srcimg-dropzone.has-image { border-color:#a6e3a1; }
+  #srcimg-drop-preview { max-width:100%; max-height:80px; border-radius:6px; display:none; }
+  #srcimg-drop-filename { font-size:11px; color:#a6e3a1; display:none; }
+  #srcimg-existing-section { display:flex; flex-direction:column; gap:8px; overflow:hidden; min-height:0; }
+  #srcimg-existing-label { font-size:12px; color:#6c7086; flex-shrink:0; }
+  #srcimg-existing-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:8px; overflow-y:auto; padding:2px; }
+  .srcimg-thumb { position:relative; border-radius:7px; border:2px solid transparent; cursor:pointer; overflow:hidden; aspect-ratio:1; background:#313244; transition:border-color 0.15s; }
+  .srcimg-thumb:hover { border-color:#6c7086; }
+  .srcimg-thumb.selected { border-color:#89b4fa; }
+  .srcimg-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .srcimg-thumb-name { position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.7); color:#cdd6f4; font-size:9px; padding:2px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .srcimg-thumb-del { position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:rgba(243,139,168,0.85); color:#1e1e2e; border:none; cursor:pointer; font-size:11px; line-height:18px; text-align:center; display:none; padding:0; }
+  .srcimg-thumb:hover .srcimg-thumb-del { display:block; }
+  #srcimg-modal-btns { display:flex; gap:8px; justify-content:flex-end; flex-shrink:0; }
+  #srcimg-modal-btns button { padding:6px 16px; border-radius:6px; border:none; cursor:pointer; font-size:13px; }
+  #srcimg-confirm-btn { background:#89b4fa; color:#1e1e2e; font-weight:bold; }
+  #srcimg-confirm-btn:disabled { background:#45475a; color:#6c7086; cursor:not-allowed; }
+  #srcimg-cancel-btn { background:#45475a; color:#cdd6f4; }
   @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(243,139,168,0.6); } 50% { box-shadow: 0 0 0 6px rgba(243,139,168,0); } }
   #send { padding: 6px 16px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -732,6 +760,7 @@
           <button onclick="doRawWrite()" style="padding:4px 10px;border-radius:6px;background:var(--blue);color:#fff;border:none;cursor:pointer;font-size:13px;">保存</button>
           <button onclick="toggleRawWriteBar()" style="padding:4px 8px;border-radius:6px;background:var(--surface1);color:var(--text);border:none;cursor:pointer;font-size:13px;">✕</button>
         </div>
+        <button id="srcimg-btn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定">🖼 生成元画像</button>
         <button id="bypass-btn" onclick="toggleBypass()" title="承認バイパス: ONにすると確認なしで即実行">🔒 承認</button>
       </div>
       <div id="input-right">
@@ -1192,10 +1221,11 @@
     return OFFICE_EXTS.has(ext) || (!file.type.startsWith('image/') && !file.type.startsWith('text/') && file.type !== 'application/json');
   }
 
-  async function uploadToWorkspace(file) {
+  async function uploadToWorkspace(file, folder = '') {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch('/workspace/upload', { method: 'POST', body: form });
+    const url = folder ? `/workspace/upload?folder=${encodeURIComponent(folder)}` : '/workspace/upload';
+    const res = await fetch(url, { method: 'POST', body: form });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     return data.path;
@@ -1327,16 +1357,17 @@
 
   // ---- ドラッグアンドドロップでファイル添付 ----
   // ftIsDragging=true の間はエディタ内部D&Dなので添付処理をスキップ
+  const _srcImgModalOpen = () => document.getElementById('srcimg-modal')?.classList.contains('open');
   window.addEventListener('dragover', e => {
-    if (window.ftIsDragging) { e.preventDefault(); return; }
+    if (window.ftIsDragging || _srcImgModalOpen()) { e.preventDefault(); return; }
     e.preventDefault(); e.stopPropagation(); document.body.classList.add('drag-over');
   }, true);
   window.addEventListener('dragleave', e => {
-    if (window.ftIsDragging) return;
+    if (window.ftIsDragging || _srcImgModalOpen()) return;
     e.stopPropagation(); if (e.relatedTarget === null) document.body.classList.remove('drag-over');
   }, true);
   window.addEventListener('drop', async e => {
-    if (window.ftIsDragging) { e.preventDefault(); return; }
+    if (window.ftIsDragging || _srcImgModalOpen()) { e.preventDefault(); return; }
     e.preventDefault();
     e.stopPropagation();
     document.body.classList.remove('drag-over');
@@ -4559,6 +4590,183 @@
     document.getElementById('editor-newtab-close-btn').style.display = '';
     document.addEventListener('DOMContentLoaded', openEditorPanel);
     openEditorPanel();
+  }
+</script>
+
+<!-- 生成元画像モーダル -->
+<div id="srcimg-modal" onclick="if(event.target===this)closeSrcImgModal()">
+  <div id="srcimg-dialog">
+    <h3>🖼 生成元画像を指定</h3>
+    <!-- 新規アップロード -->
+    <div id="srcimg-dropzone"
+      onclick="document.getElementById('srcimg-file-input').click()"
+      ondragover="event.preventDefault();this.classList.add('dragover')"
+      ondragleave="this.classList.remove('dragover')"
+      ondrop="handleSrcImgDrop(event)">
+      <img id="srcimg-drop-preview">
+      <span id="srcimg-drop-hint">新しい画像をドロップ<br><small>またはクリックして選択</small></span>
+      <span id="srcimg-drop-filename"></span>
+    </div>
+    <input id="srcimg-file-input" type="file" accept="image/*" style="display:none" onchange="handleSrcImgSelect(event)">
+    <!-- アップロード済み一覧 -->
+    <div id="srcimg-existing-section" style="display:none">
+      <div id="srcimg-existing-label">📁 アップロード済み（クリックで選択）</div>
+      <div id="srcimg-existing-grid"></div>
+    </div>
+    <div id="srcimg-modal-btns">
+      <button id="srcimg-cancel-btn" onclick="closeSrcImgModal()">キャンセル</button>
+      <button id="srcimg-confirm-btn" disabled onclick="confirmSrcImg()">この画像を使う</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let _srcImgFile = null;       // 新規アップロード予定のFileオブジェクト
+  let _srcImgSelectedPath = null; // 選択中のパス（既存 or 新規アップ後）
+  let _srcImgNote = null;       // チャット欄に挿入中のノート文字列
+
+  async function openSrcImgModal() {
+    _srcImgFile = null;
+    _srcImgSelectedPath = null;
+    // ドロップゾーンをリセット
+    document.getElementById('srcimg-drop-preview').style.display = 'none';
+    document.getElementById('srcimg-drop-preview').src = '';
+    document.getElementById('srcimg-drop-hint').style.display = '';
+    document.getElementById('srcimg-drop-filename').style.display = 'none';
+    document.getElementById('srcimg-drop-filename').textContent = '';
+    document.getElementById('srcimg-dropzone').classList.remove('has-image');
+    document.getElementById('srcimg-confirm-btn').disabled = true;
+    document.getElementById('srcimg-modal').classList.add('open');
+    // 既存画像を非同期で読み込み
+    await _loadExistingImages();
+  }
+
+  function closeSrcImgModal() {
+    document.getElementById('srcimg-modal').classList.remove('open');
+  }
+
+  async function _loadExistingImages() {
+    const grid = document.getElementById('srcimg-existing-grid');
+    const section = document.getElementById('srcimg-existing-section');
+    grid.innerHTML = '';
+    try {
+      const scope = currentWorkspaceScope || '';
+      const res = await fetch(`/workspace/temp-images?scope=${encodeURIComponent(scope)}`);
+      const data = await res.json();
+      if (!data.images || data.images.length === 0) { section.style.display = 'none'; return; }
+      section.style.display = 'flex';
+      data.images.forEach(path => {
+        const thumb = document.createElement('div');
+        thumb.className = 'srcimg-thumb';
+        if (path === _srcImgNote?.match(/image_path="([^"]+)"/)?.[1]) thumb.classList.add('selected');
+        const img = document.createElement('img');
+        img.src = `/workspace/image?path=${encodeURIComponent(path)}`;
+        img.loading = 'lazy';
+        const name = document.createElement('div');
+        name.className = 'srcimg-thumb-name';
+        name.textContent = path.split('/').pop();
+        const del = document.createElement('button');
+        del.className = 'srcimg-thumb-del';
+        del.textContent = '×';
+        del.title = '削除';
+        del.onclick = async (e) => {
+          e.stopPropagation();
+          await fetch(`/workspace/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+          thumb.remove();
+          if (_srcImgSelectedPath === path) {
+            _srcImgSelectedPath = null;
+            document.getElementById('srcimg-confirm-btn').disabled = true;
+          }
+          if (!grid.children.length) section.style.display = 'none';
+        };
+        thumb.appendChild(img);
+        thumb.appendChild(name);
+        thumb.appendChild(del);
+        thumb.onclick = () => _selectExistingImage(path, thumb);
+        grid.appendChild(thumb);
+      });
+    } catch(e) { section.style.display = 'none'; }
+  }
+
+  function _selectExistingImage(path, thumbEl) {
+    // ドロップゾーンの新規選択をクリア
+    _srcImgFile = null;
+    document.getElementById('srcimg-drop-preview').style.display = 'none';
+    document.getElementById('srcimg-drop-hint').style.display = '';
+    document.getElementById('srcimg-drop-filename').style.display = 'none';
+    document.getElementById('srcimg-dropzone').classList.remove('has-image');
+    // サムネイル選択状態を更新
+    document.querySelectorAll('.srcimg-thumb').forEach(t => t.classList.remove('selected'));
+    thumbEl.classList.add('selected');
+    _srcImgSelectedPath = path;
+    document.getElementById('srcimg-confirm-btn').disabled = false;
+  }
+
+  function _setSrcImgFile(file) {
+    _srcImgFile = file;
+    _srcImgSelectedPath = null;
+    // 既存サムネイルの選択を解除
+    document.querySelectorAll('.srcimg-thumb').forEach(t => t.classList.remove('selected'));
+    const reader = new FileReader();
+    reader.onload = e => {
+      const preview = document.getElementById('srcimg-drop-preview');
+      preview.src = e.target.result;
+      preview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+    document.getElementById('srcimg-drop-hint').style.display = 'none';
+    document.getElementById('srcimg-drop-filename').textContent = file.name;
+    document.getElementById('srcimg-drop-filename').style.display = 'block';
+    document.getElementById('srcimg-dropzone').classList.add('has-image');
+    document.getElementById('srcimg-confirm-btn').disabled = false;
+  }
+
+  function handleSrcImgDrop(event) {
+    event.preventDefault();
+    document.getElementById('srcimg-dropzone').classList.remove('dragover');
+    const file = event.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) _setSrcImgFile(file);
+  }
+
+  function handleSrcImgSelect(event) {
+    const file = event.target.files[0];
+    if (file) _setSrcImgFile(file);
+    event.target.value = '';
+  }
+
+  async function confirmSrcImg() {
+    const btn = document.getElementById('srcimg-confirm-btn');
+    btn.disabled = true;
+    let path = _srcImgSelectedPath;
+    try {
+      if (_srcImgFile) {
+        // 新規アップロード
+        btn.textContent = 'アップロード中...';
+        const tempFolder = currentWorkspaceScope ? `${currentWorkspaceScope}/TEMP` : 'TEMP';
+        path = await uploadToWorkspace(_srcImgFile, tempFolder);
+      }
+      if (!path) return;
+      closeSrcImgModal();
+      // ボタンをアクティブ表示
+      const srcBtn = document.getElementById('srcimg-btn');
+      srcBtn.classList.add('active');
+      srcBtn.title = `生成元画像: ${path}`;
+      // チャット入力：前のノートがあれば差し替え、なければ末尾に追加
+      const input = document.getElementById('input');
+      const note = `（元ネタ画像をワークスペースに保存しました。必ず edit_image ツールを使い、image_path="${path}" を指定してください）`;
+      if (_srcImgNote && input.value.includes(_srcImgNote)) {
+        input.value = input.value.replace(_srcImgNote, note);
+      } else {
+        input.value = (input.value ? input.value + '\n' : '') + note;
+      }
+      _srcImgNote = note;
+      input.dispatchEvent(new Event('input'));
+    } catch(e) {
+      alert(`失敗: ${e.message}`);
+    } finally {
+      btn.textContent = 'この画像を使う';
+      btn.disabled = false;
+    }
   }
 </script>
 </body>

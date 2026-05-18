@@ -409,7 +409,7 @@
             <div class="field">
               <label>文字サイズ (<span id="wm-fontsize-val">自動</span>)</label>
               <input id="wm-fontsize" type="range" min="0" max="120" value="0" oninput="document.getElementById('wm-fontsize-val').textContent=this.value==0?'自動':this.value+'px'" style="width:100%;">
-              <span class="hint">0 = 画像の短辺に応じて自動調整</span>
+              <span class="hint">0 = 自動（短辺の4%）／1〜11 も自動扱い／12px 以上で固定サイズ</span>
             </div>
           </div>
         </div>

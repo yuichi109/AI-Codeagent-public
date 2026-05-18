@@ -105,6 +105,79 @@ def generate_image(prompt: str, size: str = None, quality: str = None, _workspac
         return {"error": f"画像生成エラー: {e}"}
 
 
+def watermark_image(
+    image_path: str,
+    text: str,
+    position: str = "bottomright",
+    opacity: float = 0.6,
+    _workspace_scope: str = "",
+) -> dict:
+    """ワークスペース内の画像にテキストウォーターマークを追加します。"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    target = (ALLOWED_WORK_DIR / image_path).resolve()
+    if not str(target).startswith(str(ALLOWED_WORK_DIR)):
+        return {"error": "作業ディレクトリ外のファイルにはアクセスできません"}
+    if not target.exists():
+        return {"error": f"ファイルが見つかりません: {image_path}"}
+    if position not in ("topleft", "topright", "bottomleft", "bottomright", "center"):
+        return {"error": "position は topleft/topright/bottomleft/bottomright/center のいずれか"}
+
+    try:
+        base = Image.open(target).convert("RGBA")
+        w, h = base.size
+
+        # フォントサイズ = 画像短辺の 4%
+        font_size = max(20, int(min(w, h) * 0.04))
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        except OSError:
+            font = ImageFont.load_default()
+
+        # テキストサイズ計測
+        dummy = Image.new("RGBA", (1, 1))
+        draw_dummy = ImageDraw.Draw(dummy)
+        bbox = draw_dummy.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        margin = int(font_size * 0.5)
+        positions = {
+            "topleft":     (margin, margin),
+            "topright":    (w - tw - margin, margin),
+            "bottomleft":  (margin, h - th - margin),
+            "bottomright": (w - tw - margin, h - th - margin),
+            "center":      ((w - tw) // 2, (h - th) // 2),
+        }
+        xy = positions[position]
+
+        # 透過レイヤーに描画
+        alpha = int(255 * max(0.0, min(1.0, opacity)))
+        overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        # 影（可読性向上）
+        draw.text((xy[0] + 2, xy[1] + 2), text, font=font, fill=(0, 0, 0, alpha))
+        draw.text(xy, text, font=font, fill=(255, 255, 255, alpha))
+
+        result_img = Image.alpha_composite(base, overlay).convert("RGB")
+
+        buf = io.BytesIO()
+        result_img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        saved_path = _save_to_workspace(b64, "watermarked", _workspace_scope)
+        return {
+            "image_base64": b64,
+            "mime": "image/png",
+            "source_path": image_path,
+            "text": text,
+            "position": position,
+            "opacity": opacity,
+            "saved_path": saved_path,
+            "message": f"ウォーターマークを追加しました。保存先: {saved_path}",
+        }
+    except Exception as e:
+        return {"error": f"ウォーターマーク処理エラー: {e}"}
+
+
 def edit_image(image_path: str, prompt: str, size: str = None, _workspace_scope: str = "") -> dict:
     """ワークスペース内の画像を編集・清書します（img2img）。OpenAI または Gemini が必要です。"""
     provider = IMAGE_PROVIDER

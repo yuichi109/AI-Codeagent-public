@@ -55,7 +55,7 @@ from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
-from tools.image_tools import generate_image, edit_image, IMAGE_MODELS_BY_PROVIDER
+from tools.image_tools import generate_image, edit_image, watermark_image, IMAGE_MODELS_BY_PROVIDER
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -229,6 +229,7 @@ TOOL_REGISTRY = {
     "rag_list": rag_list,
     "generate_image": generate_image,
     "edit_image": edit_image,
+    "watermark_image": watermark_image,
 }
 
 if RESPONSES_API_ENABLED:
@@ -906,6 +907,23 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "watermark_image",
+            "description": "ワークスペース内の画像にテキストウォーターマーク（透かし）を追加します。生成画像にAI生成表示や著作権表記を入れたい場合に使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string", "description": "ワークスペース内の対象画像ファイルパス"},
+                    "text": {"type": "string", "description": "ウォーターマークとして表示するテキスト（例: 'AI Generated', '© 2025'）"},
+                    "position": {"type": "string", "enum": ["topleft", "topright", "bottomleft", "bottomright", "center"], "description": "表示位置（デフォルト: bottomright）"},
+                    "opacity": {"type": "number", "description": "不透明度 0.0〜1.0（デフォルト: 0.6）"},
+                },
+                "required": ["image_path", "text"],
+            },
+        },
+    },
 ]
 
 if RESPONSES_API_ENABLED:
@@ -1026,7 +1044,7 @@ def execute_tool(name: str, arguments: dict) -> str:
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
     # ツール引数で指定されたタイムアウトがあればそれに合わせて待つ（+10秒のマージン）
-    if name in ("generate_image", "edit_image"):
+    if name in ("generate_image", "edit_image", "watermark_image"):
         _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}
         timeout = 600 if arguments.get("size") in _HIGH_RES else 300
     elif name == "web_research":
@@ -1540,7 +1558,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
         # 画像ツールにワークスペーススコープを注入（保存先をスコープ配下にするため）
-        _IMAGE_TOOLS = {"generate_image", "edit_image"}
+        _IMAGE_TOOLS = {"generate_image", "edit_image", "watermark_image"}
         for _i, (_name, _args, _) in enumerate(parsed_calls):
             if _name in _IMAGE_TOOLS and workspace_scope:
                 _args["_workspace_scope"] = workspace_scope
@@ -1599,8 +1617,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 except Exception:
                     pass
 
-            # generate_image / edit_image: 画像をUIに送信（base64をLLM履歴から除去）
-            if name in ("generate_image", "edit_image"):
+            # generate_image / edit_image / watermark_image: 画像をUIに送信（base64をLLM履歴から除去）
+            if name in ("generate_image", "edit_image", "watermark_image"):
                 try:
                     result_data = json.loads(result)
                     if result_data.get("image_base64"):

@@ -179,3 +179,10 @@ IMAGE_AZURE_API_VERSION: str = os.getenv("IMAGE_AZURE_API_VERSION", "")
 IMAGE_FOUNDRY_ENDPOINT: str    = os.getenv("IMAGE_FOUNDRY_ENDPOINT", "")
 IMAGE_FOUNDRY_API_KEY: str     = os.getenv("IMAGE_FOUNDRY_API_KEY", "")
 IMAGE_FOUNDRY_API_VERSION: str = os.getenv("IMAGE_FOUNDRY_API_VERSION", "")
+# ウォーターマーク設定
+WATERMARK_ENABLED: bool   = os.getenv("WATERMARK_ENABLED", "false").lower() == "true"
+WATERMARK_TEXT: str       = os.getenv("WATERMARK_TEXT", "AI Generated")
+WATERMARK_POSITION: str   = os.getenv("WATERMARK_POSITION", "bottomright")
+WATERMARK_COLOR: str      = os.getenv("WATERMARK_COLOR", "#ffffff")
+WATERMARK_OPACITY: float  = float(os.getenv("WATERMARK_OPACITY", "0.6"))
+WATERMARK_FONT_SIZE: int  = int(os.getenv("WATERMARK_FONT_SIZE", "0"))  # 0 = auto (短辺の4%)

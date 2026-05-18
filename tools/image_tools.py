@@ -12,6 +12,7 @@ from config import (
     IMAGE_AZURE_API_KEY, IMAGE_AZURE_ENDPOINT, IMAGE_AZURE_API_VERSION,
     FOUNDRY_API_KEY, FOUNDRY_ENDPOINT, FOUNDRY_API_VERSION,
     IMAGE_FOUNDRY_API_KEY, IMAGE_FOUNDRY_ENDPOINT, IMAGE_FOUNDRY_API_VERSION,
+    WATERMARK_ENABLED, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE,
 )
 
 # プロバイダー別の代表的な画像生成モデル一覧（setup.html のプルダウン用）
@@ -105,16 +106,75 @@ def generate_image(prompt: str, size: str = None, quality: str = None, _workspac
         return {"error": f"画像生成エラー: {e}"}
 
 
+def _hex_to_rgb(hex_color: str) -> tuple:
+    """#rrggbb を (r, g, b) に変換する。"""
+    h = hex_color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+
+def _apply_watermark_to_b64(b64: str, text: str, position: str, color: str, opacity: float, font_size: int = 0) -> str:
+    """base64 PNG にウォーターマークを重畳して base64 を返す。"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    img_bytes = base64.b64decode(b64)
+    base = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+    w, h = base.size
+
+    font_size = font_size if font_size > 0 else max(20, int(min(w, h) * 0.04))
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+    except OSError:
+        font = ImageFont.load_default()
+
+    dummy = Image.new("RGBA", (1, 1))
+    bbox = ImageDraw.Draw(dummy).textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    margin = int(font_size * 0.5)
+    positions = {
+        "topleft":     (margin, margin),
+        "topright":    (w - tw - margin, margin),
+        "bottomleft":  (margin, h - th - margin),
+        "bottomright": (w - tw - margin, h - th - margin),
+        "center":      ((w - tw) // 2, (h - th) // 2),
+    }
+    xy = positions.get(position, positions["bottomright"])
+
+    alpha = int(255 * max(0.0, min(1.0, opacity)))
+    rgb = _hex_to_rgb(color)
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    # 影（可読性向上）
+    shadow_rgb = (0, 0, 0) if sum(rgb) > 382 else (255, 255, 255)
+    draw.text((xy[0] + 2, xy[1] + 2), text, font=font, fill=(*shadow_rgb, alpha))
+    draw.text(xy, text, font=font, fill=(*rgb, alpha))
+
+    result = Image.alpha_composite(base, overlay).convert("RGB")
+    buf = io.BytesIO()
+    result.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def apply_auto_watermark(b64: str, workspace_scope: str = "") -> tuple[str, str]:
+    """設定に基づき自動ウォーターマークを適用。(b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。"""
+    if not WATERMARK_ENABLED:
+        return b64, ""
+    new_b64 = _apply_watermark_to_b64(b64, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE)
+    return new_b64, ""
+
+
 def watermark_image(
     image_path: str,
     text: str,
     position: str = "bottomright",
+    color: str = "#ffffff",
     opacity: float = 0.6,
+    font_size: int = 0,
     _workspace_scope: str = "",
 ) -> dict:
     """ワークスペース内の画像にテキストウォーターマークを追加します。"""
-    from PIL import Image, ImageDraw, ImageFont
-
     target = (ALLOWED_WORK_DIR / image_path).resolve()
     if not str(target).startswith(str(ALLOWED_WORK_DIR)):
         return {"error": "作業ディレクトリ外のファイルにはアクセスできません"}
@@ -124,45 +184,8 @@ def watermark_image(
         return {"error": "position は topleft/topright/bottomleft/bottomright/center のいずれか"}
 
     try:
-        base = Image.open(target).convert("RGBA")
-        w, h = base.size
-
-        # フォントサイズ = 画像短辺の 4%
-        font_size = max(20, int(min(w, h) * 0.04))
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
-        except OSError:
-            font = ImageFont.load_default()
-
-        # テキストサイズ計測
-        dummy = Image.new("RGBA", (1, 1))
-        draw_dummy = ImageDraw.Draw(dummy)
-        bbox = draw_dummy.textbbox((0, 0), text, font=font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-        margin = int(font_size * 0.5)
-        positions = {
-            "topleft":     (margin, margin),
-            "topright":    (w - tw - margin, margin),
-            "bottomleft":  (margin, h - th - margin),
-            "bottomright": (w - tw - margin, h - th - margin),
-            "center":      ((w - tw) // 2, (h - th) // 2),
-        }
-        xy = positions[position]
-
-        # 透過レイヤーに描画
-        alpha = int(255 * max(0.0, min(1.0, opacity)))
-        overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        # 影（可読性向上）
-        draw.text((xy[0] + 2, xy[1] + 2), text, font=font, fill=(0, 0, 0, alpha))
-        draw.text(xy, text, font=font, fill=(255, 255, 255, alpha))
-
-        result_img = Image.alpha_composite(base, overlay).convert("RGB")
-
-        buf = io.BytesIO()
-        result_img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode()
+        src_b64 = base64.b64encode(target.read_bytes()).decode()
+        b64 = _apply_watermark_to_b64(src_b64, text, position, color, opacity, font_size)
         saved_path = _save_to_workspace(b64, "watermarked", _workspace_scope)
         return {
             "image_base64": b64,
@@ -170,7 +193,9 @@ def watermark_image(
             "source_path": image_path,
             "text": text,
             "position": position,
+            "color": color,
             "opacity": opacity,
+            "font_size": font_size,
             "saved_path": saved_path,
             "message": f"ウォーターマークを追加しました。保存先: {saved_path}",
         }

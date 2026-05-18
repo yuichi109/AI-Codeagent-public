@@ -55,7 +55,7 @@ from tools.windows_tools import run_powershell
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
-from tools.image_tools import generate_image, edit_image, watermark_image, IMAGE_MODELS_BY_PROVIDER
+from tools.image_tools import generate_image, edit_image, watermark_image, apply_auto_watermark, IMAGE_MODELS_BY_PROVIDER
 from pydantic import BaseModel
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
@@ -1622,7 +1622,14 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 try:
                     result_data = json.loads(result)
                     if result_data.get("image_base64"):
-                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'provider': result_data.get('provider', ''), 'model': result_data.get('model', '')})}\n\n"
+                        # generate_image / edit_image の場合は自動ウォーターマークを適用
+                        display_b64 = result_data["image_base64"]
+                        if name in ("generate_image", "edit_image"):
+                            display_b64, _ = apply_auto_watermark(display_b64, workspace_scope)
+                            if display_b64 != result_data["image_base64"]:
+                                result_data["image_base64"] = display_b64
+                                result_data["saved_path"] = _
+                        yield f"data: {json.dumps({'type': 'image_generated', 'image': display_b64, 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'provider': result_data.get('provider', ''), 'model': result_data.get('model', '')})}\n\n"
                         tool_result_for_msg = json.dumps({
                             "message": result_data.get("message", "画像を生成しました"),
                             "prompt": result_data.get("prompt"),
@@ -2913,6 +2920,12 @@ async def setup_current():
             "foundry_endpoint":     raw.get("IMAGE_FOUNDRY_ENDPOINT", ""),
             "foundry_api_key_set":  bool(raw.get("IMAGE_FOUNDRY_API_KEY")),
             "foundry_api_version":  raw.get("IMAGE_FOUNDRY_API_VERSION", ""),
+            "watermark_enabled":   raw.get("WATERMARK_ENABLED", "false"),
+            "watermark_text":      raw.get("WATERMARK_TEXT", "AI Generated"),
+            "watermark_position":  raw.get("WATERMARK_POSITION", "bottomright"),
+            "watermark_color":     raw.get("WATERMARK_COLOR", "#ffffff"),
+            "watermark_opacity":   raw.get("WATERMARK_OPACITY", "0.6"),
+            "watermark_font_size": raw.get("WATERMARK_FONT_SIZE", "0"),
         },
     })
 
@@ -3207,6 +3220,12 @@ async def setup_save(req: SetupSaveRequest):
         f"IMAGE_QUALITY={env_val(ig.get('quality',''), 'IMAGE_QUALITY', 'medium')}",
         f"IMAGE_SIZE={env_val(ig.get('size',''), 'IMAGE_SIZE', '1024x1024')}",
         f"IMAGE_INHERIT={ig_inherit if ig_inherit else 'true'}",
+        f"WATERMARK_ENABLED={ig.get('watermark_enabled', 'false')}",
+        f"WATERMARK_TEXT={ig.get('watermark_text', 'AI Generated')}",
+        f"WATERMARK_POSITION={ig.get('watermark_position', 'bottomright')}",
+        f"WATERMARK_COLOR={ig.get('watermark_color', '#ffffff')}",
+        f"WATERMARK_OPACITY={ig.get('watermark_opacity', '0.6')}",
+        f"WATERMARK_FONT_SIZE={ig.get('watermark_font_size', '0')}",
     ]
     if ig.get("azure_endpoint"):
         lines.append(f"IMAGE_AZURE_ENDPOINT={ig['azure_endpoint']}")

@@ -369,6 +369,51 @@
           <span class="hint">画像生成専用のエンドポイントと API キーを指定します。Japan East は画像生成非対応のため、海外リージョンのエンドポイントを入力してください</span>
         </div>
       </div>
+      <!-- ウォーターマーク設定 -->
+      <div style="border-top:1px solid var(--surface1);margin-top:12px;padding-top:12px;">
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="wm-enabled" onchange="onWatermarkChange()">
+            <span class="toggle-slider"></span>
+          </label>
+          <span style="font-size:13px;">生成画像にウォーターマークを追加</span>
+        </div>
+        <div id="wm-fields" style="display:none;margin-top:8px;">
+          <div class="row">
+            <div class="field">
+              <label>テキスト</label>
+              <input id="wm-text" type="text" placeholder="AI Generated">
+            </div>
+            <div class="field">
+              <label>位置</label>
+              <select id="wm-position">
+                <option value="bottomright">右下</option>
+                <option value="bottomleft">左下</option>
+                <option value="topright">右上</option>
+                <option value="topleft">左上</option>
+                <option value="center">中央</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>文字色</label>
+              <input id="wm-color" type="color" value="#ffffff" style="width:60px;height:32px;padding:2px;cursor:pointer;">
+            </div>
+            <div class="field">
+              <label>不透明度 (<span id="wm-opacity-val">60</span>%)</label>
+              <input id="wm-opacity" type="range" min="10" max="100" value="60" oninput="document.getElementById('wm-opacity-val').textContent=this.value" style="width:100%;">
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>文字サイズ (<span id="wm-fontsize-val">自動</span>)</label>
+              <input id="wm-fontsize" type="range" min="0" max="120" value="0" oninput="document.getElementById('wm-fontsize-val').textContent=this.value==0?'自動':this.value+'px'" style="width:100%;">
+              <span class="hint">0 = 画像の短辺に応じて自動調整</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -673,6 +718,12 @@ function onImageInheritChange() {
   }
 }
 
+// ---- ウォーターマーク有効化トグル ----
+function onWatermarkChange() {
+  const enabled = document.getElementById('wm-enabled').checked;
+  document.getElementById('wm-fields').style.display = enabled ? 'block' : 'none';
+}
+
 // ---- RAG 埋め込みモード切り替え ----
 function onRagModeChange() {
   const mode = document.getElementById('rag-mode').value;
@@ -807,6 +858,18 @@ async function loadConfig() {
       document.getElementById('img-foundry-endpoint').value    = ig.foundry_endpoint    || '';
       document.getElementById('img-foundry-api-version').value = ig.foundry_api_version || '';
       onImageInheritChange();
+      // ウォーターマーク設定の復元
+      document.getElementById('wm-enabled').checked = ig.watermark_enabled === 'true';
+      document.getElementById('wm-text').value     = ig.watermark_text     || 'AI Generated';
+      document.getElementById('wm-position').value = ig.watermark_position || 'bottomright';
+      document.getElementById('wm-color').value    = ig.watermark_color    || '#ffffff';
+      const opacityPct = Math.round(parseFloat(ig.watermark_opacity || '0.6') * 100);
+      document.getElementById('wm-opacity').value  = opacityPct;
+      document.getElementById('wm-opacity-val').textContent = opacityPct;
+      const fs = parseInt(ig.watermark_font_size || '0');
+      document.getElementById('wm-fontsize').value = fs;
+      document.getElementById('wm-fontsize-val').textContent = fs === 0 ? '自動' : fs + 'px';
+      onWatermarkChange();
     }
   } catch(e) {
     document.getElementById('save-status').textContent = '⚠️ 設定の読み込みに失敗しました';
@@ -879,6 +942,12 @@ async function saveConfig() {
       foundry_endpoint:    document.getElementById('img-foundry-endpoint').value,
       foundry_api_key:     document.getElementById('img-foundry-api-key').value,
       foundry_api_version: document.getElementById('img-foundry-api-version').value,
+      watermark_enabled:   document.getElementById('wm-enabled').checked ? 'true' : 'false',
+      watermark_text:      document.getElementById('wm-text').value || 'AI Generated',
+      watermark_position:  document.getElementById('wm-position').value,
+      watermark_color:     document.getElementById('wm-color').value,
+      watermark_opacity:   (parseInt(document.getElementById('wm-opacity').value) / 100).toFixed(2),
+      watermark_font_size: document.getElementById('wm-fontsize').value,
     },
   };
 

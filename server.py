@@ -1604,7 +1604,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 try:
                     result_data = json.loads(result)
                     if result_data.get("image_base64"):
-                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'model': result_data.get('model', '')})}\n\n"
+                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': result_data.get('prompt', ''), 'provider': result_data.get('provider', ''), 'model': result_data.get('model', '')})}\n\n"
                         tool_result_for_msg = json.dumps({
                             "message": result_data.get("message", "画像を生成しました"),
                             "prompt": result_data.get("prompt"),
@@ -2140,7 +2140,8 @@ async def workspace_image_serve(path: str):
         if not resolved.exists() or not resolved.is_file():
             return JSONResponse({"error": "File not found"}, status_code=404)
         mt = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
-        return FileResponse(str(resolved), media_type=mt)
+        headers = {"Content-Disposition": f'inline; filename="{resolved.name}"'}
+        return FileResponse(str(resolved), media_type=mt, headers=headers)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 

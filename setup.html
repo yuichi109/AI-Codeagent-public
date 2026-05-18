@@ -290,6 +290,7 @@
             <option value="gpt-image-2">gpt-image-2</option>
             <option value="gpt-image-1">gpt-image-1</option>
           </select>
+          <input type="text" id="img-model-text" style="display:none" placeholder="例: gpt-image-2">
         </div>
       </div>
       <div class="row">
@@ -617,18 +618,43 @@ function onRagEnabledChange() {
 const _IMAGE_MODELS = {
   openai:  ['gpt-image-2', 'gpt-image-1'],
   gemini:  ['gemini-2.5-flash-image'],
-  azure:   ['gpt-image-1', 'dall-e-3'],
-  foundry: ['gpt-image-1'],
 };
+const _IMAGE_MODEL_TEXT_PROVIDERS = new Set(['azure', 'foundry']);
+
+function getImgModel() {
+  const provider = document.getElementById('img-provider').value;
+  if (_IMAGE_MODEL_TEXT_PROVIDERS.has(provider)) {
+    return document.getElementById('img-model-text').value.trim();
+  }
+  return document.getElementById('img-model').value;
+}
+function setImgModel(val) {
+  const provider = document.getElementById('img-provider').value;
+  if (_IMAGE_MODEL_TEXT_PROVIDERS.has(provider)) {
+    document.getElementById('img-model-text').value = val || '';
+  } else {
+    const sel = document.getElementById('img-model');
+    if (val && ![...sel.options].some(o => o.value === val)) {
+      sel.insertAdjacentHTML('afterbegin', `<option value="${val}">${val}</option>`);
+    }
+    sel.value = val || sel.options[0]?.value || '';
+  }
+}
 function onImageProviderChange() {
   const provider = document.getElementById('img-provider').value;
-  const models = _IMAGE_MODELS[provider] || [];
+  const useText = _IMAGE_MODEL_TEXT_PROVIDERS.has(provider);
   const sel = document.getElementById('img-model');
-  const current = sel.value;
-  sel.innerHTML = models.map(m =>
-    `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
-  ).join('');
-  if (!sel.value && models.length) sel.value = models[0];
+  const txt = document.getElementById('img-model-text');
+  sel.style.display = useText ? 'none' : '';
+  txt.style.display = useText ? '' : 'none';
+  if (!useText) {
+    const models = _IMAGE_MODELS[provider] || [];
+    const current = sel.value;
+    sel.innerHTML = models.map(m =>
+      `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
+    ).join('');
+    if (!sel.value && models.length) sel.value = models[0];
+  }
   onImageInheritChange();
 }
 function onImageInheritChange() {
@@ -761,7 +787,7 @@ async function loadConfig() {
       const ig = d.image_gen;
       document.getElementById('img-provider').value = ig.provider || 'openai';
       onImageProviderChange();
-      document.getElementById('img-model').value   = ig.model || 'gpt-image-2';
+      setImgModel(ig.model || 'gpt-image-2');
       document.getElementById('img-quality').value = ig.quality || 'medium';
       document.getElementById('img-size').value    = ig.size || '1024x1024';
       document.getElementById('img-inherit').checked = (ig.inherit !== 'false');
@@ -841,7 +867,7 @@ async function saveConfig() {
     },
     image_gen: {
       provider:          document.getElementById('img-provider').value,
-      model:             document.getElementById('img-model').value,
+      model:             getImgModel(),
       quality:           document.getElementById('img-quality').value,
       size:              document.getElementById('img-size').value,
       inherit:           document.getElementById('img-inherit').checked ? 'true' : 'false',

@@ -1911,9 +1911,13 @@
     dl.download = savedPath.split('/').pop() || 'image.png';
     dl.style.cssText = 'font-size: 11px; color: #89b4fa; margin-top: 4px; display: inline-block;';
     dl.textContent = '⬇ ダウンロード';
+    const badge = document.createElement('span');
+    badge.style.cssText = 'font-size: 10px; color: #6c7086; background: #313244; border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: middle;';
+    badge.textContent = [toolData.provider, toolData.model].filter(Boolean).join(' / ');
     imgWrap.appendChild(label);
     imgWrap.appendChild(img);
     imgWrap.appendChild(dl);
+    if (badge.textContent) imgWrap.appendChild(badge);
     parent.appendChild(imgWrap);
   }
 
@@ -3094,9 +3098,13 @@
             dl.download = `generated_${Date.now()}.png`;
             dl.style.cssText = 'font-size: 11px; color: var(--blue); margin-top: 4px; display: inline-block;';
             dl.textContent = '⬇ ダウンロード';
+            const badge = document.createElement('span');
+            badge.style.cssText = 'font-size: 10px; color: var(--subtext0); background: var(--surface1); border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: middle;';
+            badge.textContent = [data.provider, data.model].filter(Boolean).join(' / ');
             imgWrap.appendChild(label);
             imgWrap.appendChild(img);
             imgWrap.appendChild(dl);
+            if (badge.textContent) imgWrap.appendChild(badge);
             if (currentToolGroupInnerEl) {
               currentToolGroupInnerEl.appendChild(imgWrap);
             } else {
@@ -4482,7 +4490,13 @@
 
   const langMap = { py:'python', js:'javascript', ts:'typescript', json:'json', yaml:'yaml', yml:'yaml', sh:'shell', md:'markdown', html:'html', css:'css', xml:'xml', toml:'ini', ini:'ini' };
 
+  const _IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','bmp','svg','ico']);
   async function editorOpen(path, el) {
+    const ext = path.split('.').pop().toLowerCase();
+    if (_IMAGE_EXTS.has(ext)) {
+      window.open('/workspace/image?path=' + encodeURIComponent(path), '_blank');
+      return;
+    }
     const existing = editorTabs.findIndex(t => t.path === path);
     if (existing >= 0) { switchTab(existing); return; }
     const res = await fetch('/workspace/file?path=' + encodeURIComponent(path));

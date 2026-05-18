@@ -38,12 +38,15 @@ def _make_client(provider: str):
         key      = AZURE_OPENAI_API_KEY     if IMAGE_INHERIT else (IMAGE_AZURE_API_KEY     or AZURE_OPENAI_API_KEY)
         endpoint = AZURE_OPENAI_ENDPOINT    if IMAGE_INHERIT else (IMAGE_AZURE_ENDPOINT    or AZURE_OPENAI_ENDPOINT)
         version  = AZURE_OPENAI_API_VERSION if IMAGE_INHERIT else (IMAGE_AZURE_API_VERSION or AZURE_OPENAI_API_VERSION or "2024-02-01")
-        return AzureOpenAI(api_key=key, azure_endpoint=endpoint, api_version=version)
+        # 引き継ぎOFF（専用エンドポイント）はGlobal Standard形式でBearer認証が必要
+        if IMAGE_INHERIT:
+            return AzureOpenAI(api_key=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
+        return AzureOpenAI(azure_ad_token=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
     elif provider == "foundry":
         key      = FOUNDRY_API_KEY     if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_KEY     or FOUNDRY_API_KEY)
         endpoint = FOUNDRY_ENDPOINT    if IMAGE_INHERIT else (IMAGE_FOUNDRY_ENDPOINT    or FOUNDRY_ENDPOINT)
         version  = FOUNDRY_API_VERSION if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_VERSION or FOUNDRY_API_VERSION or "2024-12-01-preview")
-        return AzureOpenAI(api_key=key, azure_endpoint=endpoint, api_version=version)
+        return AzureOpenAI(azure_ad_token=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
     else:
         raise ValueError(f"未対応のプロバイダー: {provider}")
 
@@ -107,8 +110,8 @@ def edit_image(image_path: str, prompt: str, size: str = None, _workspace_scope:
     provider = IMAGE_PROVIDER
     model = IMAGE_MODEL
 
-    if provider not in ("openai", "gemini"):
-        return {"error": f"img2img は OpenAI / Gemini のみ対応しています（現在: {provider}）"}
+    if provider not in ("openai", "gemini", "azure", "foundry"):
+        return {"error": f"img2img は未対応のプロバイダーです（現在: {provider}）"}
 
     target = (ALLOWED_WORK_DIR / image_path).resolve()
     if not str(target).startswith(str(ALLOWED_WORK_DIR)):

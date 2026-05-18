@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-05-18（追記2）
+
+### ウォーターマーク機能・生成元画像UI（Issue #52）
+
+コミット: 6f1c66b / a3c350e（main・for_windows push 済み）
+
+**変更ファイル:** tools/image_tools.py / server.py / config.py / setup.html / index.html
+
+#### ウォーターマーク機能
+- **`watermark_image` ツール追加**（`tools/image_tools.py`）: 画像にテキスト透かしを重畳。パラメータ: `image_path` / `text` / `position`（topleft/topright/bottomleft/bottomright/center）/ `color`（#rrggbb）/ `opacity`（0.0〜1.0）/ `font_size`（0=自動）。白文字＋黒影で視認性確保。保存先: `AI_Output_Images/watermarked_*.png`
+- **自動ウォーターマーク適用**: `generate_image` / `edit_image` の結果に自動適用する `apply_auto_watermark()` を追加。`WATERMARK_ENABLED=true` のとき画像生成後に自動で焼き込む
+- **`config.py` に `WATERMARK_*` 変数追加**: `WATERMARK_ENABLED` / `WATERMARK_TEXT` / `WATERMARK_POSITION` / `WATERMARK_COLOR` / `WATERMARK_OPACITY` / `WATERMARK_FONT_SIZE`（0=自動）
+- **セットアップ画面に設定UI追加**（画像生成セクション末尾）: ON/OFFトグル・テキスト・位置・文字色（カラーピッカー）・不透明度スライダー・文字サイズスライダー（0=自動）
+
+#### 生成元画像UI（`index.html`）
+- **「🖼 生成元画像」ボタン**を入力欄左下に追加
+- **専用モーダル**でD&Dまたはクリック選択。モーダルが開いている間はウィンドウレベルのdrop/dragoverを無効化（通常の添付処理と混在しない）
+- **アップロード済みサムネイル一覧**（TEMP内の画像を新しい順に表示）。クリックで即選択・切り替え可能
+- **保存先**: スコープ選択中は `workspace/{scope}/TEMP/`、未選択は `workspace/TEMP/`
+- **`/workspace/upload`** に `folder` クエリパラメータを追加（既存の添付アップロードに影響なし）
+- **`/workspace/temp-images`** エンドポイント追加: スコープ配下のTEMPフォルダ内画像一覧をJSON返却
+- 確定時、チャット欄に `edit_image` 使用を明示するノートを挿入。再選択時は差し替え
+
+#### GitLab
+- **#52** ウォーターマーク機能 → **クローズ済み**
+
+---
+
 ## 2026-05-18（追記）
 
 ### 画像生成プロバイダー改善（コミット: 7db17a3）

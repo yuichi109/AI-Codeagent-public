@@ -29,31 +29,21 @@ def _filter_tools(all_tools: list[dict], allowed_names: list[str]) -> list[dict]
     return [t for t in all_tools if t["function"]["name"] in allowed_names]
 
 
-def _resolve_model(role: str, preset: str) -> str:
-    """プリセットと役割からモデル名を解決する"""
-    tier = config.MULTI_AGENT_PRESETS.get(preset, config.MULTI_AGENT_PRESETS["balance"]).get(role, "mid")
-    return {
-        "high": config.MULTI_AGENT_MODEL_HIGH,
-        "mid":  config.MULTI_AGENT_MODEL_MID,
-        "low":  config.MULTI_AGENT_MODEL_LOW,
-    }.get(tier, config.MULTI_AGENT_MODEL_MID)
-
-
 async def dispatch_task(
     user_message: str,
     async_client,
-    preset: str,
+    model: str,
     job_dir: Path,
 ) -> dict:
     """
     ディスパッチャーLLMを呼んでJSONタスク計画を生成する。
     task.md に保存して返す。
+    各タスクに preset_id / model を含めることでディスパッチャーがプロバイダーを上書きできる。
     """
     from prompts import get_agent_system_prompt
-    dispatcher_model = _resolve_model("dispatcher", preset)
 
     response = await async_client.chat.completions.create(
-        model=dispatcher_model,
+        model=model,
         messages=[
             {"role": "system", "content": get_agent_system_prompt("dispatcher", str(job_dir))},
             {"role": "user",   "content": user_message},

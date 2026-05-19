@@ -1354,7 +1354,7 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
 
 async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
     """マルチエージェントモード: ディスパッチャー → 各エージェント逐次実行 → 最終レポート"""
-    from tools.multi_agent_tools import dispatch_task, run_sub_agent, generate_final_report, new_job_id, _resolve_model
+    from tools.multi_agent_tools import dispatch_task, run_sub_agent, generate_final_report, new_job_id
     from prompts import get_agent_system_prompt, AGENT_ROLE_LABELS
 
     def _sse(text: str) -> str:
@@ -1364,13 +1364,19 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
     job_dir = config.ALLOWED_WORK_DIR / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
+    # 役割別プロバイダー設定を読み込む
+    ma_cfg = _load_ma_config()
+
     try:
         yield _sse(f"🤖 **マルチエージェントモード開始** (job: `{job_id}`)\n\n")
 
-        # 1. タスク分解
+        # 1. タスク分解（ディスパッチャー）
         yield _sse("📋 タスク分解中...\n")
-        client = _make_async_client()
-        plan = await dispatch_task(user_message, client, agent_mode, job_dir)
+        d_cfg = ma_cfg.get("dispatcher", {})
+        d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
+        d_model  = d_cfg.get("model", _provider_config["model"])
+        d_client = _make_async_client_for(d_preset)
+        plan = await dispatch_task(user_message, d_client, d_model, job_dir)
 
         roles = plan.get("roles", [])
         tasks = plan.get("tasks", {})
@@ -1382,9 +1388,14 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
             task = tasks.get(role, {})
             task_prompt = task.get("prompt", user_message)
             label = AGENT_ROLE_LABELS.get(role, role)
-            model = _resolve_model(role, agent_mode)
 
-            yield _sse(f"🎯 **[{label}]** 開始... (model: `{model}`)\n")
+            # タスクにモデル指定があればそれを優先、なければ設定ファイルの値を使用
+            role_cfg   = ma_cfg.get(role, d_cfg)
+            preset_id  = task.get("preset_id") or role_cfg.get("preset_id", d_preset)
+            model      = task.get("model")     or role_cfg.get("model", d_model)
+            sub_client = _make_async_client_for(preset_id)
+
+            yield _sse(f"🎯 **[{label}]** 開始... (`{preset_id}` / `{model}`)\n")
 
             system_prompt = get_agent_system_prompt(role, str(job_dir))
 
@@ -1395,7 +1406,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
                     task_prompt=task_prompt,
                     all_tools=TOOLS,
                     execute_tool_fn=execute_tool_async,
-                    async_client=client,
+                    async_client=sub_client,
                     model=model,
                     job_dir=job_dir,
                 )
@@ -1404,10 +1415,9 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
                 yield _sse(f"  → エラー ⚠️ `{type(e).__name__}: {e}`\n\n")
                 print(f"[multi_agent] {role} エラー: {e}")
 
-        # 3. 最終レポート生成
+        # 3. 最終レポート生成（ディスパッチャーと同じプロバイダー）
         yield _sse("📄 最終報告書を生成中...\n\n")
-        report_model = _resolve_model("dispatcher", agent_mode)
-        report = await generate_final_report(client, report_model, job_dir)
+        report = await generate_final_report(d_client, d_model, job_dir)
 
         yield _sse(f"---\n\n{report}\n\n")
         yield _sse(f"\n📁 成果物: `workspace/jobs/{job_id}/`\n")
@@ -2096,6 +2106,94 @@ async def providers_config(req: ProviderConfigRequest):
         "model": _provider_config["model"],
         "tools_enabled": _provider_config.get("tools_enabled", True),
     }})
+
+
+# ============================================================
+# マルチエージェント: プロバイダー横断設定
+# ============================================================
+
+_MA_CONFIG_FILE = Path(__file__).parent / ".multi_agent_config.json"
+
+_MA_ROLE_DEFAULTS = ["dispatcher", "design", "coding", "debug", "security", "docs", "research", "infra"]
+
+
+def _load_ma_config() -> dict:
+    if _MA_CONFIG_FILE.exists():
+        try:
+            return json.loads(_MA_CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    # デフォルト: 現在のアクティブプロバイダーを全役割に適用
+    default = {"preset_id": _provider_config.get("preset_id", _provider_config["type"]), "model": _provider_config["model"]}
+    return {role: dict(default) for role in _MA_ROLE_DEFAULTS}
+
+
+def _save_ma_config(cfg: dict):
+    try:
+        _MA_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[ma_config] save failed: {e}")
+
+
+def _make_async_client_for(preset_id: str):
+    """任意のプロバイダーID から非同期クライアントを生成する"""
+    if preset_id == "azure":
+        return AsyncAzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    if preset_id.startswith("foundry"):
+        inst = next((i for i in FOUNDRY_INSTANCES if i["id"] == preset_id), None)
+        if not inst and FOUNDRY_INSTANCES:
+            inst = FOUNDRY_INSTANCES[0]
+        if inst:
+            return AsyncAzureOpenAI(
+                azure_endpoint=inst["endpoint"],
+                api_key=inst["api_key"],
+                api_version=inst["api_version"],
+                http_client=httpx.AsyncClient(trust_env=False),
+            )
+    if preset_id == "gemini":
+        return AsyncOpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=GEMINI_API_KEY,
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    if preset_id == "openai":
+        return AsyncOpenAI(
+            api_key=OPENAI_API_KEY,
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    # フォールバック: 現在のアクティブプロバイダー
+    return _make_async_client()
+
+
+@app.get("/multi-agent/providers")
+async def ma_providers():
+    """マルチエージェント設定UI用: 登録済みプロバイダーとモデル一覧を返す"""
+    providers = []
+    if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY:
+        providers.append({"preset_id": "azure", "name": "Azure OpenAI", "models": list(AZURE_OPENAI_DEPLOYMENTS)})
+    for inst in FOUNDRY_INSTANCES:
+        providers.append({"preset_id": inst["id"], "name": inst["name"], "models": list(inst["models"])})
+    if GEMINI_API_KEY:
+        providers.append({"preset_id": "gemini", "name": "Google Gemini", "models": list(GEMINI_MODELS or _GEMINI_DEFAULT_MODELS)})
+    if OPENAI_API_KEY:
+        providers.append({"preset_id": "openai", "name": "OpenAI", "models": list(OPENAI_MODELS or _OPENAI_DEFAULT_MODELS)})
+    return JSONResponse({"providers": providers})
+
+
+@app.get("/multi-agent/config")
+async def ma_config_get():
+    return JSONResponse(_load_ma_config())
+
+
+@app.post("/multi-agent/config")
+async def ma_config_save(body: dict):
+    _save_ma_config(body)
+    return JSONResponse({"ok": True})
 
 
 class CleanupRequest(BaseModel):

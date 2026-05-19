@@ -458,6 +458,31 @@
     </div>
   </div>
 
+  <!-- マルチエージェント設定 -->
+  <div class="section collapsed" id="sec-multi-agent">
+    <div class="section-header" onclick="toggleSection('sec-multi-agent')">
+      🤖 マルチエージェント設定 <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <p class="hint" style="margin-bottom:12px">役割ごとに使用するプロバイダーとモデルを設定します。未設定の場合は現在のアクティブプロバイダーが使われます。ディスパッチャーがタスクに応じてモデルを変更することもあります。</p>
+      <table id="ma-role-table" style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="color:#6c7086;font-size:12px;text-align:left">
+            <th style="padding:4px 8px;width:140px">役割</th>
+            <th style="padding:4px 8px">プロバイダー</th>
+            <th style="padding:4px 8px">モデル</th>
+          </tr>
+        </thead>
+        <tbody id="ma-role-rows"></tbody>
+      </table>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button onclick="saveMaConfig()" style="padding:6px 16px;background:#cba6f7;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold">💾 役割設定を保存</button>
+        <span id="ma-save-status" style="font-size:12px;color:#a6e3a1"></span>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div class="save-bar">
@@ -1088,6 +1113,121 @@ async function clearAnsibleCreds() {
 
 loadConfig();
 loadAnsibleCreds();
+
+// ---- マルチエージェント役割設定 ----
+const MA_ROLE_LABELS = {
+  dispatcher: 'ディスパッチャー',
+  design:     '設計',
+  coding:     'コーディング',
+  debug:      'デバッグ/テスト',
+  security:   'セキュリティ',
+  docs:       'ドキュメント',
+  research:   'リサーチ',
+  infra:      'インフラ',
+};
+const MA_ROLES = Object.keys(MA_ROLE_LABELS);
+
+let _maProviders = [];   // [{preset_id, name, models:[]}]
+let _maConfig    = {};   // {role: {preset_id, model}}
+
+async function loadMaConfig() {
+  try {
+    const [pRes, cRes] = await Promise.all([
+      fetch('/multi-agent/providers').then(r => r.json()),
+      fetch('/multi-agent/config').then(r => r.json()),
+    ]);
+    _maProviders = pRes.providers || [];
+    _maConfig    = cRes || {};
+    renderMaTable();
+  } catch(e) {
+    console.warn('MA config load failed:', e);
+  }
+}
+
+function renderMaTable() {
+  const tbody = document.getElementById('ma-role-rows');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  MA_ROLES.forEach(role => {
+    const cfg       = _maConfig[role] || {};
+    const curPreset = cfg.preset_id || '';
+    const curModel  = cfg.model     || '';
+
+    const provOpts = _maProviders.map(p =>
+      `<option value="${p.preset_id}" ${p.preset_id === curPreset ? 'selected' : ''}>${p.name}</option>`
+    ).join('');
+
+    const provSel = _maProviders.find(p => p.preset_id === curPreset) || _maProviders[0];
+    const modelOpts = provSel
+      ? provSel.models.map(m => `<option value="${m}" ${m === curModel ? 'selected' : ''}>${m}</option>`).join('')
+      : `<option value="${curModel}">${curModel || '（プロバイダーを選択）'}</option>`;
+
+    const tr = document.createElement('tr');
+    tr.style.cssText = 'border-top:1px solid #313244';
+    tr.innerHTML = `
+      <td style="padding:6px 8px;font-size:13px;color:#cdd6f4">${MA_ROLE_LABELS[role]}</td>
+      <td style="padding:6px 8px">
+        <select data-role="${role}" data-type="provider"
+          style="width:100%;padding:4px 6px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:12px"
+          onchange="onMaProviderChange(this)">
+          ${_maProviders.length ? provOpts : `<option value="">（プロバイダー未設定）</option>`}
+        </select>
+      </td>
+      <td style="padding:6px 8px">
+        <select data-role="${role}" data-type="model"
+          style="width:100%;padding:4px 6px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:12px">
+          ${modelOpts}
+        </select>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function onMaProviderChange(sel) {
+  const role     = sel.dataset.role;
+  const presetId = sel.value;
+  const prov     = _maProviders.find(p => p.preset_id === presetId);
+  const tr       = sel.closest('tr');
+  const modelSel = tr.querySelector('[data-type="model"]');
+  if (!modelSel) return;
+  const curModel = (_maConfig[role] || {}).model || '';
+  modelSel.innerHTML = (prov ? prov.models : []).map(m =>
+    `<option value="${m}" ${m === curModel ? 'selected' : ''}>${m}</option>`
+  ).join('') || `<option value="">（モデルなし）</option>`;
+}
+
+async function saveMaConfig() {
+  const cfg = {};
+  MA_ROLES.forEach(role => {
+    const provSel  = document.querySelector(`[data-role="${role}"][data-type="provider"]`);
+    const modelSel = document.querySelector(`[data-role="${role}"][data-type="model"]`);
+    if (provSel && modelSel && provSel.value) {
+      cfg[role] = { preset_id: provSel.value, model: modelSel.value };
+    }
+  });
+  const status = document.getElementById('ma-save-status');
+  status.textContent = '保存中...';
+  try {
+    const r = await fetch('/multi-agent/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      _maConfig = cfg;
+      status.textContent = '✓ 保存しました';
+      setTimeout(() => status.textContent = '', 3000);
+    } else {
+      throw new Error(data.error || '不明なエラー');
+    }
+  } catch(e) {
+    status.textContent = '⚠️ ' + e.message;
+    status.style.color = '#f38ba8';
+  }
+}
+
+loadMaConfig();
 </script>
 </body>
 </html>

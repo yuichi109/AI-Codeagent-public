@@ -329,7 +329,44 @@ workspace/
 - テスト・デバッグ実行前に保存済みスナップショットから復元
 - テスト・デバッグ完了後に自動ロールバック
 - 常にフレッシュな状態を保証
-- vSphere：`community.vmware` コレクションで既存プレイブックを活用
+
+#### vSphere のスナップショット（シンプル）
+
+vSphere はスナップショット取得・リバートがネイティブ機能として組み込まれているため、`community.vmware` モジュールから数行で完結する。
+
+```yaml
+# リバート（テスト前）
+- community.vmware.vmware_guest_snapshot:
+    name: "{{ vm_name }}"
+    snapshot_name: "clean-state"
+    state: revert
+
+# 取得（初回のみ）
+- community.vmware.vmware_guest_snapshot:
+    name: "{{ vm_name }}"
+    snapshot_name: "clean-state"
+    state: present
+```
+
+#### Azure のスナップショット（要工夫）
+
+Azure はVM単位のスナップショットリバートがネイティブにないため、以下のフローで実現する。  
+実装は `spec2325705/bk-yuichi.matsuo` リポジトリの `3Ti-NC-Role-FIX/rsrenew-snap_to_vm.yml` を改変して使用する。
+
+```
+【初回のみ】
+  SYSPREP済みVMのOSディスクからスナップショット取得・保存
+
+【テストのたびに】
+  VM停止（deallocate）
+  → VM削除（NIC・NSG・IPは維持）
+  → 古いOSディスク削除
+  → スナップショットから新しいOSディスク作成
+  → 既存NIC・NSGを使って同名VMを再デプロイ
+```
+
+既存コードから不要な部分（NSG/NIC作成・毎回スナップショット作成）を削ることでシンプルになる。  
+`vm_from_disk_template.json`（ARMテンプレート）はOS問わず流用可能。
 
 ユーザーがやることは要件を言うだけ。設計・実装・環境構築・テストが全自動で完結する。
 

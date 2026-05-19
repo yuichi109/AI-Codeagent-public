@@ -1224,6 +1224,8 @@ class ChatRequest(BaseModel):
     bypass_approval: bool = False
     no_think: bool = False
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
+    multi_agent: bool = False
+    agent_mode: str = "balance"  # "quality" | "balance" | "economy"
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
@@ -1348,6 +1350,74 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
         yield f"data: {json.dumps({'type': 'answer_chunk', 'content': f'エラー: {type(e).__name__}: {e}'})}\n\n"
         yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
         print(err)  # uvicornログに出力
+
+
+async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
+    """マルチエージェントモード: ディスパッチャー → 各エージェント逐次実行 → 最終レポート"""
+    from tools.multi_agent_tools import dispatch_task, run_sub_agent, generate_final_report, new_job_id, _resolve_model
+    from prompts import get_agent_system_prompt, AGENT_ROLE_LABELS
+
+    def _sse(text: str) -> str:
+        return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
+
+    job_id = new_job_id()
+    job_dir = config.ALLOWED_WORK_DIR / "jobs" / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        yield _sse(f"🤖 **マルチエージェントモード開始** (job: `{job_id}`)\n\n")
+
+        # 1. タスク分解
+        yield _sse("📋 タスク分解中...\n")
+        client = _make_async_client()
+        plan = await dispatch_task(user_message, client, agent_mode, job_dir)
+
+        roles = plan.get("roles", [])
+        tasks = plan.get("tasks", {})
+        roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in roles)
+        yield _sse(f"  → 役割: {roles_str}\n\n")
+
+        # 2. 各エージェントを逐次実行
+        for role in roles:
+            task = tasks.get(role, {})
+            task_prompt = task.get("prompt", user_message)
+            label = AGENT_ROLE_LABELS.get(role, role)
+            model = _resolve_model(role, agent_mode)
+
+            yield _sse(f"🎯 **[{label}]** 開始... (model: `{model}`)\n")
+
+            system_prompt = get_agent_system_prompt(role, str(job_dir))
+
+            try:
+                await run_sub_agent(
+                    role=role,
+                    system_prompt=system_prompt,
+                    task_prompt=task_prompt,
+                    all_tools=TOOLS,
+                    execute_tool_fn=execute_tool_async,
+                    async_client=client,
+                    model=model,
+                    job_dir=job_dir,
+                )
+                yield _sse(f"  → 完了 ✅\n\n")
+            except Exception as e:
+                yield _sse(f"  → エラー ⚠️ `{type(e).__name__}: {e}`\n\n")
+                print(f"[multi_agent] {role} エラー: {e}")
+
+        # 3. 最終レポート生成
+        yield _sse("📄 最終報告書を生成中...\n\n")
+        report_model = _resolve_model("dispatcher", agent_mode)
+        report = await generate_final_report(client, report_model, job_dir)
+
+        yield _sse(f"---\n\n{report}\n\n")
+        yield _sse(f"\n📁 成果物: `workspace/jobs/{job_id}/`\n")
+
+    except Exception as e:
+        import traceback
+        yield _sse(f"❌ マルチエージェントエラー: `{type(e).__name__}: {e}`")
+        print(traceback.format_exc())
+
+    yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
 
 
 def _convert_messages_for_local(messages: list) -> list:
@@ -1703,10 +1773,11 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    return StreamingResponse(
-        agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope),
-        media_type="text/event-stream",
-    )
+    if req.multi_agent:
+        stream = multi_agent_stream(req.message, req.agent_mode)
+    else:
+        stream = agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope)
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 
 @app.get("/skills")

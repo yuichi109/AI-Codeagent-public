@@ -189,3 +189,32 @@ WATERMARK_POSITION: str   = os.getenv("WATERMARK_POSITION", "bottomright")
 WATERMARK_COLOR: str      = os.getenv("WATERMARK_COLOR", "#ffffff")
 WATERMARK_OPACITY: float  = float(os.getenv("WATERMARK_OPACITY", "0.6"))
 WATERMARK_FONT_SIZE: int  = int(os.getenv("WATERMARK_FONT_SIZE", "0"))  # 0 = auto (短辺の4%)
+
+# ---- マルチエージェント設定 ----
+# モデル名は現在アクティブなプロバイダーで利用できるものを指定
+MULTI_AGENT_MODEL_HIGH: str = os.getenv("MULTI_AGENT_MODEL_HIGH", "gpt-5.4")
+MULTI_AGENT_MODEL_MID: str  = os.getenv("MULTI_AGENT_MODEL_MID",  "gpt-5.4-mini")
+MULTI_AGENT_MODEL_LOW: str  = os.getenv("MULTI_AGENT_MODEL_LOW",  "gpt-5.4-nano")
+
+# プリセット: 役割 → "high" | "mid" | "low" のマッピング
+MULTI_AGENT_PRESETS: dict = {
+    "quality": {
+        "dispatcher": "high", "design": "high", "coding": "high",
+        "debug": "high", "security": "high", "docs": "high",
+        "research": "mid", "infra": "high",
+    },
+    "balance": {
+        "dispatcher": "high", "design": "high", "coding": "mid",
+        "debug": "high", "security": "high", "docs": "mid",
+        "research": "mid", "infra": "high",
+    },
+    "economy": {
+        "dispatcher": "mid", "design": "mid", "coding": "low",
+        "debug": "mid", "security": "mid", "docs": "mid",
+        "research": "low", "infra": "mid",
+    },
+}
+
+MULTI_AGENT_MAX_ITERATIONS: int = int(os.getenv("MULTI_AGENT_MAX_ITERATIONS", "20"))
+MULTI_AGENT_TIMEOUT_SEC: int    = int(os.getenv("MULTI_AGENT_TIMEOUT_SEC", "300"))
+MULTI_AGENT_MAX_RETRIES: int    = int(os.getenv("MULTI_AGENT_MAX_RETRIES", "2"))

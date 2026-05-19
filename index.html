@@ -106,6 +106,12 @@
   #bypass-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 14px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #bypass-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #bypass-btn.active { color: #a6e3a1; border-color: #a6e3a1; font-weight: bold; }
+  #ma-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px 0 0 6px; cursor: pointer; font-size: 14px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
+  #ma-btn:hover { color: #cdd6f4; border-color: #6c7086; }
+  #ma-btn.active { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
+  #ma-mode { padding: 3px 6px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-left: none; border-radius: 0 6px 6px 0; cursor: pointer; font-size: 12px; appearance: none; -webkit-appearance: none; }
+  #ma-mode:focus { outline: none; }
+  #ma-btn.active + #ma-mode { color: #cba6f7; border-color: #cba6f7; }
   #srcimg-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #srcimg-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #srcimg-btn.active { color: #89b4fa; border-color: #89b4fa; font-weight: bold; }
@@ -819,6 +825,7 @@
         </div>
         <button id="srcimg-btn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定">🖼 生成元画像</button><button id="srcimg-clear-btn" onclick="clearSrcImg()" title="生成元画像の参照を解除" style="display:none">×</button>
         <button id="bypass-btn" onclick="toggleBypass()" title="承認バイパス: ONにすると確認なしで即実行">🔒 承認</button>
+        <button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行">🤖 マルチAI</button><select id="ma-mode" title="品質/コストのバランス設定"><option value="balance">バランス</option><option value="quality">品質優先</option><option value="economy">コスト優先</option></select>
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
@@ -1014,6 +1021,43 @@
   // 初期化
   updateBypassBtn();
   loadNoThink();
+
+  // ---- マルチエージェントトグル ----
+  function isMultiAgentActive() {
+    return localStorage.getItem('multiAgent') === 'true';
+  }
+  function toggleMultiAgent() {
+    const next = !isMultiAgentActive();
+    localStorage.setItem('multiAgent', next);
+    updateMultiAgentBtn();
+  }
+  function updateMultiAgentBtn() {
+    const btn = document.getElementById('ma-btn');
+    const sel = document.getElementById('ma-mode');
+    if (!btn) return;
+    if (isMultiAgentActive()) {
+      btn.classList.add('active');
+      btn.title = 'マルチエージェント: ON（複数AIが役割分担して実行）';
+      if (sel) sel.style.display = '';
+    } else {
+      btn.classList.remove('active');
+      btn.title = 'マルチエージェント: OFF（通常の単一エージェントモード）';
+      if (sel) sel.style.display = 'none';
+    }
+  }
+  function getAgentMode() {
+    const sel = document.getElementById('ma-mode');
+    return sel ? sel.value : 'balance';
+  }
+  // 初期化
+  updateMultiAgentBtn();
+  // モード選択をlocalStorageで永続化
+  const _maSel = document.getElementById('ma-mode');
+  if (_maSel) {
+    const saved = localStorage.getItem('agentMode');
+    if (saved) _maSel.value = saved;
+    _maSel.addEventListener('change', () => localStorage.setItem('agentMode', _maSel.value));
+  }
 
   function stopGeneration() {
     if (abortController) abortController.abort();
@@ -3129,6 +3173,8 @@
           bypass_approval: isBypassActive(),
           no_think: isNoThinkActive(),
           workspace_scope: currentWorkspaceScope,
+          multi_agent: isMultiAgentActive(),
+          agent_mode: getAgentMode(),
         }),
       });
 

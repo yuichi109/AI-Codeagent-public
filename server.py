@@ -2728,6 +2728,73 @@ async def list_archive_sessions():
     return JSONResponse(sessions)
 
 
+def _extract_snippet(history: list, keyword: str, context: int = 60) -> dict:
+    """会話履歴からキーワード周辺テキストを抜き出してターン番号・ロール・スニペットを返却"""
+    kw = keyword.lower()
+    turn = 0
+    for msg in history:
+        role = msg.get("role", "")
+        if role == "user":
+            turn += 1
+        if role not in ("user", "assistant"):
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"
+            )
+        if not isinstance(content, str):
+            continue
+        idx = content.lower().find(kw)
+        if idx == -1:
+            continue
+        start = max(0, idx - context)
+        end = min(len(content), idx + len(keyword) + context)
+        snippet = content[start:end].replace("\n", " ")
+        if start > 0:
+            snippet = "…" + snippet
+        if end < len(content):
+            snippet = snippet + "…"
+        role_label = "あなた" if role == "user" else "AI"
+        return {"text": snippet, "turn": turn, "role": role_label}
+    return {}
+
+
+@app.get("/sessions/search")
+async def search_sessions(q: str = "", archive: int = 0):
+    """セッションをキーワード検索（タイトル・会話内容）"""
+    keyword = q.strip().lower()
+    protected = _load_protected()
+    results = []
+    dirs = [SESSIONS_DIR, ARCHIVE_DIR] if archive else [SESSIONS_DIR]
+    for d in dirs:
+        for f in sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                text = f.read_text(encoding="utf-8")
+                if keyword and keyword not in text.lower():
+                    continue
+                data = json.loads(text)
+                sid = data.get("session_id")
+                history = data.get("history", [])
+                turn_count = len([m for m in history if m.get("role") == "user"])
+                snippet = _extract_snippet(history, keyword) if keyword else {}
+                results.append({
+                    "session_id": sid,
+                    "title": data.get("title", "無題"),
+                    "created_at": data.get("created_at"),
+                    "updated_at": data.get("updated_at"),
+                    "turn_count": turn_count,
+                    "protected": sid in protected,
+                    "archived": d == ARCHIVE_DIR,
+                    "snippet": snippet.get("text", ""),
+                    "snippet_turn": snippet.get("turn"),
+                    "snippet_role": snippet.get("role", ""),
+                })
+            except Exception:
+                pass
+    return JSONResponse(results)
+
+
 @app.post("/sessions/{session_id}/protect")
 async def toggle_protect_session(session_id: str):
     """セッションの保護フラグをトグル"""

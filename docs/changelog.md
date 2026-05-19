@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-05-19（セッション3）
+
+### 設計ドキュメント整備
+
+**変更ファイル:** docs/multi-agent-dispatch-design.md / memory
+
+- インフラAI 3段階ロードマップを整理・確定
+  - Stage 1: ローカル/Dockerのみ（現在）
+  - Stage 2: 登録済みOS環境へSSH接続（次段階）
+  - Stage 3: Azure/vSphereスナップショット付きクリーン環境（最終形）
+- Azure スナップショット実装方針を追記（bk-yuichi.matsuoのAnsibleコードを改変して使用）
+- vSphere スナップショット実装方針を追記（community.vmwareで数行）
+- RAG＋コード生成によるAnsible/PowerShell調達フローを追記
+  - RAGヒット→既存コード活用、RAGミス→コーディングAIが新規生成
+- プロジェクト最終ビジョン（3段階）をメモリに記録
+
+---
+
 ## 2026-05-19（セッション2）
 
 ### マルチエージェント Phase 1 追加実装

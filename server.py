@@ -1352,7 +1352,7 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
         print(err)  # uvicornログに出力
 
 
-async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
+async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = ""):
     """マルチエージェントモード: ディスパッチャー → 各エージェント逐次実行 → 最終レポート"""
     from tools.multi_agent_tools import dispatch_task, run_sub_agent, generate_final_report, new_job_id
     from prompts import get_agent_system_prompt, AGENT_ROLE_LABELS
@@ -1361,7 +1361,9 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
     job_id = new_job_id()
-    job_dir = ALLOWED_WORK_DIR / "jobs" / job_id
+    # ワークスペーススコープが設定されている場合はその配下にジョブを作成
+    base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+    job_dir = base_dir / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
     # 役割別プロバイダー設定を読み込む
@@ -1784,7 +1786,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     if req.multi_agent:
-        stream = multi_agent_stream(req.message, req.agent_mode)
+        stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope)
     else:
         stream = agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope)
     return StreamingResponse(stream, media_type="text/event-stream")

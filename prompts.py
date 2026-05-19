@@ -724,6 +724,12 @@ _MA_COMMON_RULES = """
 - 「ついでにここも直しておこう」は禁止。スコープ外は無視する。
 - 完了したら必ず status.md に完了を記録すること。
 - 他のエージェントへのメッセージや質問は書かない。成果物ファイルだけが通信手段。
+
+## ファイルパス・コマンド実行のルール
+- ファイルの読み書きは {job_dir}/ 以下の相対パスまたは絶対パスで指定すること。
+- run_command でコードを実行する際は必ず `work_dir` に `{job_dir}` を指定すること。
+  例: run_command("python3 code/fibonacci.py", work_dir="{job_dir}")
+- work_dir を指定しないとファイルが見つからずエラーになる。
 """
 
 AGENT_SYSTEM_PROMPTS: dict[str, str] = {

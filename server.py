@@ -1361,7 +1361,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance"):
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
     job_id = new_job_id()
-    job_dir = config.ALLOWED_WORK_DIR / "jobs" / job_id
+    job_dir = ALLOWED_WORK_DIR / "jobs" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
     # 役割別プロバイダー設定を読み込む

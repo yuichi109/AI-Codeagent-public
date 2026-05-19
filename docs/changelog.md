@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-05-19
+
+### Windows版 セットアップ保存後の再起動バグ修正 (#51)
+
+- `server.py`: `sys.platform == "win32"` で分岐。Windows では `threading.Timer(0.5, os._exit)` で自己終了し、`tray.py` の `_monitor` が自動再起動する
+- `setup.html`: `warning` フィールドがある場合にオレンジ色で手動再起動を案内（従来は無視して成功と誤表示していた）
+- Linux/WSL は従来通り `systemctl restart` を使用（動作変化なし）
+
+---
+
 ## 2026-05-18（追記3）
 
 ### 生成元画像モーダル改善・Draw.io 組み込み

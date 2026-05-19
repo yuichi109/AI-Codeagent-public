@@ -1,0 +1,34 @@
+{
+  "dispatcher": {
+    "preset_id": "azure",
+    "model": "gpt-5.4"
+  },
+  "design": {
+    "preset_id": "azure",
+    "model": "gpt-5.4"
+  },
+  "coding": {
+    "preset_id": "azure",
+    "model": "gpt-5.4-mini"
+  },
+  "debug": {
+    "preset_id": "azure",
+    "model": "gpt-5.4-mini"
+  },
+  "security": {
+    "preset_id": "azure",
+    "model": "gpt-5.4"
+  },
+  "docs": {
+    "preset_id": "azure",
+    "model": "gpt-5.4-mini"
+  },
+  "research": {
+    "preset_id": "gemini",
+    "model": "gemini-2.5-flash"
+  },
+  "infra": {
+    "preset_id": "azure",
+    "model": "gpt-5.4"
+  }
+}

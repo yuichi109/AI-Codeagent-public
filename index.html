@@ -1022,6 +1022,47 @@
   updateBypassBtn();
   loadNoThink();
 
+  // ---- マルチエージェント: 計画確認待ち状態 ----
+  let _maPendingJobId = '';
+
+  function _updatePlanConfirmUI(active) {
+    const bar = document.getElementById('ma-plan-confirm-bar');
+    if (active) {
+      if (!bar) {
+        const b = document.createElement('div');
+        b.id = 'ma-plan-confirm-bar';
+        b.style.cssText = 'background:#313244;border:1px solid #cba6f7;border-radius:6px;padding:6px 12px;margin:4px 0;font-size:13px;color:#cba6f7;display:flex;align-items:center;gap:8px;';
+        b.innerHTML = '📋 <span>計画確認中 — 返答を入力して実行・修正・キャンセルを指示できます</span><button onclick="_clearMaPending()" style="margin-left:auto;background:none;border:none;color:#6c7086;cursor:pointer;font-size:12px;">✕ 解除</button>';
+        const inputArea = document.getElementById('input-area') || document.querySelector('.input-area');
+        if (inputArea) inputArea.insertAdjacentElement('beforebegin', b);
+      }
+    } else {
+      if (bar) bar.remove();
+    }
+  }
+  function _clearMaPending() {
+    _maPendingJobId = '';
+    _updatePlanConfirmUI(false);
+  }
+
+  // 送信後にペンディングをクリア（実行開始 or キャンセル後）
+  function _maConsumePending() {
+    const id = _maPendingJobId;
+    if (id) { _maPendingJobId = ''; _updatePlanConfirmUI(false); }
+    return id;
+  }
+
+  // ボタンから直接実行・キャンセルを送信（job_id を DOM に持つので変数消失の心配なし）
+  function sendMaResume(jobId, action) {
+    _maPendingJobId = jobId;
+    const inputEl = document.getElementById('input');
+    if (inputEl) {
+      inputEl.value = action === 'cancel' ? 'キャンセル' : '実行して';
+      inputEl.dispatchEvent(new Event('input'));
+    }
+    sendMessage();
+  }
+
   // ---- マルチエージェントトグル ----
   function isMultiAgentActive() {
     return localStorage.getItem('multiAgent') === 'true';
@@ -3160,6 +3201,8 @@
 
     // API履歴は最新 MAX_API_MESSAGES 件のみ送信
     const trimmedHistory = history.slice(-MAX_API_MESSAGES);
+    // 計画確認ペンディング中の場合は job_id を取り出してバーを消す
+    const resumeJobId = _maConsumePending();
 
     try {
       const res = await fetch('/chat', {
@@ -3175,6 +3218,7 @@
           workspace_scope: currentWorkspaceScope,
           multi_agent: isMultiAgentActive(),
           agent_mode: getAgentMode(),
+          resume_job_id: resumeJobId || '',
         }),
       });
 
@@ -3228,6 +3272,7 @@
             genPhase = data.name; updateGenStatus();
             updateStatusLine(statusEl, getToolStatusText(data.name, data.args));
             finalAnswer = '';
+            _ttsReset();
             currentToolName = data.name;
             // ツールグループを作成（ターン内の初回のみ）
             if (!currentToolGroupEl) {
@@ -3279,6 +3324,7 @@
             genPhase = 'responding'; genTokenChars += data.content.length; updateGenStatus();
             updateStatusLine(statusEl, 'Responding...');
             finalAnswer += data.content;
+            ttsFeedChunk(data.content);
             // <think>...</think> を非表示（Qwen CoT）
             setAiContent(getOrCreateAiMsg(), stripThink(finalAnswer));
           } else if (data.type === 'history_messages') {
@@ -3362,7 +3408,24 @@
               const secs = Math.floor((Date.now() - genStartTime) / 1000);
               gsEl.textContent = `${secs}s · ↑ ${data.prompt} ↓ ${data.completion} tokens`;
             }
+          } else if (data.type === 'plan_ready') {
+            // 計画確認待ち: job_id を保持 + チャット内に実行ボタンを埋め込む
+            _maPendingJobId = data.job_id;
+            _updatePlanConfirmUI(true);
+            // AIメッセージ末尾に実行ボタンを挿入
+            const msgEl = getOrCreateAiMsg()?.el || getOrCreateAiMsg();
+            if (msgEl) {
+              const btnWrap = document.createElement('div');
+              btnWrap.style.cssText = 'margin-top:12px;display:flex;gap:8px;';
+              btnWrap.innerHTML = `
+                <button onclick="sendMaResume('${data.job_id}','execute')" style="background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:bold;">▶ 実行する</button>
+                <button onclick="sendMaResume('${data.job_id}','cancel')" style="background:#45475a;color:#cdd6f4;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">✕ キャンセル</button>
+              `;
+              msgEl.appendChild(btnWrap);
+            }
           } else if (data.type === 'answer_done') {
+            // plan_ready が来ていない場合はペンディング解除
+            if (!_maPendingJobId) _updatePlanConfirmUI(false);
             // 読み上げ
             ttsSpeak(finalAnswer);
             // モデル名をラベルに表示
@@ -5063,6 +5126,9 @@
 
   // ---- TTS（音声読み上げ） ----
   let _ttsEnabled = localStorage.getItem('ttsEnabled') === 'true';
+  let _ttsBuffer   = '';
+  const _ttsQueue  = [];
+  let _ttsSpeaking = false;
 
   (function _initTtsBtn() {
     const btn = document.getElementById('tts-btn');
@@ -5076,6 +5142,9 @@
     btn.classList.toggle('active', _ttsEnabled);
     if (!_ttsEnabled) {
       speechSynthesis.cancel();
+      _ttsQueue.length = 0;
+      _ttsBuffer = '';
+      _ttsSpeaking = false;
       btn.classList.remove('speaking');
     }
   }
@@ -5095,18 +5164,50 @@
       .trim();
   }
 
-  function ttsSpeak(text) {
-    if (!_ttsEnabled || !text) return;
-    speechSynthesis.cancel();
-    const plain = _stripForTTS(text);
-    if (!plain) return;
-    const utt = new SpeechSynthesisUtterance(plain);
+  function _ttsPlayNext() {
+    if (!_ttsQueue.length || !_ttsEnabled) {
+      _ttsSpeaking = false;
+      document.getElementById('tts-btn').classList.remove('speaking');
+      return;
+    }
+    _ttsSpeaking = true;
+    document.getElementById('tts-btn').classList.add('speaking');
+    const utt = new SpeechSynthesisUtterance(_ttsQueue.shift());
     utt.lang = 'ja-JP';
-    const btn = document.getElementById('tts-btn');
-    utt.onstart = () => btn.classList.add('speaking');
-    utt.onend = utt.onerror = () => btn.classList.remove('speaking');
+    utt.onend = utt.onerror = _ttsPlayNext;
     speechSynthesis.speak(utt);
   }
+
+  function _ttsEnqueue(text) {
+    const plain = _stripForTTS(text).trim();
+    if (!plain) return;
+    _ttsQueue.push(plain);
+    if (!_ttsSpeaking) _ttsPlayNext();
+  }
+
+  // ストリーミング中チャンクを受け取り、文境界で随時キューに追加
+  function ttsFeedChunk(chunk) {
+    if (!_ttsEnabled) return;
+    _ttsBuffer += chunk;
+    const re = /[^。！？\n]+[。！？\n]+/g;
+    let m, lastIdx = 0;
+    while ((m = re.exec(_ttsBuffer)) !== null) {
+      _ttsEnqueue(m[0]);
+      lastIdx = re.lastIndex;
+    }
+    _ttsBuffer = _ttsBuffer.slice(lastIdx);
+  }
+
+  // 残りバッファを吐き出す（answer_done 時）
+  function ttsFlush() {
+    if (!_ttsEnabled) return;
+    if (_ttsBuffer.trim()) { _ttsEnqueue(_ttsBuffer); _ttsBuffer = ''; }
+  }
+
+  // 後方互換（answer_done での呼び出し元はそのまま）
+  function ttsSpeak(_text) { ttsFlush(); }
+
+  function _ttsReset() { speechSynthesis.cancel(); _ttsQueue.length = 0; _ttsBuffer = ''; _ttsSpeaking = false; }
 
   function toggleDrawioPanel() {
     const panel = document.getElementById('drawio-panel');

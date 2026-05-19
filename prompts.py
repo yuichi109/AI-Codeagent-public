@@ -742,18 +742,36 @@ AGENT_SYSTEM_PROMPTS: dict[str, str] = {
   "tasks": {{
     "design": {{
       "prompt": "設計エージェントへの具体的な指示",
-      "depends_on": []
+      "depends_on": [],
+      "timeout_sec": 180
     }},
     "coding": {{
       "prompt": "コーディングエージェントへの具体的な指示。design.md を参照すること。",
-      "depends_on": ["design"]
+      "depends_on": ["design"],
+      "timeout_sec": 300
     }},
     "debug": {{
       "prompt": "デバッグエージェントへの指示。code/ を参照してテストすること。",
-      "depends_on": ["coding"]
+      "depends_on": ["coding"],
+      "timeout_sec": 600
     }}
   }}
 }}
+
+## timeout_sec の設定基準
+タスクの性質に応じて適切なタイムアウトを設定すること。
+
+| 作業内容 | 目安 |
+|---|---|
+| 設計書・ドキュメント生成のみ | 120〜180秒 |
+| コード実装（ファイル書き込みのみ） | 180〜300秒 |
+| 単体テスト・軽いスクリプト実行 | 180〜300秒 |
+| pip install / npm install を含む | 300〜600秒 |
+| Docker build を含む | 600〜900秒 |
+| Ansible プレイブック実行 | 600〜1800秒 |
+| クラウドリソース構築（Azure・vSphere） | 900〜3600秒 |
+
+迷ったら長めに設定すること。タイムアウトは短すぎると作業が中断されるが、長すぎても無害。
 
 ## 利用可能な役割
 - research: 外部情報収集が必要な場合（新技術・API調査）

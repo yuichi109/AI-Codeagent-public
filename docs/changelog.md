@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-05-19（セッション2）
+
+### マルチエージェント Phase 1 追加実装
+
+**変更ファイル:** server.py / prompts.py / index.html / tools/multi_agent_tools.py（新規）
+
+#### 計画確認フロー（Plan-then-Execute）
+- ディスパッチャーが計画を立てた後に一度停止し「この流れで実行してよいですか？」と確認
+- チャット内に「▶ 実行する」「✕ キャンセル」ボタンを直接埋め込み（変数消失リスク回避）
+- 自然言語での返答に対応：
+  - 「実行して」→ そのまま実行
+  - 「インフラAIも追加して」→ 計画修正して再確認（`_interpret_plan_response` でLLM判定）
+  - 「キャンセル」→ 中止
+- `ChatRequest` に `resume_job_id` フィールド追加
+- `plan.json` / `original_task.txt` をジョブディレクトリに保存（再計画時に参照）
+
+#### ディスパッチャー制御タイムアウト
+- ディスパッチャーがタスクの複雑さに応じて `timeout_sec` を設定
+- `run_sub_agent()` へ `timeout_sec` を渡す配線を追加（server.py）
+- プロンプトに複雑さ別タイムアウト基準表を追加（Docker 600s、Ansible 1800s 等）
+
+#### TTS ストリーミング読み上げ
+- 全文受信後ではなく文単位（`。！？\n`）でリアルタイム読み上げ
+- キュー方式（`_ttsQueue`）で順番に再生、次の文を即時キューイング
+
+#### バグ修正
+- `_interpret_plan_response` の `max_tokens` → `max_completion_tokens`（gpt-5.4系対応）
+- `multi_agent_stream` 内の `config.ALLOWED_WORK_DIR` → `ALLOWED_WORK_DIR`（NameError修正）
+
+---
+
 ## 2026-05-20
 
 ### セッション履歴キーワード検索機能（#41）

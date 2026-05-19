@@ -1226,6 +1226,7 @@ class ChatRequest(BaseModel):
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
+    resume_job_id: str = ""     # 計画確認後の再開ジョブID
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
@@ -1352,55 +1353,148 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
         print(err)  # uvicornログに出力
 
 
-async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = ""):
-    """マルチエージェントモード: ディスパッチャー → 各エージェント逐次実行 → 最終レポート"""
+async def _interpret_plan_response(user_message: str, plan: dict, async_client, model: str) -> dict:
+    """ユーザーの返答から action (execute / replan / cancel) を判定する"""
+    from prompts import AGENT_ROLE_LABELS
+    roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in plan.get("roles", []))
+    prompt = (
+        f"マルチエージェントの実行計画についてユーザーが返答しました。\n\n"
+        f"計画: {roles_str} の順で実行\n"
+        f"ユーザーの返答: 「{user_message}」\n\n"
+        f"以下のJSONのみを返してください:\n"
+        f'{"{"}"action": "execute" | "replan" | "cancel", "notes": "修正内容（replanの場合のみ）"{"}"}\n\n'
+        f"判定基準:\n"
+        f"- execute: 承認・実行・進めて・OK・やってみて 等\n"
+        f"- replan: 役割の追加/削除/変更を求めている\n"
+        f"- cancel: キャンセル・やめる・不要 等\n"
+    )
+    resp = await async_client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+        temperature=0,
+        max_completion_tokens=200,
+    )
+    try:
+        return json.loads(resp.choices[0].message.content or "{}")
+    except Exception:
+        return {"action": "execute", "notes": ""}
+
+
+async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = ""):
+    """マルチエージェントモード:
+    Phase 1 (resume_job_id なし): ディスパッチャー → 計画表示 → 停止（plan_ready イベント）
+    Phase 2 (resume_job_id あり): ユーザー返答を解釈 → 実行 / 再計画 / キャンセル
+    """
     from tools.multi_agent_tools import dispatch_task, run_sub_agent, generate_final_report, new_job_id
     from prompts import get_agent_system_prompt, AGENT_ROLE_LABELS
 
     def _sse(text: str) -> str:
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
-    job_id = new_job_id()
-    # ワークスペーススコープが設定されている場合はその配下にジョブを作成
-    base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
-    job_dir = base_dir / "jobs" / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    # 役割別プロバイダー設定を読み込む
     ma_cfg = _load_ma_config()
+    d_cfg    = ma_cfg.get("dispatcher", {})
+    d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
+    d_model  = d_cfg.get("model", _provider_config["model"])
+    d_client = _make_async_client_for(d_preset)
 
     try:
-        yield _sse(f"🤖 **マルチエージェントモード開始** (job: `{job_id}`)\n\n")
+        if resume_job_id:
+            # ---- Phase 2: ユーザー返答を解釈 ----
+            job_id = resume_job_id
+            # ジョブディレクトリを探す（スコープ配下 or ルート）
+            base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+            job_dir = base_dir / "jobs" / job_id
+            if not (job_dir / "plan.json").exists():
+                # スコープが異なる場合は全スコープを探す
+                candidates = list(ALLOWED_WORK_DIR.glob(f"*/jobs/{job_id}")) + [ALLOWED_WORK_DIR / "jobs" / job_id]
+                job_dir = next((c for c in candidates if (c / "plan.json").exists()), job_dir)
 
-        # 1. タスク分解（ディスパッチャー）
-        yield _sse("📋 タスク分解中...\n")
-        d_cfg = ma_cfg.get("dispatcher", {})
-        d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
-        d_model  = d_cfg.get("model", _provider_config["model"])
-        d_client = _make_async_client_for(d_preset)
-        plan = await dispatch_task(user_message, d_client, d_model, job_dir)
+            plan_file = job_dir / "plan.json"
+            if not plan_file.exists():
+                yield _sse("❌ ジョブが見つかりません。\n")
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
 
+            plan = json.loads(plan_file.read_text(encoding="utf-8"))
+            original_task_file = job_dir / "original_task.txt"
+            original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
+
+            action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
+            action = action_result.get("action", "execute")
+            notes  = action_result.get("notes", "")
+
+            if action == "cancel":
+                yield _sse("🚫 了解しました、キャンセルします。\n")
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            if action == "replan":
+                yield _sse("🔄 計画を修正中...\n\n")
+                revised_message = original_task + (f"\n\n【修正指示】{notes}" if notes else "")
+                plan = await dispatch_task(revised_message, d_client, d_model, job_dir)
+                plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+
+                roles = plan.get("roles", [])
+                tasks = plan.get("tasks", {})
+                roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in roles)
+                yield _sse(f"  → 修正後の役割: {roles_str}\n\n")
+                for role in roles:
+                    task = tasks.get(role, {})
+                    label = AGENT_ROLE_LABELS.get(role, role)
+                    t_sec = task.get("timeout_sec", "")
+                    yield _sse(f"- **{label}**: {task.get('prompt', '')[:80]}" + (f" (最大{t_sec}秒)" if t_sec else "") + "\n")
+                yield _sse("\nこの内容でよろしいですか？\n")
+                yield f"data: {json.dumps({'type': 'plan_ready', 'job_id': job_id, 'roles': roles})}\n\n"
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            # action == "execute": エージェント実行フェーズへ
+            yield _sse(f"▶ **実行開始** (job: `{job_id}`)\n\n")
+
+        else:
+            # ---- Phase 1: 新規ジョブ → 計画表示 → 停止 ----
+            job_id = new_job_id()
+            base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+            job_dir = base_dir / "jobs" / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+
+            yield _sse(f"🤖 **マルチエージェントモード** (job: `{job_id}`)\n\n")
+            yield _sse("📋 タスク分解中...\n")
+
+            plan = await dispatch_task(user_message, d_client, d_model, job_dir)
+            (job_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
+            (job_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+
+            roles = plan.get("roles", [])
+            tasks = plan.get("tasks", {})
+            roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in roles)
+            yield _sse(f"  → 役割: {roles_str}\n\n")
+            for role in roles:
+                task = tasks.get(role, {})
+                label = AGENT_ROLE_LABELS.get(role, role)
+                t_sec = task.get("timeout_sec", "")
+                yield _sse(f"- **{label}**: {task.get('prompt', '')[:80]}" + (f" (最大{t_sec}秒)" if t_sec else "") + "\n")
+            yield _sse("\nこの流れで実行してよいですか？ 役割の追加・変更があればお知らせください。\n")
+            yield f"data: {json.dumps({'type': 'plan_ready', 'job_id': job_id, 'roles': roles})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+            return
+
+        # ---- エージェント実行フェーズ（Phase 2 execute） ----
         roles = plan.get("roles", [])
         tasks = plan.get("tasks", {})
-        roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in roles)
-        yield _sse(f"  → 役割: {roles_str}\n\n")
 
-        # 2. 各エージェントを逐次実行
         for role in roles:
-            task = tasks.get(role, {})
+            task        = tasks.get(role, {})
             task_prompt = task.get("prompt", user_message)
-            label = AGENT_ROLE_LABELS.get(role, role)
-
-            # タスクにモデル指定があればそれを優先、なければ設定ファイルの値を使用
-            role_cfg   = ma_cfg.get(role, d_cfg)
-            preset_id  = task.get("preset_id") or role_cfg.get("preset_id", d_preset)
-            model      = task.get("model")     or role_cfg.get("model", d_model)
-            sub_client = _make_async_client_for(preset_id)
+            label       = AGENT_ROLE_LABELS.get(role, role)
+            role_cfg    = ma_cfg.get(role, d_cfg)
+            preset_id   = task.get("preset_id") or role_cfg.get("preset_id", d_preset)
+            model       = task.get("model")     or role_cfg.get("model", d_model)
+            sub_client  = _make_async_client_for(preset_id)
 
             yield _sse(f"🎯 **[{label}]** 開始... (`{preset_id}` / `{model}`)\n")
-
             system_prompt = get_agent_system_prompt(role, str(job_dir))
-
             try:
                 await run_sub_agent(
                     role=role,
@@ -1411,18 +1505,18 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                     async_client=sub_client,
                     model=model,
                     job_dir=job_dir,
+                    timeout_sec=task.get("timeout_sec"),
                 )
                 yield _sse(f"  → 完了 ✅\n\n")
             except Exception as e:
                 yield _sse(f"  → エラー ⚠️ `{type(e).__name__}: {e}`\n\n")
                 print(f"[multi_agent] {role} エラー: {e}")
 
-        # 3. 最終レポート生成（ディスパッチャーと同じプロバイダー）
         yield _sse("📄 最終報告書を生成中...\n\n")
         report = await generate_final_report(d_client, d_model, job_dir)
-
         yield _sse(f"---\n\n{report}\n\n")
-        yield _sse(f"\n📁 成果物: `workspace/jobs/{job_id}/`\n")
+        scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
+        yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
 
     except Exception as e:
         import traceback
@@ -1785,8 +1879,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    if req.multi_agent:
-        stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope)
+    if req.multi_agent or req.resume_job_id:
+        stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
     else:
         stream = agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope)
     return StreamingResponse(stream, media_type="text/event-stream")

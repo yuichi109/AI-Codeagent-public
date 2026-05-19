@@ -7,6 +7,10 @@
 
 ## 2026-05-19
 
+### Draw.io ダークモード問題修正（Windows）
+
+- `index.html`: Draw.io iframe に `style="color-scheme: light"` を追加。WindowsのEdge/ChromeがOSのダークモード設定をiframeに強制する問題を解消
+
 ### Windows版 セットアップ保存後の再起動バグ修正 (#51)
 
 - `server.py`: `sys.platform == "win32"` で分岐。Windows では `threading.Timer(0.5, os._exit)` で自己終了し、`tray.py` の `_monitor` が自動再起動する

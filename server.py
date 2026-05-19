@@ -3294,12 +3294,19 @@ async def setup_save(req: SetupSaveRequest):
 
     env_path.write_text("\n".join(lines))
 
-    # systemd サービスを再起動
-    try:
-        subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+    # サービスを再起動
+    if sys.platform == "win32":
+        # Windows: tray.py の _monitor が停止を検知して自動再起動する
+        import os
+        threading.Timer(0.5, lambda: os._exit(0)).start()
         return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+    else:
+        # Linux/WSL: systemd 経由で再起動
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+            return JSONResponse({"status": "ok"})
+        except Exception as e:
+            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
 
 
 @app.get("/setup/ansible-creds")

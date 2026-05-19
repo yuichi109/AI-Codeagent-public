@@ -959,12 +959,18 @@ async function saveConfig() {
     });
     const data = await res.json();
     if (data.status === 'ok') {
-      status.textContent = '✓ 保存しました。サーバーを再起動しています...';
-      status.style.color = '#a6e3a1';
-      setTimeout(() => {
-        status.textContent = '✓ 完了。チャット画面をリロードしてください。';
+      if (data.warning) {
+        status.textContent = '✓ 保存しました。⚠️ ' + data.warning + ' — トレイアイコンから手動で再起動してください。';
+        status.style.color = '#fab387';
         btn.disabled = false;
-      }, 3000);
+      } else {
+        status.textContent = '✓ 保存しました。サーバーを再起動しています...';
+        status.style.color = '#a6e3a1';
+        setTimeout(() => {
+          status.textContent = '✓ 完了。チャット画面をリロードしてください。';
+          btn.disabled = false;
+        }, 3000);
+      }
     } else {
       throw new Error(data.error || '不明なエラー');
     }

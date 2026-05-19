@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from config import SEARXNG_BASE_URL, SEARXNG_ENABLED, TAVILY_API_KEY
+from config import SEARXNG_BASE_URL, SEARXNG_ENABLED, TAVILY_API_KEY, WEB_RESEARCH_PROVIDER, OPENAI_API_KEY
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CodeAgent/1.0)"}
 
@@ -294,11 +294,42 @@ def web_fetch(url: str, extract_text: bool = True, max_chars: int = 8000) -> dic
         return {"error": f"処理エラー: {e}", "url": url}
 
 
+def _research_deep_research(query: str, model: str) -> dict:
+    """OpenAI Deep Research API を使った高品質Web調査。"""
+    if not OPENAI_API_KEY:
+        return {"error": "OPENAI_API_KEY が未設定です", "query": query, "sources": []}
+    try:
+        import openai
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        response = client.responses.create(
+            model=model,
+            input=[{"role": "user", "content": query}],
+            tools=[{"type": "web_search_preview"}],
+            timeout=600,
+        )
+        report = response.output_text or ""
+        return {
+            "query": query,
+            "report": report,
+            "sources": [],
+            "source_count": 0,
+            "search_backend": model,
+        }
+    except Exception as e:
+        return {"error": f"Deep Research エラー: {e}", "query": query, "sources": []}
+
+
 def web_research(query: str, max_sources: int = 3, max_chars_per_page: int = 3000) -> dict:
     """
     検索 → 上位ページを自動取得 → まとめて返す。
     AIが複数ソースを参照して比較・提案できるようにするための高レベルツール。
     """
+    # Deep Research プロバイダー振り分け
+    if WEB_RESEARCH_PROVIDER == "deep-research-o4-mini":
+        return _research_deep_research(query, "o4-mini-deep-research")
+    if WEB_RESEARCH_PROVIDER == "deep-research-o3":
+        return _research_deep_research(query, "o3-deep-research")
+
     max_sources = min(max_sources, 5)
     max_chars_per_page = min(max_chars_per_page, 8000)
 

@@ -442,6 +442,19 @@
         <input id="sx-tavily-key" type="password" placeholder="tvly-...（未設定）" autocomplete="off">
         <span class="hint" id="sx-tavily-hint">未設定 — <a href="https://tavily.com" target="_blank" style="color:#89b4fa">tavily.com</a> で取得（無料・カード不要）</span>
       </div>
+      <div class="field">
+        <label>web_research ツールのプロバイダー</label>
+        <select id="sx-web-research-provider" onchange="onWebResearchProviderChange()">
+          <option value="tavily">Tavily（デフォルト・安価）</option>
+          <option value="deep-research-o4-mini">OpenAI Deep Research o4-mini（高品質・$0.4〜2.5/回）</option>
+          <option value="deep-research-o3">OpenAI Deep Research o3（最高品質・$1.5〜8/回）</option>
+        </select>
+        <span class="hint">Deep Research 選択時は OpenAI プロバイダーの API キーを使用します。<br>
+        ⚠ 事前に <a href="https://platform.openai.com/settings/organization/general" target="_blank" style="color:#89b4fa">OpenAI 組織の本人確認（Individual Verification）</a> を完了させてください。未完了の場合は model_not_found エラーになります。</span>
+      </div>
+      <div class="field" id="sx-deep-research-warning" style="display:none">
+        <span class="hint" style="color:#f38ba8">⚠ OpenAI プロバイダーが未登録です。上部の「LLM プロバイダー」セクションで OpenAI を追加するか、プロバイダーを Tavily に戻してください。</span>
+      </div>
     </div>
   </div>
 
@@ -730,6 +743,15 @@ function onRagModeChange() {
   document.getElementById('rag-azure-fields').classList.toggle('disabled', mode !== 'azure');
 }
 
+// ---- Web調査プロバイダー切り替え ----
+let _openaiApiKeySet = false;
+function onWebResearchProviderChange() {
+  const v = document.getElementById('sx-web-research-provider').value;
+  const isDeepResearch = v.startsWith('deep-research-');
+  const warn = document.getElementById('sx-deep-research-warning');
+  warn.style.display = (isDeepResearch && !_openaiApiKeySet) ? 'block' : 'none';
+}
+
 // ---- セクション開閉 ----
 function toggleSection(id) {
   document.getElementById(id).classList.toggle('collapsed');
@@ -805,6 +827,9 @@ async function loadConfig() {
     document.getElementById('sx-enabled').value = d.searxng.enabled;
     document.getElementById('sx-tavily-key').placeholder = d.searxng.tavily_api_key_set ? '（設定済み — 変更する場合のみ入力）' : 'tvly-...（未設定）';
     document.getElementById('sx-tavily-hint').textContent = d.searxng.tavily_api_key_set ? '現在: 設定済み' : '未設定 — tavily.com で取得（無料・カード不要）';
+    document.getElementById('sx-web-research-provider').value = d.searxng.web_research_provider || 'tavily';
+    _openaiApiKeySet = d.searxng.openai_api_key_set;
+    onWebResearchProviderChange();
 
     // Responses API
     if (d.responses_api) {
@@ -909,9 +934,10 @@ async function saveConfig() {
       email: document.getElementById('gl-email').value,
     },
     searxng: {
-      url:            document.getElementById('sx-url').value,
-      enabled:        document.getElementById('sx-enabled').value,
-      tavily_api_key: document.getElementById('sx-tavily-key').value,
+      url:                   document.getElementById('sx-url').value,
+      enabled:               document.getElementById('sx-enabled').value,
+      tavily_api_key:        document.getElementById('sx-tavily-key').value,
+      web_research_provider: document.getElementById('sx-web-research-provider').value,
     },
     responses_api: {
       enabled:     document.getElementById('ra-enabled').checked ? 'true' : 'false',

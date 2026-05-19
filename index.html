@@ -12,6 +12,11 @@
   #turn-count { font-size: 11px; color: #6c7086; font-weight: normal; }
   #clear-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #clear-btn:hover { background: #f38ba8; color: #1e1e2e; }
+  #tts-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  #tts-btn:hover { background: #89b4fa; color: #1e1e2e; }
+  #tts-btn.active { background: #89b4fa; color: #1e1e2e; }
+  #tts-btn.speaking { background: #a6e3a1; color: #1e1e2e; animation: tts-pulse 1s ease-in-out infinite; }
+  @keyframes tts-pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
   #cleanup-btn { padding: 4px 8px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #cleanup-btn:hover { background: #a6e3a1; color: #1e1e2e; }
   #gitlab-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; display: none; }
@@ -556,6 +561,7 @@
     <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
     <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
     <button id="todo-btn" onclick="toggleTodoPanel()">📋 タスク<span id="todo-badge"></span></button>
+    <button id="tts-btn" onclick="toggleTTS()" title="AIの返答を読み上げ">🔊 読み上げ</button>
     <button id="drawio-btn" onclick="toggleDrawioPanel()" title="Draw.io 作図エディタ">✏️ Draw.io</button>
     <button id="cleanup-btn" onclick="openCleanupDirect()" title="ワークスペース掃除・保護リスト編集">🧹</button>
     <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
@@ -3311,6 +3317,8 @@
               gsEl.textContent = `${secs}s · ↑ ${data.prompt} ↓ ${data.completion} tokens`;
             }
           } else if (data.type === 'answer_done') {
+            // 読み上げ
+            ttsSpeak(finalAnswer);
             // モデル名をラベルに表示
             if (data.model) {
               currentModelName = data.model;
@@ -5006,6 +5014,53 @@
   }
 
   const _DRAWIO_BLANK = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>';
+
+  // ---- TTS（音声読み上げ） ----
+  let _ttsEnabled = localStorage.getItem('ttsEnabled') === 'true';
+
+  (function _initTtsBtn() {
+    const btn = document.getElementById('tts-btn');
+    if (_ttsEnabled) btn.classList.add('active');
+  })();
+
+  function toggleTTS() {
+    _ttsEnabled = !_ttsEnabled;
+    localStorage.setItem('ttsEnabled', _ttsEnabled);
+    const btn = document.getElementById('tts-btn');
+    btn.classList.toggle('active', _ttsEnabled);
+    if (!_ttsEnabled) {
+      speechSynthesis.cancel();
+      btn.classList.remove('speaking');
+    }
+  }
+
+  function _stripForTTS(md) {
+    return md
+      .replace(/```[\s\S]*?```/g, '、コード省略、')
+      .replace(/https?:\/\/\S+/g, 'リンク')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\|/g, ' ')
+      .replace(/^[-*_]{3,}$/gm, '')
+      .replace(/!\[.*?\]\(.*?\)/g, '画像')
+      .replace(/\[([^\]]+)\]\(.*?\)/g, '$1')
+      .trim();
+  }
+
+  function ttsSpeak(text) {
+    if (!_ttsEnabled || !text) return;
+    speechSynthesis.cancel();
+    const plain = _stripForTTS(text);
+    if (!plain) return;
+    const utt = new SpeechSynthesisUtterance(plain);
+    utt.lang = 'ja-JP';
+    const btn = document.getElementById('tts-btn');
+    utt.onstart = () => btn.classList.add('speaking');
+    utt.onend = utt.onerror = () => btn.classList.remove('speaking');
+    speechSynthesis.speak(utt);
+  }
 
   function toggleDrawioPanel() {
     const panel = document.getElementById('drawio-panel');

@@ -2993,6 +2993,8 @@ async def setup_current():
             "enabled": raw.get("SEARXNG_ENABLED", "false"),
             "tavily_api_key": mask(raw.get("TAVILY_API_KEY", "")),
             "tavily_api_key_set": bool(raw.get("TAVILY_API_KEY")),
+            "web_research_provider": raw.get("WEB_RESEARCH_PROVIDER", "tavily"),
+            "openai_api_key_set": bool(raw.get("OPENAI_API_KEY")),
         },
         "responses_api": {
             "enabled":     raw.get("RESPONSES_API_ENABLED", "false"),
@@ -3280,7 +3282,10 @@ async def setup_save(req: SetupSaveRequest):
     ]
     if tavily_key:
         lines.append(f"TAVILY_API_KEY={tavily_key}")
-    lines.append("")
+    lines += [
+        f"WEB_RESEARCH_PROVIDER={sx.get('web_research_provider', 'tavily')}",
+        "",
+    ]
 
     # Responses API サブエージェント
     ra = req.responses_api

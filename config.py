@@ -147,6 +147,9 @@ SEARXNG_ENABLED: bool = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"
 # Tavily Search API (省略可・無料1000クエリ/月・カード不要)
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 
+# Web調査プロバイダー: "tavily" | "deep-research-o4-mini" | "deep-research-o3"
+WEB_RESEARCH_PROVIDER: str = os.getenv("WEB_RESEARCH_PROVIDER", "tavily")
+
 # Responses API サブエージェント (省略可・コード生成特化モデル用)
 RESPONSES_API_ENABLED: bool = os.getenv("RESPONSES_API_ENABLED", "false").lower() == "true"
 RESPONSES_API_ENDPOINT: str = os.getenv("RESPONSES_API_ENDPOINT", "")

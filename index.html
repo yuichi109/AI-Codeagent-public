@@ -3954,8 +3954,10 @@
   }
 
   function _icPopulateSelect(sel, deployments, savedKey) {
-    const saved = localStorage.getItem(savedKey) || deployments[0] || '';
-    if (!localStorage.getItem(savedKey)) localStorage.setItem(savedKey, saved);
+    const rawSaved = localStorage.getItem(savedKey);
+    // localStorage に保存されたモデルが現在のデプロイメント一覧に存在しない場合はリセット
+    const saved = (rawSaved && deployments.includes(rawSaved)) ? rawSaved : (deployments[0] || '');
+    localStorage.setItem(savedKey, saved);
     sel.innerHTML = '';
     deployments.forEach(d => {
       const opt = document.createElement('option');

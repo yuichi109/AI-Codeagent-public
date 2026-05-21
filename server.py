@@ -1794,6 +1794,26 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         for (name, args, tc_id), result in zip(parsed_calls, results):
             tool_result_for_msg = result  # LLM に渡す tool メッセージの内容
 
+            # web_research で Deep Research レポートが返った場合はUIに直接表示（AIに要約させない）
+            if name == "web_research":
+                try:
+                    result_data = json.loads(result)
+                    report = result_data.get("report", "")
+                    if report:
+                        backend = result_data.get("search_backend", "")
+                        query = result_data.get("query", args.get("query", ""))
+                        yield f"data: {json.dumps({'type': 'deep_research_report', 'report': report, 'query': query, 'backend': backend}, ensure_ascii=False)}\n\n"
+                        # LLMには「レポートはUIに表示済み」と伝えて再出力を防ぐ
+                        tool_result_for_msg = json.dumps({
+                            "query": query,
+                            "report_displayed": True,
+                            "report_length": len(report),
+                            "search_backend": backend,
+                            "note": "Deep Researchのレポート全文はチャットUIに直接表示済みです。AIは内容を重複して出力する必要はありません。必要に応じて補足コメントのみ追加してください。",
+                        }, ensure_ascii=False)
+                except Exception:
+                    pass
+
             # todo_update の場合はUIにタスクリストを即時反映
             if name == "todo_update":
                 try:

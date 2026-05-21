@@ -3378,6 +3378,27 @@
             } else {
               turnEl.appendChild(imgWrap);
             }
+          } else if (data.type === 'deep_research_report') {
+            // Deep Research レポートをチャット内にマークダウンで直接表示
+            const drWrap = document.createElement('div');
+            drWrap.style.cssText = 'margin: 10px 0; border: 1px solid var(--blue); border-radius: 8px; overflow: hidden;';
+            const drHeader = document.createElement('div');
+            drHeader.style.cssText = 'background: var(--blue); color: var(--base); padding: 6px 12px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;';
+            drHeader.innerHTML = `🔬 Deep Research レポート <span style="font-weight:400; opacity:0.85;">(${data.backend || 'deep-research'})</span>`;
+            const drQuery = document.createElement('div');
+            drQuery.style.cssText = 'padding: 4px 12px; background: var(--surface0); font-size: 11px; color: var(--subtext0); border-bottom: 1px solid var(--surface1);';
+            drQuery.textContent = `🔍 ${data.query || ''}`;
+            const drBody = document.createElement('div');
+            drBody.style.cssText = 'padding: 12px 16px; background: var(--base); font-size: 13px; line-height: 1.7; overflow-x: auto; max-height: 600px; overflow-y: auto;';
+            drBody.innerHTML = (typeof marked !== 'undefined') ? marked.parse(data.report || '') : (data.report || '').replace(/\n/g, '<br>');
+            drWrap.appendChild(drHeader);
+            drWrap.appendChild(drQuery);
+            drWrap.appendChild(drBody);
+            if (currentToolGroupInnerEl) {
+              currentToolGroupInnerEl.appendChild(drWrap);
+            } else {
+              turnEl.appendChild(drWrap);
+            }
           } else if (data.type === 'manim_render') {
             // Manimレンダリング結果をツールグループ内にインライン表示
             const imgWrap = document.createElement('div');

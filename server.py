@@ -1804,15 +1804,29 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                             result_str = chunk["result"]
                     results.append(result_str or json.dumps({"error": "ストリーミング結果なし", "stdout": "", "stderr": "", "returncode": -1}))
                 else:
-                    results.append(await execute_tool_async(name, args))
+                    # 長時間ツール実行中は30秒ごとにSSEキープアライブを送ってブラウザ接続を維持
+                    task = asyncio.create_task(execute_tool_async(name, args))
+                    while True:
+                        done, pending = await asyncio.wait({task}, timeout=30)
+                        if not pending:
+                            break
+                        yield f": keepalive\n\n"
+                    results.append(task.result())
         else:
             # ストリーミング不要ツールは並列実行（スキップ済みはダミー結果）
+            # 長時間ツール実行中は30秒ごとにSSEキープアライブを送ってブラウザ接続を維持
             async def _skipped(_msg=_DR_SKIP_MSG):
                 return _msg
-            results = list(await asyncio.gather(*[
-                _skipped() if tc_id.endswith("__skipped__") else execute_tool_async(name, args)
+            _tasks = [
+                asyncio.create_task(_skipped() if tc_id.endswith("__skipped__") else execute_tool_async(name, args))
                 for name, args, tc_id in parsed_calls
-            ]))
+            ]
+            while True:
+                done, pending = await asyncio.wait(_tasks, timeout=30)
+                if not pending:
+                    break
+                yield f": keepalive\n\n"
+            results = [t.result() for t in _tasks]
 
         # 結果を順番に処理してメッセージ履歴に追加
         pending_vision_images = []  # render_manim の画像をまとめてvision messageに注入するためのキュー

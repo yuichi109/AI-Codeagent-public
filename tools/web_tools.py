@@ -295,28 +295,37 @@ def web_fetch(url: str, extract_text: bool = True, max_chars: int = 8000) -> dic
 
 
 def _research_deep_research(query: str, model: str) -> dict:
-    """OpenAI Deep Research API を使った高品質Web調査。"""
+    """OpenAI Deep Research API を使った高品質Web調査。429時は60秒待ってリトライ。"""
     if not OPENAI_API_KEY:
         return {"error": "OPENAI_API_KEY が未設定です", "query": query, "sources": []}
-    try:
-        import openai
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        response = client.responses.create(
-            model=model,
-            input=[{"role": "user", "content": query}],
-            tools=[{"type": "web_search_preview"}],
-            timeout=600,
-        )
-        report = response.output_text or ""
-        return {
-            "query": query,
-            "report": report,
-            "sources": [],
-            "source_count": 0,
-            "search_backend": model,
-        }
-    except Exception as e:
-        return {"error": f"Deep Research エラー: {e}", "query": query, "sources": []}
+    import openai
+    import time
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    for attempt in range(2):  # 最大2回試行（初回 + リトライ1回）
+        try:
+            response = client.responses.create(
+                model=model,
+                input=[{"role": "user", "content": query}],
+                tools=[{"type": "web_search_preview"}],
+                timeout=600,
+            )
+            report = response.output_text or ""
+            return {
+                "query": query,
+                "report": report,
+                "sources": [],
+                "source_count": 0,
+                "search_backend": model,
+            }
+        except openai.RateLimitError as e:
+            if attempt == 0:
+                # 429 レートリミット: 60秒待ってリトライ
+                print(f"[deep_research] 429 rate limit hit. Waiting 60s before retry...", flush=True)
+                time.sleep(60)
+                continue
+            return {"error": f"レートリミット超過: {e}\n\n約60秒後に再度お試しください。", "query": query, "sources": []}
+        except Exception as e:
+            return {"error": f"Deep Research エラー: {e}", "query": query, "sources": []}
 
 
 def web_research(query: str, max_sources: int = 3, max_chars_per_page: int = 3000) -> dict:

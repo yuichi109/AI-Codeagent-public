@@ -1021,9 +1021,17 @@ def execute_tool(name: str, arguments: dict) -> str:
     try:
         result = TOOL_REGISTRY[name](**arguments)
         # 検索系ツールで結果が空の場合、LLMがハルシネーションしないよう明示的な警告を付与
+        # 検索バックエンドをログに出力
         if name in ("web_search", "web_research") and isinstance(result, dict):
+            backend = result.get("search_backend", WEB_RESEARCH_PROVIDER if name == "web_research" else "tavily/ddgs")
+            item_count = len(result.get("results") or result.get("sources") or [])
+            has_rpt = bool(result.get("report"))
+            print(f"[{name}] backend={backend} items={item_count} report={'yes' if has_rpt else 'no'}", flush=True)
+        # Deep Research の場合は report フィールドがあれば結果ありとみなす
+        if name in ("web_search", "web_research") and isinstance(result, dict):
+            has_report = bool(result.get("report"))
             items = result.get("results") or result.get("sources") or []
-            if not items or "error" in result:
+            if not has_report and (not items or "error" in result):
                 result["_warning"] = (
                     "【重要】検索結果が見つかりませんでした。"
                     "この情報に基づいた回答はできません。"

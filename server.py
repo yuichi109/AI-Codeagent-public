@@ -1075,7 +1075,7 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
         _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}
         timeout = 600 if arguments.get("size") in _HIGH_RES else 300
     elif name in ("web_research", "web_search") and WEB_RESEARCH_PROVIDER.startswith("deep-research"):
-        timeout = 600
+        timeout = 750  # Deep Research は最大約10分 + リトライ60秒を考慮して余裕を持たせる
     elif name == "web_research":
         timeout = 60
     elif name == "run_powershell" and "timeout_seconds" in arguments:

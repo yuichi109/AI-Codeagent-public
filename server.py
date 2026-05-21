@@ -955,6 +955,7 @@ if WEB_RESEARCH_PROVIDER.startswith("deep-research"):
                 f"【Deep Research ({_dr_label}) 使用中】OpenAI Deep Researchを使った高精度Web調査。"
                 f"Web調査・情報収集が必要な場合は必ずこのツールを使うこと。"
                 f"web_searchより大幅に精度・網羅性が高く、詳細なレポートを返す。"
+                f"【重要】1ターンにつき必ず1回のみ呼び出すこと。複数クエリを同時に呼び出すと高額課金になるため禁止。"
             )
         elif _fn.get("name") == "web_search":
             _fn["description"] = (
@@ -1757,8 +1758,26 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             for tc in tool_calls_list
         ]
 
+        # Deep Research 設定時に web_research が複数呼ばれた場合は最初の1件のみに制限（二重課金防止）
+        if WEB_RESEARCH_PROVIDER.startswith("deep-research"):
+            _dr_seen = False
+            _filtered = []
+            for _call in parsed_calls:
+                if _call[0] == "web_research":
+                    if not _dr_seen:
+                        _filtered.append(_call)
+                        _dr_seen = True
+                    else:
+                        # 2件目以降はスキップ（ダミー結果を後で返す）
+                        _filtered.append((_call[0], _call[1], _call[2] + "__skipped__"))
+                else:
+                    _filtered.append(_call)
+            parsed_calls = _filtered
+
         # tool_start イベントを全件先に送信
-        for name, args, _ in parsed_calls:
+        for name, args, tc_id in parsed_calls:
+            if tc_id.endswith("__skipped__"):
+                continue
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
         # 画像ツールにワークスペーススコープを注入（保存先をスコープ配下にするため）
@@ -1769,11 +1788,14 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
         # ツールを実行（run_commandはストリーミング、他は並列）
         _STREAMING_TOOLS = {"run_command"}
+        _DR_SKIP_MSG = json.dumps({"error": "Deep Research の同時複数呼び出しは禁止されています。1ターンに1回のみ呼び出してください。"}, ensure_ascii=False)
         if any(name in _STREAMING_TOOLS for name, _, _ in parsed_calls):
             # ストリーミングツールが含まれる場合は順次実行
             results = []
             for name, args, tc_id in parsed_calls:
-                if name in _STREAMING_TOOLS:
+                if tc_id.endswith("__skipped__"):
+                    results.append(_DR_SKIP_MSG)
+                elif name in _STREAMING_TOOLS:
                     result_str = None
                     async for chunk in _stream_command(args):
                         if chunk["type"] == "line":
@@ -1784,14 +1806,19 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 else:
                     results.append(await execute_tool_async(name, args))
         else:
-            # ストリーミング不要ツールは並列実行
+            # ストリーミング不要ツールは並列実行（スキップ済みはダミー結果）
+            async def _skipped(_msg=_DR_SKIP_MSG):
+                return _msg
             results = list(await asyncio.gather(*[
-                execute_tool_async(name, args) for name, args, _ in parsed_calls
+                _skipped() if tc_id.endswith("__skipped__") else execute_tool_async(name, args)
+                for name, args, tc_id in parsed_calls
             ]))
 
         # 結果を順番に処理してメッセージ履歴に追加
         pending_vision_images = []  # render_manim の画像をまとめてvision messageに注入するためのキュー
         for (name, args, tc_id), result in zip(parsed_calls, results):
+            # Deep Research スキップ済みの呼び出しはtool_idの__skipped__サフィックスを除去してLLMに返す
+            real_tc_id = tc_id.replace("__skipped__", "") if tc_id.endswith("__skipped__") else tc_id
             tool_result_for_msg = result  # LLM に渡す tool メッセージの内容
 
             # web_research で Deep Research レポートが返った場合はUIに直接表示（AIに要約させない）
@@ -1895,7 +1922,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
             tool_msg = {
                 "role": "tool",
-                "tool_call_id": tc_id,
+                "tool_call_id": real_tc_id,
                 "content": tool_result_for_msg,
             }
             messages.append(tool_msg)

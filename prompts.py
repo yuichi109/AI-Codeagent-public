@@ -338,7 +338,8 @@ def _build_prompt(bypass_section: str, skills_section: str = "", claude_mds_sect
 | `read_file` | ファイルの内容（または要点）を引用・参照する |
 | `run_command` | stdout/stderr の要点・結果を書く |
 | `grep` / `glob_files` | マッチしたファイル名・行をそのまま示す |
-| `web_search` / `web_fetch` / `web_research` | 取得した情報の要点を回答に書く |
+| `web_search` / `web_fetch` | 取得した情報の要点を回答に書く |
+| `web_research` | レポート全文を省略せずそのまま回答に含める（特にDeep Researchの結果は要約・省略禁止） |
 
 **悪い例（禁止）：**
 > 「ワークスペースの内容を一覧表示しました。次に何をしますか？」

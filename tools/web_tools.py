@@ -136,6 +136,10 @@ def _results_look_relevant(results: list, query: str) -> bool:
 
 
 def web_search(query: str, max_results: int = 5) -> dict:
+    # Deep Research 設定時は web_research にリダイレクト
+    if WEB_RESEARCH_PROVIDER.startswith("deep-research"):
+        return web_research(query)
+
     max_results = min(max_results, 10)
 
     # --- 一次手段: Tavily Search API (設定時のみ・AIエージェント向け高精度) ---

@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER
 from prompts import get_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
@@ -1047,6 +1047,8 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
     if name in ("generate_image", "edit_image", "watermark_image"):
         _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}
         timeout = 600 if arguments.get("size") in _HIGH_RES else 300
+    elif name in ("web_research", "web_search") and WEB_RESEARCH_PROVIDER.startswith("deep-research"):
+        timeout = 600
     elif name == "web_research":
         timeout = 60
     elif name == "run_powershell" and "timeout_seconds" in arguments:

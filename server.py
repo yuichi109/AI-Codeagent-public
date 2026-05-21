@@ -1844,13 +1844,14 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         backend = result_data.get("search_backend", "")
                         query = result_data.get("query", args.get("query", ""))
                         yield f"data: {json.dumps({'type': 'deep_research_report', 'report': report, 'query': query, 'backend': backend}, ensure_ascii=False)}\n\n"
-                        # LLMには「レポートはUIに表示済み」と伝えて再出力を防ぐ
+                        # LLMにはレポート全文を渡しつつ「UI表示済みなので繰り返し不要」と伝える
+                        # ※ report を含めないとwrite_fileなどで保存できなくなるため必ず含める
                         tool_result_for_msg = json.dumps({
                             "query": query,
+                            "report": report,
                             "report_displayed": True,
-                            "report_length": len(report),
                             "search_backend": backend,
-                            "note": "Deep Researchのレポート全文はチャットUIに直接表示済みです。AIは内容を重複して出力する必要はありません。必要に応じて補足コメントのみ追加してください。",
+                            "note": "レポート全文はチャットUIに直接表示済みです。チャット回答でレポートをそのまま繰り返す必要はありません。ただしwrite_fileなどでの保存・加工には上記reportフィールドの全文を使用してください。",
                         }, ensure_ascii=False)
                 except Exception:
                     pass

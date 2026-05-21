@@ -945,6 +945,24 @@ if RESPONSES_API_ENABLED:
         },
     })
 
+# Deep Research が設定されている場合、ツール説明を動的に更新してAIが確実にweb_researchを使うよう誘導
+if WEB_RESEARCH_PROVIDER.startswith("deep-research"):
+    _dr_label = WEB_RESEARCH_PROVIDER.replace("deep-research-", "").upper()
+    for _tool in TOOLS:
+        _fn = _tool.get("function", {})
+        if _fn.get("name") == "web_research":
+            _fn["description"] = (
+                f"【Deep Research ({_dr_label}) 使用中】OpenAI Deep Researchを使った高精度Web調査。"
+                f"Web調査・情報収集が必要な場合は必ずこのツールを使うこと。"
+                f"web_searchより大幅に精度・網羅性が高く、詳細なレポートを返す。"
+            )
+        elif _fn.get("name") == "web_search":
+            _fn["description"] = (
+                "シンプルなWeb検索（DuckDuckGo/Tavily）。"
+                "現在はDeep Researchが設定されているため、Web調査にはweb_researchを使うこと。"
+                "このツールはURLが既にわかっていてweb_fetchを使う直前の簡易確認など、限定的な用途のみ。"
+            )
+
 
 def _get_error_hint(tool_name: str, error_type: str, error_msg: str, args: dict) -> str:
     """エラー種別に応じた自己修正ヒントを返す"""

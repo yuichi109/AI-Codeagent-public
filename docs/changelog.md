@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-05-21（セッション6）
+
+### Deep Research 集中修正（server.py / tools/web_tools.py / index.html）
+
+今日は Deep Research (OpenAI o4-mini-deep-research) が全く使えない状態だったため、集中的に修正。6回以上のテストが無駄になった反省から、表示・保存・接続維持・課金防止の全面対応を実施。
+
+#### バグ修正
+
+**`server.py`**
+- **`_warning` 誤発動修正**: Deep Research の返り値は `sources:[]` が正常仕様のため、`report` フィールドがあれば「成功」と判定するよう変更（以前は空sourceを「失敗」と誤判定してAIがレポートを無視していた）
+- **ツール説明の動的変更**: `WEB_RESEARCH_PROVIDER=deep-research-*` 時に `web_research` の説明を「必ずこのツールを使え」に、`web_search` を「Deep Research設定中は代わりにweb_researchを使え」に変更
+- **二重呼び出し防止**: Deep Research 設定時に同一ターン内で `web_research` が複数呼ばれた場合、2件目以降をサーバー側でブロック（二重課金防止）
+- **SSEキープアライブ追加**: 長時間ツール実行中に30秒ごと `": keepalive\n\n"` を送信してブラウザのSSE接続切れを防止（`asyncio.wait` でタスク監視しながら yield）
+- **タイムアウト延長**: 600秒 → 750秒（リトライ60秒分の余裕を確保）
+- **Deep Research レポートのUI直接表示**: `web_research` 結果に `report` フィールドがある場合に `deep_research_report` SSEイベントを送出（AIの要約を回避）
+- **AIへの全文渡し修正**: tool_result_for_msg に `report` フィールドを含める（以前は `report_displayed:true` のみでAIが保存操作できなかった）
+- **GitLab イシュー #56 作成**: Deep Research実行前確認ダイアログ（有料なのでワンクッション必要）
+
+**`tools/web_tools.py`**
+- **429自動リトライ**: `RateLimitError` 発生時に60秒待って1回自動リトライ
+
+**`index.html`**
+- **`deep_research_report` イベントハンドラ追加**: SSEで受け取ったレポートを青いボックス（マークダウンレンダリング・最大600px・スクロール対応）でチャットに直接表示
+- **セッション復元時の再表示**: `_restoreToolBlocks` で `report_displayed:true` かつ `report` フィールドがあれば、ページリロード後も青いボックスで再レンダリング
+
+#### 残課題（次回セッション）
+
+- **「マークダウンに保存して」だと要約が保存される**: 「調査結果の全文を保存して」と言わないと全文が入らない → prompts.py または tool note を強化して「保存 = report全文」をデフォルト化
+- **Deep Research 動作確認**: 昼間（15〜17時JST）に再テストして全修正が正常に機能するか確認
+- **#56 確認ダイアログ実装**: 有料呼び出し前のワンクッション
+
+#### 今日わかったこと（運用メモ）
+
+- Deep Research 1回 ≒ 175,000 TPM消費（上限200,000/分）→ 連続2回は即429
+- 日本時間21時台 = 米国東海岸8〜9時 → OpenAI混雑時間帯（タイムアウトリスク高）
+- タイムアウトした場合の課金はOpenAI側の処理完了状況次第（不明）
+- 「マークダウンに保存して」だけでは要約が保存される → 「全文を保存して」と明示が必要（次回修正予定）
+
+---
+
 ## 2026-05-21（セッション5）
 
 ### 設計議論・イシュー登録（コード変更なし）

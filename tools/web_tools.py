@@ -1,11 +1,13 @@
 import ipaddress
+import re
 import socket
+from datetime import datetime
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import SEARXNG_BASE_URL, SEARXNG_ENABLED, TAVILY_API_KEY, WEB_RESEARCH_PROVIDER, OPENAI_API_KEY
+from config import SEARXNG_BASE_URL, SEARXNG_ENABLED, TAVILY_API_KEY, WEB_RESEARCH_PROVIDER, OPENAI_API_KEY, ALLOWED_WORK_DIR
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CodeAgent/1.0)"}
 
@@ -307,15 +309,29 @@ def _research_deep_research(query: str, model: str) -> dict:
                 model=model,
                 input=[{"role": "user", "content": query}],
                 tools=[{"type": "web_search_preview"}],
-                timeout=600,
+                timeout=3600,
             )
             report = response.output_text or ""
+            # #:~:text=... URLフラグメント（テキストハイライト指定）を除去
+            report = re.sub(r'#:~:text=[^\s\)\]\"\']+', '', report)
+            # レポートを workspace/ 直下に自動保存
+            saved_filename = ""
+            try:
+                date_str = datetime.now().strftime("%Y%m%d")
+                safe_name = re.sub(r'[\\/:*?"<>|\s]', '_', query[:25]).strip('_')
+                saved_filename = f"{date_str}_{safe_name}レポート.md"
+                save_path = ALLOWED_WORK_DIR / saved_filename
+                save_path.write_text(report, encoding="utf-8")
+                print(f"[deep_research] saved → {save_path}", flush=True)
+            except Exception as e:
+                print(f"[deep_research] save failed: {e}", flush=True)
             return {
                 "query": query,
                 "report": report,
                 "sources": [],
                 "source_count": 0,
                 "search_backend": model,
+                "saved_filename": saved_filename,
             }
         except openai.RateLimitError as e:
             if attempt == 0:

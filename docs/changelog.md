@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-05-22（セッション7）
+
+### Deep Research 残課題解消・品質改善（server.py / tools/web_tools.py / index.html）
+
+#### 新規実装
+
+**`tools/web_tools.py`**
+- **URLフラグメント削除**: レポート内の `#:~:text=...` を `re.sub` で除去（表示・保存がきれいになる）
+- **レポート自動保存**: Deep Research 完了時に `workspace/YYYYMMDD_クエリ名レポート.md` へ自動保存（ファイル名のスペースはアンダースコアに変換）
+- **タイムアウト延長**: API `timeout` を 600秒 → 3600秒（OpenAI公式推奨値）
+
+**`server.py`**
+- **`/providers/current` に `web_research_provider` 追加**: フロントエンドで Deep Research 設定状態を判別できるよう
+- **tool note 強化**: `saved_filename` を回答に含めること・要約は端折らず重要ポイントを網羅することをAIに指示
+- **タイムアウト延長**: `asyncio.wait_for` のタイムアウトを 750秒 → 3600秒
+- **タイムアウト時の再試行禁止**: Deep Research タイムアウト時のエラーメッセージに「再試行・別クエリでの再実行は絶対にしないこと」を追記
+
+**`index.html`**
+- **Deep Research 確認ダイアログ実装（#56）**: Deep Research プロバイダー設定中に送信すると「本当に実行しますか？（有料）」確認ダイアログを表示。キャンセルで中断可能
+- **`_webResearchProvider` 変数追加**: 起動時・プロバイダー切り替え時に `web_research_provider` を取得して保持
+
+#### 動作確認済み
+- 確認ダイアログ表示 ✅
+- 自動保存・ファイル名を回答に含める ✅
+- レポート全文UI表示 ✅
+
+#### 運用メモ（今日判明）
+- Deep Research の実行時間は混雑時間帯で 900〜1200秒超かかることがある（1200秒でもタイムアウトした）
+- タイムアウトしても OpenAI 側で処理が開始されていれば課金される
+- 3600秒（1時間）あればほぼ完走できる見込み
+- ブラウザ更新前に送信すると確認ダイアログが出ずに Deep Research が実行されてしまう（注意）
+
+---
+
 ## 2026-05-21（セッション6）
 
 ### Deep Research 集中修正（server.py / tools/web_tools.py / index.html）

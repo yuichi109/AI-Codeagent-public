@@ -1075,7 +1075,7 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
         _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}
         timeout = 600 if arguments.get("size") in _HIGH_RES else 300
     elif name in ("web_research", "web_search") and WEB_RESEARCH_PROVIDER.startswith("deep-research"):
-        timeout = 750  # Deep Research は最大約10分 + リトライ60秒を考慮して余裕を持たせる
+        timeout = 3600  # Deep Research は最大1時間待つ（OpenAI公式推奨値）
     elif name == "web_research":
         timeout = 60
     elif name == "run_powershell" and "timeout_seconds" in arguments:
@@ -1090,10 +1090,11 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
             timeout=timeout,
         )
     except asyncio.TimeoutError:
-        return json.dumps(
-            {"error": f"ツールがタイムアウトしました ({timeout}秒): {name}"},
-            ensure_ascii=False,
-        )
+        is_dr = name in ("web_research", "web_search") and WEB_RESEARCH_PROVIDER.startswith("deep-research")
+        msg = {"error": f"ツールがタイムアウトしました ({timeout}秒): {name}"}
+        if is_dr:
+            msg["note"] = "Deep Research がタイムアウトしました。再試行・別クエリでの再実行は絶対にしないこと。ユーザーに「タイムアウトしました」とだけ報告してください。"
+        return json.dumps(msg, ensure_ascii=False)
 
 
 async def _stream_command(arguments: dict):
@@ -1843,15 +1844,20 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                     if report:
                         backend = result_data.get("search_backend", "")
                         query = result_data.get("query", args.get("query", ""))
+                        saved_filename = result_data.get("saved_filename", "")
                         yield f"data: {json.dumps({'type': 'deep_research_report', 'report': report, 'query': query, 'backend': backend}, ensure_ascii=False)}\n\n"
-                        # LLMにはレポート全文を渡しつつ「UI表示済みなので繰り返し不要」と伝える
-                        # ※ report を含めないとwrite_fileなどで保存できなくなるため必ず含める
                         tool_result_for_msg = json.dumps({
                             "query": query,
                             "report": report,
                             "report_displayed": True,
                             "search_backend": backend,
-                            "note": "レポート全文はチャットUIに直接表示済みです。チャット回答でレポートをそのまま繰り返す必要はありません。ただしwrite_fileなどでの保存・加工には上記reportフィールドの全文を使用してください。",
+                            "saved_filename": saved_filename,
+                            "note": (
+                                "レポート全文はチャットUIに直接表示済みです。"
+                                "チャット回答ではレポートをそのまま繰り返さないこと。"
+                                f"レポートは '{saved_filename}' として workspace/ に自動保存しました。必ずこのファイル名を回答に含めること。"
+                                "チャット回答では調査結果の重要ポイントを端折らず十分な分量で要約すること（箇条書き・見出しを使って分かりやすく）。"
+                            ),
                         }, ensure_ascii=False)
                 except Exception:
                     pass
@@ -2130,6 +2136,7 @@ async def providers_current():
         "url": _provider_config["url"],
         "model": _provider_config["model"],
         "tools_enabled": _provider_config.get("tools_enabled", True),
+        "web_research_provider": WEB_RESEARCH_PROVIDER,
     })
 
 

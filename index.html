@@ -543,6 +543,18 @@
   .ai th, .ai td { border: 1px solid #45475a; padding: 4px 8px; }
   .ai th { background: #181825; }
   .ai strong { color: #fab387; font-weight: 600; }
+  /* ---- Deep Research 確認ダイアログ ---- */
+  #dr-confirm-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9200; align-items:center; justify-content:center; }
+  #dr-confirm-overlay.open { display:flex; }
+  #dr-confirm-modal { background:#1e1e2e; border:1px solid #89b4fa; border-radius:12px; width:400px; max-width:92vw; box-shadow:0 8px 32px rgba(0,0,0,0.5); overflow:hidden; }
+  #dr-confirm-header { background:#89b4fa; color:#1e1e2e; padding:10px 16px; font-size:14px; font-weight:bold; display:flex; align-items:center; gap:6px; }
+  #dr-confirm-body { padding:16px 20px; font-size:13px; color:#cdd6f4; line-height:1.6; }
+  #dr-confirm-body .dr-warn { color:#f38ba8; font-size:12px; margin-top:8px; }
+  #dr-confirm-footer { padding:12px 20px; border-top:1px solid #313244; display:flex; gap:8px; justify-content:flex-end; }
+  #dr-confirm-ok { padding:7px 18px; background:#89b4fa; color:#1e1e2e; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold; }
+  #dr-confirm-ok:hover { background:#74c7ec; }
+  #dr-confirm-cancel { padding:7px 14px; background:#313244; color:#cdd6f4; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+  #dr-confirm-cancel:hover { background:#45475a; }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -798,6 +810,21 @@
       <button id="scope-clear-btn" onclick="clearWorkspaceScope()">全体に戻す（解除）</button>
       <button id="scope-close-btn" onclick="closeWorkspaceScopeModal()">閉じる</button>
       <button id="scope-mkdir-btn" onclick="createScopeDir()">フォルダ作成</button>
+    </div>
+  </div>
+</div>
+<!-- Deep Research 確認ダイアログ -->
+<div id="dr-confirm-overlay">
+  <div id="dr-confirm-modal">
+    <div id="dr-confirm-header">🔬 Deep Research を実行しますか？</div>
+    <div id="dr-confirm-body">
+      <div>現在 <strong id="dr-confirm-model"></strong> が有効です。</div>
+      <div>Deep Research は 1 回あたり約 <strong>$0.5〜数ドル</strong> の費用が発生します。</div>
+      <div class="dr-warn">⚠ 実行すると即座に課金が開始されます。本当に実行しますか？</div>
+    </div>
+    <div id="dr-confirm-footer">
+      <button id="dr-confirm-cancel" onclick="drConfirmCancel()">キャンセル</button>
+      <button id="dr-confirm-ok" onclick="drConfirmOk()">実行する</button>
     </div>
   </div>
 </div>
@@ -1675,6 +1702,25 @@
 
   function closeWorkspaceScopeModal() {
     document.getElementById('scope-overlay').classList.remove('open');
+  }
+
+  // ---- Deep Research 確認ダイアログ ----
+  let _drConfirmResolve = null;
+  function drConfirmPrompt(provider) {
+    return new Promise(resolve => {
+      _drConfirmResolve = resolve;
+      const modelLabel = provider === 'deep-research-o4-mini' ? 'o4-mini Deep Research' : 'o3 Deep Research';
+      document.getElementById('dr-confirm-model').textContent = modelLabel;
+      document.getElementById('dr-confirm-overlay').classList.add('open');
+    });
+  }
+  function drConfirmOk() {
+    document.getElementById('dr-confirm-overlay').classList.remove('open');
+    if (_drConfirmResolve) { _drConfirmResolve(true); _drConfirmResolve = null; }
+  }
+  function drConfirmCancel() {
+    document.getElementById('dr-confirm-overlay').classList.remove('open');
+    if (_drConfirmResolve) { _drConfirmResolve(false); _drConfirmResolve = null; }
   }
 
   async function loadScopeDirList() {
@@ -2975,6 +3021,7 @@
   let _currentProviderType = 'azure';
   let _currentProviderName = 'Azure OpenAI';
   let _currentModel = '';
+  let _webResearchProvider = 'tavily';
 
   function updatePvCurrent(data) {
     _currentProviderType = data.type;
@@ -2985,6 +3032,7 @@
                 : 'OpenAI互換';
     _currentProviderName = label;
     _currentModel = data.model || '';
+    if (data.web_research_provider) _webResearchProvider = data.web_research_provider;
     document.getElementById('pv-current').textContent = `現在: ${label} / ${data.model || '(未設定)'}`;
     const labelEl = document.getElementById('provider-label');
     labelEl.innerHTML = (PROVIDER_SVG[data.type] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>`;
@@ -3142,6 +3190,12 @@
         UI_COMMANDS[cmdKey].action();
         return;
       }
+    }
+
+    // Deep Research 有効時は確認ダイアログを表示
+    if (_webResearchProvider && _webResearchProvider.startsWith('deep-research')) {
+      const confirmed = await drConfirmPrompt(_webResearchProvider);
+      if (!confirmed) return;
     }
 
     input.value = '';

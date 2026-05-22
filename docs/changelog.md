@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-05-23（セッション9）
+
+### Obsidian WSL統合・環境整備（コード変更なし）
+
+#### 環境整備
+
+**Zone.Identifier ファイル削除**
+- workspace 内に大量発生していた Windows セキュリティメタデータファイルを一括削除（約200個）
+- ワークスペースを Windows側に移したことで発生、WSLに戻したため再発しない
+
+**WSL版 Obsidian インストール（WSLg使用）**
+- Windows版 Obsidian は WSL ファイルシステムを直接開けない（EISDIRエラー・既知の未対応問題）
+- WSLg（Windows 11内蔵）経由で WSL内に Obsidian をインストール → Windowsのスタートメニューから起動可能
+- 依存パッケージ: `obsidian_1.12.7_amd64.deb` / `fonts-noto-cjk` / `wslu`
+- `.bashrc` エイリアス追加（GPU エラー抑制）・`xdg-open` 差し替え（ファイルエクスプローラー誤起動防止）
+- 手順書: `docs/obsidian-setup.md`
+
+**Obsidian Sync 設定**
+- workspace 全体を Obsidian Sync で同期（ドットファイルは自動除外）
+- Windows版・WSL版・iPhone で同一 Vault を共有
+- 個人メモとワークスペースを一つの Vault に統合
+
+#### クローズしたIssue
+- **#56** Deep Research実行前に確認ダイアログ → クローズ（実装済み）
+
+#### 検討中（未決定）
+- workspace のディレクトリ構造整理（notes/ / jobs/ / images/ 分離・Obsidian同期範囲の最適化）→ GitLab #45 に設計メモ追記
+
+---
+
 ## 2026-05-22（セッション8）
 
 ### Mermaid清書・エディタ機能強化・Obsidian連携（index.html / server.py / setup.html）

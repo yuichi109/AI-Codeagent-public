@@ -186,6 +186,32 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+def show_mermaid_batch_refine_dialog(path: str, _workspace_scope: str = "") -> dict:
+    """MDファイル内のMermaidブロックを抽出し、一括清書ダイアログをUIに表示します。
+    ユーザーが清書プロンプトを入力後、ブラウザ側で各図を自動的に清書・差し替えします。"""
+    import re as _re
+    from config import ALLOWED_WORK_DIR
+    target = (ALLOWED_WORK_DIR / path).resolve()
+    if not str(target).startswith(str(ALLOWED_WORK_DIR)):
+        return {"error": "作業ディレクトリ外のファイルへのアクセスは禁止"}
+    if not target.exists():
+        return {"error": f"ファイルが見つかりません: {path}"}
+    content = target.read_text(encoding="utf-8")
+    blocks = []
+    for i, m in enumerate(_re.finditer(r'```mermaid\n(.*?)\n```', content, _re.DOTALL)):
+        blocks.append({"index": i, "code": m.group(1).strip()})
+    if not blocks:
+        return {"message": "Mermaidブロックが見つかりませんでした", "count": 0}
+    return {
+        "file_path": path,
+        "workspace_scope": _workspace_scope,
+        "blocks": blocks,
+        "count": len(blocks),
+        "trigger_ui": "mermaid_batch_refine",
+    }
+
+
 TOOL_REGISTRY = {
     "read_file": read_file,
     "write_file": write_file,
@@ -230,6 +256,7 @@ TOOL_REGISTRY = {
     "generate_image": generate_image,
     "edit_image": edit_image,
     "watermark_image": watermark_image,
+    "show_mermaid_batch_refine_dialog": show_mermaid_batch_refine_dialog,
 }
 
 if RESPONSES_API_ENABLED:
@@ -924,6 +951,20 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "show_mermaid_batch_refine_dialog",
+            "description": "MDファイル内のすべてのMermaid図を一括で清書するダイアログをUIに表示します。ユーザーが「このMDファイルの図を清書して」と依頼した場合に使います。ダイアログで清書プロンプトを入力後、全図が自動的に清書されてMDファイル内の各Mermaidブロックが画像参照に差し替えられます。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "対象MDファイルのパス（作業ディレクトリ相対）"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
 ]
 
 if RESPONSES_API_ENABLED:
@@ -1257,6 +1298,25 @@ class ChatRequest(BaseModel):
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
     resume_job_id: str = ""     # 計画確認後の再開ジョブID
+
+
+class MermaidCheckRequest(BaseModel):
+    code: str          # Mermaidコード
+    image: str         # base64 PNG（data:...プレフィックスなし）
+    user_note: str = ""  # ユーザーからの指摘（「問題なし」後に再チェックする場合）
+
+
+class MermaidRefineRequest(BaseModel):
+    image: str = ""            # base64 PNG（初回清書）
+    source_path: str = ""      # workspace 内パス（再清書時はこちら）
+    prompt: str                # 清書の指示
+    workspace_scope: str = ""  # 作業ディレクトリスコープ
+
+
+class MermaidBatchReplaceRequest(BaseModel):
+    file_path: str                  # 対象MDファイル（ALLOWED_WORK_DIR相対）
+    workspace_scope: str = ""
+    replacements: list[dict]        # [{block_index: int, saved_path: str}]
 
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
@@ -1781,10 +1841,10 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 continue
             yield f"data: {json.dumps({'type': 'tool_start', 'name': name, 'args': args})}\n\n"
 
-        # 画像ツールにワークスペーススコープを注入（保存先をスコープ配下にするため）
-        _IMAGE_TOOLS = {"generate_image", "edit_image", "watermark_image"}
+        # 画像ツール・一括清書ダイアログにワークスペーススコープを注入（保存先をスコープ配下にするため）
+        _SCOPE_TOOLS = {"generate_image", "edit_image", "watermark_image", "show_mermaid_batch_refine_dialog"}
         for _i, (_name, _args, _) in enumerate(parsed_calls):
-            if _name in _IMAGE_TOOLS and workspace_scope:
+            if _name in _SCOPE_TOOLS and workspace_scope:
                 _args["_workspace_scope"] = workspace_scope
 
         # ツールを実行（run_commandはストリーミング、他は並列）
@@ -1889,6 +1949,16 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 except Exception:
                     pass
 
+            # show_mermaid_batch_refine_dialog: 一括清書ダイアログをSSEで送信
+            if name == "show_mermaid_batch_refine_dialog":
+                try:
+                    result_data = json.loads(result)
+                    if result_data.get("trigger_ui") == "mermaid_batch_refine":
+                        payload = json.dumps({'type': 'mermaid_batch_refine', 'file_path': result_data['file_path'], 'workspace_scope': result_data.get('workspace_scope', ''), 'blocks': result_data['blocks'], 'count': result_data['count']})
+                        yield f"data: {payload}\n\n"
+                except Exception:
+                    pass
+
             # generate_image / edit_image / watermark_image: 画像をUIに送信（base64をLLM履歴から除去）
             if name in ("generate_image", "edit_image", "watermark_image"):
                 try:
@@ -1980,6 +2050,120 @@ async def chat(req: ChatRequest):
     else:
         stream = agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope)
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@app.post("/mermaid-check")
+async def mermaid_check(req: MermaidCheckRequest):
+    """Mermaid図のレイアウトをAIビジョンでチェックし、修正コードがあれば返す"""
+    import re as _re
+    if req.user_note:
+        system_prompt = (
+            "あなたはMermaidダイアグラムの修正アシスタントです。"
+            "ユーザーから指摘された問題点を踏まえて、MermaidコードとPNG画像を確認し、修正したMermaidコードを```mermaidブロックで返してください。"
+            "余分な説明は不要です。修正コードのみ返してください。"
+        )
+    else:
+        system_prompt = (
+            "あなたはMermaidダイアグラムの品質チェッカーです。"
+            "提示されたMermaidコードと、そのコードから生成した図の画像を確認してください。"
+            "以下の問題がある場合のみ、修正したMermaidコードを```mermaidブロックで返してください:\n"
+            "- ノード名・テキストの文字被り・重なり\n"
+            "- 矢印や接続線の重なり・交差\n"
+            "- 読みにくいレイアウト\n"
+            "問題がなければ「問題なし」とだけ答えてください。余分な説明は不要です。"
+        )
+    note_text = f"\n\nユーザーからの指摘: {req.user_note}" if req.user_note else ""
+    user_content = [
+        {"type": "text", "text": f"Mermaidコード:\n```mermaid\n{req.code}\n```\n\n上記コードが生成した図の画像を確認し、レイアウトの問題をチェックしてください。{note_text}"},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{req.image}"}},
+    ]
+    try:
+        client = _make_async_client()
+        resp = await client.chat.completions.create(
+            model=_provider_config["model"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            max_completion_tokens=1000,
+            temperature=0,
+        )
+        content = resp.choices[0].message.content or ""
+        m = _re.search(r'```mermaid\s*([\s\S]*?)```', content)
+        fixed_code = m.group(1).strip() if m else None
+        return JSONResponse({"fixed_code": fixed_code, "message": content})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/mermaid-refine")
+async def mermaid_refine(req: MermaidRefineRequest):
+    """MermaidのPNGをgpt-image-2で清書する（img2img）"""
+    from tools.image_tools import _make_client, _b64_from_response, _save_to_workspace
+    from config import IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_SIZE, ALLOWED_WORK_DIR
+    import io as _io, base64 as _b64lib
+    try:
+        client = _make_client(IMAGE_PROVIDER)
+        if req.source_path:
+            # 再清書：workspace内の保存済みファイルから読み込む
+            target = (ALLOWED_WORK_DIR / req.source_path).resolve()
+            if not str(target).startswith(str(ALLOWED_WORK_DIR)):
+                return JSONResponse({"error": "作業ディレクトリ外のファイルへのアクセスは禁止"}, status_code=400)
+            if not target.exists():
+                return JSONResponse({"error": f"ファイルが見つかりません: {req.source_path}"}, status_code=404)
+            img_bytes = target.read_bytes()
+        else:
+            img_bytes = _b64lib.b64decode(req.image)
+        buf = _io.BytesIO(img_bytes)
+        kwargs: dict = dict(
+            model=IMAGE_MODEL,
+            image=("mermaid.png", buf, "image/png"),
+            prompt=req.prompt,
+            n=1,
+        )
+        sz = IMAGE_SIZE or "1024x1024"
+        if sz and sz != "auto":
+            kwargs["size"] = sz
+        resp = await asyncio.to_thread(lambda: client.images.edit(**kwargs))
+        b64 = _b64_from_response(resp.data[0])
+        saved_path = _save_to_workspace(b64, "mermaid_refined", req.workspace_scope)
+        return JSONResponse({"image": b64, "mime": "image/png", "saved_path": saved_path, "model": IMAGE_MODEL})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/mermaid-batch-replace")
+async def mermaid_batch_replace(req: MermaidBatchReplaceRequest):
+    """MDファイルのMermaidブロックを清書済み画像参照（Markdown形式）に差し替える"""
+    import re as _re
+    from config import ALLOWED_WORK_DIR
+    target = (ALLOWED_WORK_DIR / req.file_path).resolve()
+    if not str(target).startswith(str(ALLOWED_WORK_DIR)):
+        return JSONResponse({"error": "作業ディレクトリ外のファイルへのアクセスは禁止"}, status_code=400)
+    if not target.exists():
+        return JSONResponse({"error": f"ファイルが見つかりません: {req.file_path}"}, status_code=404)
+    import os as _os
+    content = target.read_text(encoding="utf-8")
+    matches = list(_re.finditer(r'```mermaid\n.*?\n```', content, _re.DOTALL))
+    # MDファイルのディレクトリ（saved_pathからの相対パス計算用）
+    md_dir = _os.path.dirname(req.file_path) or "."
+    # 後ろから差し替えることで前方の位置ずれを防ぐ
+    sorted_reps = sorted(req.replacements, key=lambda x: x.get("block_index", 0), reverse=True)
+    replaced = 0
+    for rep in sorted_reps:
+        idx = rep.get("block_index", -1)
+        saved_path = rep.get("saved_path", "")
+        if idx < 0 or idx >= len(matches) or not saved_path:
+            continue
+        m = matches[idx]
+        fig_label = f"図{idx + 1}"
+        # MDファイルからの相対パスに変換（Markdown画像参照用）
+        rel_img_path = _os.path.relpath(saved_path, md_dir).replace("\\", "/")
+        img_ref = f"![{fig_label}]({rel_img_path})"
+        content = content[:m.start()] + img_ref + content[m.end():]
+        replaced += 1
+    target.write_text(content, encoding="utf-8")
+    return JSONResponse({"ok": True, "replaced": replaced, "total": len(req.replacements)})
 
 
 @app.get("/skills")
@@ -3741,6 +3925,60 @@ async def setup_save(req: SetupSaveRequest):
             return JSONResponse({"status": "ok"})
         except Exception as e:
             return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+
+
+@app.get("/setup/browse-dir")
+async def browse_dir(path: str = ""):
+    """ディレクトリブラウザ用: 指定パス(WindowsパスまたはWSLパス)の直下フォルダ一覧を返す"""
+    from config import _normalize_to_wsl_path
+    def _to_win(wsl_str: str) -> str:
+        """WSLパス → Windowsパス表記（/mnt/c/... → C:\...）"""
+        if wsl_str.startswith("/mnt/") and len(wsl_str) > 5 and wsl_str[5] != "/":
+            drive = wsl_str[5].upper()
+            rest  = wsl_str[6:].replace("/", "\\")
+            return f"{drive}:{rest or chr(92)}"
+        return wsl_str
+
+    if not path:
+        # ルート: Windowsドライブ一覧 + WSLホーム
+        entries = []
+        home = Path.home()
+        entries.append({"name": f"ホーム ({home})", "wsl_path": str(home), "win_path": str(home)})
+        mnt = Path("/mnt")
+        if mnt.exists():
+            for p in sorted(mnt.iterdir()):
+                if p.is_dir() and len(p.name) == 1 and p.name.isalpha():
+                    drive = p.name.upper()
+                    entries.append({"name": f"ドライブ {drive}:\\", "wsl_path": str(p), "win_path": f"{drive}:\\"})
+        return JSONResponse({"entries": entries, "current_wsl": "", "current_win": "", "parent_wsl": ""})
+
+    try:
+        import os as _os
+        wsl_path = _normalize_to_wsl_path(path)
+        wsl_str  = str(wsl_path)
+        entries  = []
+        try:
+            names = _os.listdir(wsl_str)
+        except PermissionError:
+            names = []
+        for name in sorted(names, key=str.lower):
+            if name.startswith("."):
+                continue
+            full = _os.path.join(wsl_str, name)
+            try:
+                if _os.path.isdir(full):
+                    entries.append({"name": name, "wsl_path": full, "win_path": _to_win(full)})
+            except OSError:
+                pass
+        parent = str(wsl_path.parent) if wsl_str not in ("/", "") else ""
+        return JSONResponse({
+            "entries": entries,
+            "current_wsl": wsl_str,
+            "current_win": _to_win(wsl_str),
+            "parent_wsl": parent,
+        })
+    except Exception as e:
+        return JSONResponse({"entries": [], "error": str(e), "current_wsl": path, "current_win": path, "parent_wsl": ""})
 
 
 @app.get("/setup/ansible-creds")

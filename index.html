@@ -396,6 +396,9 @@
   #editor-main-area { display: flex; flex: 1; overflow: hidden; }
   #editor-container { flex: 1; overflow: hidden; }
   #editor-preview-pane { flex: 1; overflow-y: auto; padding: 16px 24px; background: #1e1e2e; border-left: 1px solid #313244; font-size: 14px; line-height: 1.7; color: #cdd6f4; display: none; }
+  #editor-preview-content { width: 100%; }
+  #editor-preview-content p { margin: 0.7em 0; }
+  #editor-preview-content br { display: block; margin-bottom: 0.4em; }
   #editor-preview-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; display: none; }
   #editor-preview-btn.on { background: #89b4fa; color: #1e1e2e; font-weight: bold; }
   #editor-preview-btn:hover { opacity: 0.85; }
@@ -543,6 +546,21 @@
   .ai th, .ai td { border: 1px solid #45475a; padding: 4px 8px; }
   .ai th { background: #181825; }
   .ai strong { color: #fab387; font-weight: 600; }
+  /* ---- Mermaidダイアグラム ---- */
+  .mermaid-block { background:#fff; border:1px solid #45475a; border-radius:8px; margin:8px 0; overflow:hidden; }
+  .mermaid-header { display:flex; align-items:center; justify-content:space-between; padding:4px 12px; background:#f0f0f0; border-bottom:1px solid #ddd; font-size:11px; color:#555; font-family:monospace; }
+  .mermaid-header-left { display:flex; align-items:center; gap:6px; font-weight:bold; }
+  .mermaid-svg-area { padding:16px; text-align:center; background:#fff; min-height:40px; }
+  .mermaid-svg-area svg { max-width:100%; height:auto; }
+  .mermaid-src { display:none; }
+  .mermaid-btn { padding:2px 8px; background:#e8e8e8; color:#444; border:1px solid #ccc; border-radius:4px; cursor:pointer; font-size:11px; margin-left:4px; }
+  .mermaid-btn:hover { background:#d4d4d4; }
+  .mermaid-btn:disabled { opacity:0.5; cursor:default; }
+  .mermaid-check-result { padding:8px 12px; background:#fffde7; border-top:1px solid #ffe082; font-size:12px; color:#555; }
+  .mermaid-check-result pre { font-size:11px; margin:6px 0 0; white-space:pre-wrap; word-break:break-all; background:#f5f5f5; padding:6px; border-radius:4px; }
+  .mermaid-apply-btn { margin-left:8px; padding:2px 8px; background:#a6e3a1; color:#1e1e2e; border:none; border-radius:4px; cursor:pointer; font-size:11px; }
+  .mermaid-skip-btn { margin-left:4px; padding:2px 8px; background:#f38ba8; color:#1e1e2e; border:none; border-radius:4px; cursor:pointer; font-size:11px; }
+  .mermaid-checked-badge { color:#22863a; font-size:11px; font-weight:normal; }
   /* ---- Deep Research 確認ダイアログ ---- */
   #dr-confirm-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9200; align-items:center; justify-content:center; }
   #dr-confirm-overlay.open { display:flex; }
@@ -559,6 +577,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <div id="workspace-scope-bar">
@@ -713,6 +732,16 @@
     <button id="editor-new-btn" onclick="editorNewFile()">＋ 新規</button>
     <button id="editor-save-btn" onclick="editorSave()" disabled>💾 保存</button>
     <button id="editor-preview-btn" onclick="toggleEditorPreview()" title="Markdownプレビュー">👁 プレビュー</button>
+    <select id="editor-page-size" title="用紙ガイド" onchange="_onPageSizeChange()" style="display:none;padding:3px 6px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:12px;cursor:pointer;">
+      <option value="">ガイドなし</option>
+      <option value="a4p">A4 縦</option>
+      <option value="a4l">A4 横</option>
+      <option value="a3p">A3 縦</option>
+      <option value="a3l">A3 横</option>
+    </select>
+    <span id="editor-page-margin-wrap" style="display:none;align-items:center;gap:3px;font-size:12px;color:#a6adc8;">
+      余白<input id="editor-page-margin" type="number" min="0" max="60" value="20" title="左右余白(mm) — PDFツールの設定に合わせて調整" onchange="updateEditorPageGuide()" oninput="updateEditorPageGuide()" style="width:42px;padding:2px 4px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:4px;font-size:12px;text-align:right;">mm
+    </span>
     <button id="editor-ai-btn" onclick="toggleEditorAI()" title="AI補完（Tabで確定）">🤖 AI補完: OFF</button>
     <select id="editor-complete-model" title="補完用モデル（チャットとは独立）" onchange="localStorage.setItem('editorCompleteModel', this.value)"></select>
     <button id="inline-chat-btn" onclick="toggleInlineChat()" title="インラインチャット (Ctrl+Shift+K)">💬 チャット</button>
@@ -869,11 +898,49 @@
   // marked v5+ では highlight オプション廃止 → hljs.highlightElement を手動適用
   marked.setOptions({ breaks: true, gfm: true });
 
+
+  // ---- Mermaid 初期化 ----
+  if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+  }
+
   function renderMarkdown(text) {
+    // Obsidian互換パイプ記法を事前変換: ![alt|80%](path) → <img src="path" style="width:80%">
+    text = text.replace(/!\[([^\]]*?)\|(\d+)(px|%)?]\(([^)]+)\)/g, (_, alt, w, unit, href) =>
+      `<img src="${href}" alt="${alt}" style="width:${w}${unit || 'px'};max-width:100%;">`
+    );
     const html = marked.parse(text);
     const div = document.createElement('div');
     div.innerHTML = html;
-    // シンタックスハイライト適用
+    // Mermaidブロックを先に変換（hljsとcode-headerの対象から除外）
+    div.querySelectorAll('pre code.language-mermaid').forEach(code => {
+      const mermaidCode = code.textContent || '';
+      const pre = code.closest('pre');
+      const block = document.createElement('div');
+      block.className = 'mermaid-block';
+      block.innerHTML =
+        '<div class="mermaid-header">' +
+          '<div class="mermaid-header-left"><span>Mermaid</span></div>' +
+          '<div>' +
+            '<button class="mermaid-btn mermaid-copy-btn">コピー</button>' +
+            '<button class="mermaid-btn mermaid-png-btn">PNG保存</button>' +
+            '<button class="mermaid-btn mermaid-ai-btn">🤖 AIチェック</button>' +
+            '<button class="mermaid-btn mermaid-refine-btn">✨ 清書</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="mermaid-svg-area"></div>' +
+        '<div class="mermaid-refine-input-area" style="display:none;padding:8px 12px;background:#f9f9f9;border-top:1px solid #ddd">' +
+          '<div style="font-size:11px;color:#555;margin-bottom:4px">清書の指示を入力してください</div>' +
+          '<textarea class="mermaid-refine-prompt" placeholder="例: より見やすく美しくスタイリッシュに清書してください。白背景で。" ' +
+          'style="width:100%;height:64px;font-size:12px;padding:4px;border:1px solid #ccc;border-radius:4px;resize:vertical;box-sizing:border-box"></textarea>' +
+          '<button class="mermaid-btn mermaid-refine-submit-btn" style="margin-top:4px">清書実行</button>' +
+        '</div>' +
+        '<div class="mermaid-refine-result" style="display:none"></div>' +
+        '<div class="mermaid-src"></div>';
+      block.querySelector('.mermaid-src').textContent = mermaidCode;
+      pre.replaceWith(block);
+    });
+    // シンタックスハイライト適用（Mermaid以外）
     div.querySelectorAll('pre code').forEach(block => {
       hljs.highlightElement(block);
     });
@@ -887,9 +954,108 @@
     return div.innerHTML;
   }
 
+  // ---- Mermaid清書キャッシュ（localStorage: コード先頭200文字 → saved_path）----
+  const _MM_REFINE_KEY = 'mermaid-refine-cache';
+  function _mmRefineKey(code) { return code.trim().slice(0, 200); }
+  function _mmRefineSave(code, savedPath) {
+    try {
+      const c = JSON.parse(localStorage.getItem(_MM_REFINE_KEY) || '{}');
+      c[_mmRefineKey(code)] = savedPath;
+      localStorage.setItem(_MM_REFINE_KEY, JSON.stringify(c));
+    } catch (_e) {}
+  }
+  function _mmRefineGet(code) {
+    try { return (JSON.parse(localStorage.getItem(_MM_REFINE_KEY) || '{}'))[_mmRefineKey(code)] || null; }
+    catch (_e) { return null; }
+  }
+
+  // 清書キャッシュがあれば /workspace/image から再表示
+  function _restoreMermaidRefine(el) {
+    const blocks = el.querySelectorAll ? el.querySelectorAll('.mermaid-block') : [];
+    for (const block of blocks) {
+      const src = block.querySelector('.mermaid-src');
+      const resultDiv = block.querySelector('.mermaid-refine-result');
+      if (!src || !resultDiv) continue;
+      if (resultDiv.querySelector('img')) continue;  // 既に表示済み
+      const savedPath = _mmRefineGet(src.textContent.trim());
+      if (!savedPath) continue;
+      const imgUrl = '/workspace/image?path=' + encodeURIComponent(savedPath);
+      resultDiv.style.display = '';
+      resultDiv.innerHTML =
+        '<div style="padding:8px 12px;background:#f0f7ff;border-top:1px solid #b3d4f5">' +
+          '<div style="font-size:11px;color:#555;margin-bottom:6px">✨ 清書済み</div>' +
+          `<img src="${imgUrl}" style="max-width:100%;border-radius:4px;border:1px solid #ddd" onerror="this.closest('.mermaid-refine-result').style.display='none'">` +
+          '<div style="margin-top:6px">' +
+            `<button class="mermaid-btn mermaid-refine-png-btn" data-path="${escHtml(savedPath)}">PNG保存</button>` +
+            `<button class="mermaid-btn mermaid-rerefine-btn" data-path="${escHtml(savedPath)}">🔄 もう一度清書</button>` +
+          '</div>' +
+        '</div>';
+    }
+  }
+
+  // Mermaidブロックを非同期でレンダリング（コードが変わった場合のみ再実行）
+  async function renderMermaid(el) {
+    if (typeof mermaid === 'undefined') return;
+    const blocks = el.querySelectorAll ? el.querySelectorAll('.mermaid-block') : [];
+    for (const block of blocks) {
+      const src = block.querySelector('.mermaid-src');
+      const svgArea = block.querySelector('.mermaid-svg-area');
+      if (!src || !svgArea) continue;
+      const code = src.textContent.trim();
+      if (!code) continue;
+      if (block.dataset.lastCode === code && svgArea.innerHTML) continue;
+      const id = 'mm-' + Math.random().toString(36).slice(2);
+      try {
+        const { svg } = await mermaid.render(id, code);
+        svgArea.innerHTML = svg;
+        block.dataset.lastCode = code;
+      } catch (_e) {
+        // ストリーミング途中の不完全なコードは無視
+      }
+    }
+    _restoreMermaidRefine(el);
+  }
+
+  // SVGをPNGのbase64に変換
+  function _svgToPngBase64(svgEl) {
+    return new Promise((resolve, reject) => {
+      // width/heightを明示的に付与（Mermaid生成SVGはviewBoxのみの場合がある）
+      const bbox = svgEl.getBoundingClientRect();
+      const w = Math.round(bbox.width) || (svgEl.viewBox && svgEl.viewBox.baseVal.width) || 800;
+      const h = Math.round(bbox.height) || (svgEl.viewBox && svgEl.viewBox.baseVal.height) || 600;
+      const clone = svgEl.cloneNode(true);
+      clone.setAttribute('width', w);
+      clone.setAttribute('height', h);
+      // BlobURLではなくDataURLを使う（onloadが呼ばれないブラウザ互換問題を回避）
+      const svgData = new XMLSerializer().serializeToString(clone);
+      const dataUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+      const img = new Image();
+      const timeout = setTimeout(() => reject(new Error('SVG変換タイムアウト（5秒）')), 5000);
+      img.onload = () => {
+        clearTimeout(timeout);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          resolve(canvas.toDataURL('image/png').split(',')[1]);
+        } catch (e) {
+          reject(new Error('Canvas描画失敗: ' + e.message));
+        }
+      };
+      img.onerror = (e) => { clearTimeout(timeout); reject(new Error('SVG画像読み込み失敗')); };
+      img.src = dataUrl;
+    });
+  }
+
   function setAiContent(el, text) {
     el.innerHTML = renderMarkdown(text);
     if (typeof _injectDrawioButtons === 'function') _injectDrawioButtons(el);
+    // Mermaid: デバウンス300msでレンダリング（ストリーミング中の連打防止）
+    clearTimeout(el._mermaidTimer);
+    el._mermaidTimer = setTimeout(() => renderMermaid(el), 300);
   }
 
   // ---- スピナー＋状態表示 ----
@@ -981,6 +1147,224 @@
       done();
     }
   });
+
+  // ---- Mermaid ボタンのイベント委譲 ----
+  chat.addEventListener('click', e => {
+    // コピー
+    const copyBtn = e.target.closest('.mermaid-copy-btn');
+    if (copyBtn) {
+      const src = copyBtn.closest('.mermaid-block')?.querySelector('.mermaid-src');
+      if (!src) return;
+      const text = src.textContent.trim();
+      const done = () => { copyBtn.textContent = '✓ コピー済み'; setTimeout(() => copyBtn.textContent = 'コピー', 2000); };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        done();
+      }
+      return;
+    }
+    // PNG保存
+    const pngBtn = e.target.closest('.mermaid-png-btn');
+    if (pngBtn) {
+      const svgEl = pngBtn.closest('.mermaid-block')?.querySelector('.mermaid-svg-area svg');
+      if (!svgEl) { alert('まずMermaid図をレンダリングしてください'); return; }
+      _svgToPngBase64(svgEl).then(b64 => {
+        const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,15);
+        const a = document.createElement('a');
+        a.href = 'data:image/png;base64,' + b64;
+        a.download = `mermaid-${ts}.png`;
+        a.click();
+      });
+      return;
+    }
+    // AIチェック
+    const aiBtn = e.target.closest('.mermaid-ai-btn');
+    if (aiBtn) { _mermaidAiCheck(aiBtn, ''); return; }
+    // 清書ボタン → 入力欄トグル
+    const refineBtn = e.target.closest('.mermaid-refine-btn');
+    if (refineBtn) {
+      const area = refineBtn.closest('.mermaid-block')?.querySelector('.mermaid-refine-input-area');
+      if (area) area.style.display = area.style.display === 'none' ? '' : 'none';
+      return;
+    }
+    // 清書実行
+    const refineSubmit = e.target.closest('.mermaid-refine-submit-btn');
+    if (refineSubmit) { _mermaidRefine(refineSubmit); return; }
+    // 清書画像のPNG保存
+    const refinePngBtn = e.target.closest('.mermaid-refine-png-btn');
+    if (refinePngBtn) {
+      const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,15);
+      const savedPath = refinePngBtn.dataset.path;
+      if (savedPath) {
+        // workspace に保存済みのファイルをダウンロード
+        const a = document.createElement('a');
+        a.href = '/workspace/image?path=' + encodeURIComponent(savedPath);
+        a.download = `mermaid-refined-${ts}.png`;
+        a.click();
+      }
+      return;
+    }
+    // もう一度清書 → 保存済みパスをセットして入力欄を開く
+    const reRefineBtn = e.target.closest('.mermaid-rerefine-btn');
+    if (reRefineBtn) {
+      const block = reRefineBtn.closest('.mermaid-block');
+      if (!block) return;
+      block.dataset.refineSourcePath = reRefineBtn.dataset.path || '';
+      const area = block.querySelector('.mermaid-refine-input-area');
+      if (area) area.style.display = '';
+      return;
+    }
+    // 「問題を指摘して再チェック」ボタン → 入力欄を表示
+    const recheckBtn = e.target.closest('.mermaid-recheck-btn');
+    if (recheckBtn) {
+      const area = recheckBtn.closest('.mermaid-check-result')?.querySelector('.mermaid-recheck-area');
+      if (area) { area.style.display = area.style.display === 'none' ? '' : 'none'; }
+      return;
+    }
+    // 指摘メモを入力して再チェック
+    const recheckSubmit = e.target.closest('.mermaid-recheck-submit-btn');
+    if (recheckSubmit) {
+      const resultDiv = recheckSubmit.closest('.mermaid-check-result');
+      const note = resultDiv?.querySelector('.mermaid-recheck-input')?.value?.trim() || '';
+      const aiBtn2 = resultDiv?.closest('.mermaid-block')?.querySelector('.mermaid-ai-btn');
+      if (aiBtn2) _mermaidAiCheck(aiBtn2, note);
+      return;
+    }
+    // 修正適用
+    const applyBtn = e.target.closest('.mermaid-apply-btn');
+    if (applyBtn) {
+      const block = applyBtn.closest('.mermaid-block');
+      const newCode = applyBtn.dataset.code;
+      if (block && newCode) {
+        block.querySelector('.mermaid-src').textContent = newCode;
+        block.dataset.lastCode = '';
+        renderMermaid(block.closest('.msg') || block.parentElement);
+        const res = block.querySelector('.mermaid-check-result');
+        if (res) res.innerHTML = '<span class="mermaid-checked-badge">✅ AIチェック済み（修正適用）</span>';
+      }
+      return;
+    }
+    // 修正スキップ
+    const skipBtn = e.target.closest('.mermaid-skip-btn');
+    if (skipBtn) {
+      const res = skipBtn.closest('.mermaid-check-result');
+      if (res) res.innerHTML = '<span class="mermaid-checked-badge">✅ AIチェック済み（修正スキップ）</span>';
+      return;
+    }
+  });
+
+  async function _mermaidAiCheck(btn, userNote) {
+    const block = btn.closest('.mermaid-block');
+    if (!block) return;
+    const src = block.querySelector('.mermaid-src');
+    const svgEl = block.querySelector('.mermaid-svg-area svg');
+    if (!svgEl) { alert('まずMermaid図をレンダリングしてください'); return; }
+    btn.textContent = '⏳ チェック中...';
+    btn.disabled = true;
+    try {
+      const pngB64 = await _svgToPngBase64(svgEl);
+      const resp = await fetch('/mermaid-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: src.textContent.trim(), image: pngB64, user_note: userNote || '' }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      let resultDiv = block.querySelector('.mermaid-check-result');
+      if (!resultDiv) {
+        resultDiv = document.createElement('div');
+        resultDiv.className = 'mermaid-check-result';
+        block.appendChild(resultDiv);
+      }
+      if (data.fixed_code) {
+        const escaped = escHtml(data.fixed_code);
+        resultDiv.innerHTML =
+          '修正案があります ' +
+          `<button class="mermaid-apply-btn" data-code="">適用する</button>` +
+          `<button class="mermaid-skip-btn">スキップ</button>` +
+          `<pre>${escaped}</pre>`;
+        resultDiv.querySelector('.mermaid-apply-btn').dataset.code = data.fixed_code;
+      } else {
+        resultDiv.innerHTML =
+          '<span class="mermaid-checked-badge">✅ レイアウトに問題なし</span> ' +
+          '<button class="mermaid-btn mermaid-recheck-btn" style="font-size:10px">問題を指摘して再チェック</button>' +
+          '<div class="mermaid-recheck-area" style="display:none;margin-top:6px">' +
+            '<textarea class="mermaid-recheck-input" placeholder="問題点を具体的に入力（例: ノードBとCのラベルが重なっている）" ' +
+            'style="width:100%;height:56px;font-size:12px;padding:4px;border:1px solid #ccc;border-radius:4px;resize:vertical;box-sizing:border-box"></textarea>' +
+            '<button class="mermaid-btn mermaid-recheck-submit-btn" style="margin-top:4px">この内容でAIに再チェック</button>' +
+          '</div>';
+      }
+    } catch (err) {
+      alert('AIチェックに失敗しました: ' + err.message);
+    } finally {
+      btn.textContent = '🤖 AIチェック';
+      btn.disabled = false;
+    }
+  }
+
+  async function _mermaidRefine(submitBtn) {
+    const block = submitBtn.closest('.mermaid-block');
+    if (!block) return;
+    const prompt = block.querySelector('.mermaid-refine-prompt')?.value?.trim();
+    if (!prompt) { alert('清書の指示を入力してください'); return; }
+    // 再清書（source_path）か初回清書（SVG→PNG）かを判断
+    const sourcePath = block.dataset.refineSourcePath || '';
+    let pngB64 = '';
+    if (!sourcePath) {
+      const svgEl = block.querySelector('.mermaid-svg-area svg');
+      if (!svgEl) { alert('まずMermaid図をレンダリングしてください'); return; }
+      try { pngB64 = await _svgToPngBase64(svgEl); } catch(e) { alert('PNG変換失敗: ' + e.message); return; }
+    }
+    submitBtn.textContent = '⏳ 生成中...';
+    submitBtn.disabled = true;
+    const resultDiv = block.querySelector('.mermaid-refine-result');
+    resultDiv.style.display = '';
+    resultDiv.innerHTML = '<div style="padding:12px;color:#888;font-size:12px">✨ 清書中... しばらくお待ちください</div>';
+    try {
+      const body = sourcePath
+        ? { source_path: sourcePath, prompt, workspace_scope: currentWorkspaceScope }
+        : { image: pngB64, prompt, workspace_scope: currentWorkspaceScope };
+      const resp = await fetch('/mermaid-refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      // キャッシュ保存（リロード後の復元用）
+      const mermaidCode = block.querySelector('.mermaid-src')?.textContent?.trim() || '';
+      if (data.saved_path && mermaidCode) _mmRefineSave(mermaidCode, data.saved_path);
+      // 再清書フラグをクリア
+      block.dataset.refineSourcePath = '';
+      const imgSrc = data.saved_path
+        ? '/workspace/image?path=' + encodeURIComponent(data.saved_path)
+        : 'data:image/png;base64,' + data.image;
+      resultDiv.innerHTML =
+        '<div style="padding:8px 12px;background:#f0f7ff;border-top:1px solid #b3d4f5">' +
+          '<div style="font-size:11px;color:#555;margin-bottom:6px">✨ 清書完了' +
+            (data.model ? ` (${escHtml(data.model)})` : '') +
+            (data.saved_path ? ` — <code>${escHtml(data.saved_path)}</code>` : '') +
+          '</div>' +
+          `<img src="${imgSrc}" style="max-width:100%;border-radius:4px;border:1px solid #ddd">` +
+          '<div style="margin-top:6px">' +
+            `<button class="mermaid-btn mermaid-refine-png-btn" data-path="${escHtml(data.saved_path || '')}">PNG保存</button>` +
+            `<button class="mermaid-btn mermaid-rerefine-btn" data-path="${escHtml(data.saved_path || '')}">🔄 もう一度清書</button>` +
+          '</div>' +
+        '</div>';
+      // 入力欄を閉じる
+      block.querySelector('.mermaid-refine-input-area').style.display = 'none';
+    } catch (err) {
+      resultDiv.innerHTML = `<div style="padding:8px 12px;color:#c00;font-size:12px">❌ 清書失敗: ${escHtml(err.message)}</div>`;
+    } finally {
+      submitBtn.textContent = '清書実行';
+      submitBtn.disabled = false;
+    }
+  }
 
   function updateGenStatus() {
     const el = document.getElementById('gen-status');
@@ -2082,7 +2466,7 @@
     const d = document.createElement('div');
     d.className = `msg ${cls}`;
     if (cls === 'ai' && text) {
-      d.innerHTML = renderMarkdown(text);
+      setAiContent(d, text);
     } else {
       d.textContent = text;
     }
@@ -2277,6 +2661,7 @@
               const drBody = document.createElement('div');
               drBody.style.cssText = 'padding: 12px 16px; background: var(--base); font-size: 13px; line-height: 1.7; overflow-x: auto; max-height: 600px; overflow-y: auto;';
               drBody.innerHTML = (typeof marked !== 'undefined') ? marked.parse(td.report) : td.report.replace(/\n/g, '<br>');
+              if (typeof renderMermaid === 'function') renderMermaid(drBody);
               drWrap.appendChild(drHeader);
               drWrap.appendChild(drQuery);
               drWrap.appendChild(drBody);
@@ -3412,6 +3797,8 @@
           } else if (data.type === 'ansible_chooser') {
             // answer_done 後に chat 末尾へ描画するためデータを保持
             pendingAnsibleChooser = { playbooks: data.playbooks, credsExists: data.creds_exists, credsFilled: data.creds_filled };
+          } else if (data.type === 'mermaid_batch_refine') {
+            showMermaidBatchModal(data.file_path, data.workspace_scope, data.blocks, data.count);
           } else if (data.type === 'image_generated') {
             const imgWrap = document.createElement('div');
             imgWrap.style.cssText = 'margin: 8px 0 4px 0;';
@@ -3463,6 +3850,7 @@
             const drBody = document.createElement('div');
             drBody.style.cssText = 'padding: 12px 16px; background: var(--base); font-size: 13px; line-height: 1.7; overflow-x: auto; max-height: 600px; overflow-y: auto;';
             drBody.innerHTML = (typeof marked !== 'undefined') ? marked.parse(data.report || '') : (data.report || '').replace(/\n/g, '<br>');
+            if (typeof renderMermaid === 'function') renderMermaid(drBody);
             drWrap.appendChild(drHeader);
             drWrap.appendChild(drQuery);
             drWrap.appendChild(drBody);
@@ -3960,33 +4348,110 @@
     if (!btn) return;
     const isMd = isMarkdownPath(editorCurrentPath);
     btn.style.display = isMd ? 'inline-block' : 'none';
+    const pageSel = document.getElementById('editor-page-size');
+    const pageMarginWrap = document.getElementById('editor-page-margin-wrap');
+    const show = isMd && editorPreviewMode;
+    if (pageSel) pageSel.style.display = show ? 'inline-block' : 'none';
+    if (pageMarginWrap) pageMarginWrap.style.display = (show && pageSel && pageSel.value) ? 'inline-flex' : 'none';
     if (!isMd && editorPreviewMode) {
       editorPreviewMode = false;
       document.getElementById('editor-preview-pane').style.display = 'none';
       btn.classList.remove('on');
       btn.textContent = '👁 プレビュー';
+      updateEditorPageGuide();
     }
+  }
+
+  // 用紙ガイド: A4/A3の横幅ラインとページ区切りラインをpreviewペインに描画
+  const _PAGE_DEFS = {
+    'a4p': {w: 210, h: 297},
+    'a4l': {w: 297, h: 210},
+    'a3p': {w: 297, h: 420},
+    'a3l': {w: 420, h: 297},
+  };
+  const _MM_PX = 96 / 25.4;  // 96dpi での 1mm のピクセル数
+
+  function _onPageSizeChange() {
+    const sel = document.getElementById('editor-page-size');
+    const wrap = document.getElementById('editor-page-margin-wrap');
+    if (wrap) wrap.style.display = (sel && sel.value) ? 'inline-flex' : 'none';
+    updateEditorPageGuide();
+  }
+
+  function updateEditorPageGuide() {
+    const pane = document.getElementById('editor-preview-pane');
+    if (!pane) return;
+    const inner = document.getElementById('editor-preview-content');
+    const sel = document.getElementById('editor-page-size');
+    const key = sel ? sel.value : '';
+    if (!key || !editorPreviewMode) {
+      pane.style.backgroundImage = '';
+      pane.style.backgroundAttachment = '';
+      if (inner) { inner.style.width = ''; inner.style.minWidth = ''; }
+      return;
+    }
+    const def = _PAGE_DEFS[key];
+    if (!def) return;
+    const marginInput = document.getElementById('editor-page-margin');
+    const MARGIN_H = marginInput ? Math.max(0, Math.min(60, Number(marginInput.value) || 20)) : 20;
+    const contentW = Math.round((def.w - MARGIN_H * 2) * _MM_PX);
+    const pageH    = Math.round(def.h * _MM_PX);
+    // コンテンツ幅をpx固定 → ブラウザ幅変更・ガイド切替で%指定画像のサイズが変わらなくなる
+    if (inner) {
+      inner.style.width    = contentW + 'px';
+      inner.style.minWidth = contentW + 'px';
+    }
+    // ガイド線はCSS backgroundでオーバーレイ描画（レイアウトに干渉しない）
+    const lineX = contentW + 24; // ペインpadding 24px 分オフセット
+    pane.style.backgroundImage = [
+      `linear-gradient(to right, transparent ${lineX}px, rgba(137,180,250,0.5) ${lineX}px, rgba(137,180,250,0.5) ${lineX + 2}px, transparent ${lineX + 2}px)`,
+      `repeating-linear-gradient(to bottom, transparent 0, transparent ${pageH - 2}px, rgba(137,180,250,0.35) ${pageH - 2}px, rgba(137,180,250,0.35) ${pageH}px)`
+    ].join(',');
+    pane.style.backgroundAttachment = 'local,local';
   }
 
   function refreshEditorPreview() {
     if (!editorPreviewMode || !monacoEditor) return;
     const pane = document.getElementById('editor-preview-pane');
-    pane.innerHTML = renderMarkdown(monacoEditor.getValue());
+    pane.innerHTML = '<div id="editor-preview-content">' + renderMarkdown(monacoEditor.getValue()) + '</div>';
+    const fileDir = editorCurrentPath ? editorCurrentPath.replace(/\/[^/]*$/, '') : '';
+    pane.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src') || '';
+      if (!src || src.startsWith('http') || src.startsWith('data:') || src.startsWith('/')) {
+        img.dataset.originalSrc = src;
+      } else {
+        img.dataset.originalSrc = src;  // MD編集用に相対パスを保持
+        const fullPath = fileDir ? fileDir + '/' + src : src;
+        img.src = '/workspace/image?path=' + encodeURIComponent(fullPath);
+      }
+      // クリックでサイズ・配置パネルを表示
+      img.style.cursor = 'pointer';
+      img.title = 'クリックでサイズ・配置を変更';
+      img.addEventListener('click', e => { e.stopPropagation(); showImgResizePanel(img, e.clientX, e.clientY); });
+    });
+    if (typeof renderMermaid === 'function') renderMermaid(pane);
+    updateEditorPageGuide();
   }
 
   function toggleEditorPreview() {
     editorPreviewMode = !editorPreviewMode;
     const pane = document.getElementById('editor-preview-pane');
     const btn = document.getElementById('editor-preview-btn');
+    const pageSel = document.getElementById('editor-page-size');
+    const pageMarginWrap = document.getElementById('editor-page-margin-wrap');
     if (editorPreviewMode) {
       pane.style.display = 'block';
       btn.classList.add('on');
       btn.textContent = '👁 プレビュー: ON';
+      if (pageSel) pageSel.style.display = 'inline-block';
       refreshEditorPreview();
     } else {
       pane.style.display = 'none';
       btn.classList.remove('on');
       btn.textContent = '👁 プレビュー';
+      if (pageSel) pageSel.style.display = 'none';
+      if (pageMarginWrap) pageMarginWrap.style.display = 'none';
+      updateEditorPageGuide();
     }
   }
 
@@ -5460,6 +5925,262 @@
       };
       pre.appendChild(btn);
     });
+  }
+</script>
+
+<!-- ===== プレビュー画像サイズ・配置パネル ===== -->
+<div id="img-resize-panel" style="display:none;position:fixed;z-index:20000;background:#1e1e2e;border:1px solid #89b4fa;border-radius:10px;padding:14px 16px;box-shadow:0 4px 24px rgba(0,0,0,0.6);min-width:240px">
+  <div style="font-size:13px;font-weight:600;color:#cdd6f4;margin-bottom:10px">🖼 サイズ・配置</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:12px;color:#a6adc8;flex-shrink:0">幅</span>
+    <input id="irp-width" type="number" min="10" max="100" value="80"
+      style="width:56px;padding:3px 6px;background:#313244;color:#cdd6f4;border:1px solid #585b70;border-radius:4px;font-size:13px;text-align:center"
+      oninput="document.getElementById('irp-slider').value=this.value">
+    <span style="font-size:12px;color:#a6adc8">%</span>
+    <input id="irp-slider" type="range" min="10" max="100" value="80" style="flex:1;accent-color:#89b4fa"
+      oninput="document.getElementById('irp-width').value=this.value">
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:12px">
+    <button id="irp-left"   onclick="irpSetAlign('left')"   style="flex:1;padding:5px;border:1px solid #585b70;border-radius:5px;background:#313244;color:#cdd6f4;cursor:pointer;font-size:12px">◀ 左寄せ</button>
+    <button id="irp-center" onclick="irpSetAlign('center')" style="flex:1;padding:5px;border:1px solid #585b70;border-radius:5px;background:#313244;color:#cdd6f4;cursor:pointer;font-size:12px">▣ 中央</button>
+  </div>
+  <div style="display:flex;gap:6px;justify-content:flex-end">
+    <button onclick="closeImgResizePanel()" style="padding:5px 14px;border:1px solid #585b70;border-radius:6px;background:#313244;color:#cdd6f4;cursor:pointer;font-size:12px">キャンセル</button>
+    <button onclick="applyImgResize()" style="padding:5px 14px;border:none;border-radius:6px;background:#89b4fa;color:#1e1e2e;cursor:pointer;font-size:12px;font-weight:600">適用</button>
+  </div>
+</div>
+
+<script>
+  // ===== プレビュー画像サイズ・配置 =====
+  let _irpTarget = null;
+  let _irpAlign = 'left';
+
+  function irpSetAlign(align) {
+    _irpAlign = align;
+    document.getElementById('irp-left').style.background   = align === 'left'   ? '#89b4fa' : '#313244';
+    document.getElementById('irp-left').style.color        = align === 'left'   ? '#1e1e2e' : '#cdd6f4';
+    document.getElementById('irp-center').style.background = align === 'center' ? '#89b4fa' : '#313244';
+    document.getElementById('irp-center').style.color      = align === 'center' ? '#1e1e2e' : '#cdd6f4';
+  }
+
+  function showImgResizePanel(img, cx, cy) {
+    _irpTarget = img;
+    const panel = document.getElementById('img-resize-panel');
+    const src = img.dataset.originalSrc || '';
+    let curWidth = 80, curAlign = 'left';
+    if (src && typeof monacoEditor !== 'undefined') {
+      const content = monacoEditor.getValue();
+      const escapedSrc = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // パイプ記法: ![alt|80%](src) または ![alt|400](src)
+      const pm = content.match(new RegExp(`!\\[[^\\]]*\\|(\\d+)(%?)\\]\\(${escapedSrc}\\)`));
+      if (pm) curWidth = parseInt(pm[1]);
+      // 旧HTML形式: <img ... width="80%">
+      const wm = content.match(new RegExp(`<img[^>]*src="${escapedSrc}"[^>]*width="(\\d+)%"`));
+      if (wm) curWidth = parseInt(wm[1]);
+      // 中央揃え判定
+      const am = content.match(new RegExp(`<div[^>]*text-align:center[^>]*>[\\s\\S]*?${escapedSrc}`));
+      if (am) curAlign = 'center';
+    }
+    document.getElementById('irp-width').value  = curWidth;
+    document.getElementById('irp-slider').value = curWidth;
+    irpSetAlign(curAlign);
+    // 画面外にはみ出さないよう位置調整
+    panel.style.display = 'block';
+    const pw = panel.offsetWidth, ph = panel.offsetHeight;
+    const left = Math.min(cx + 8, window.innerWidth  - pw - 8);
+    const top  = Math.min(cy + 8, window.innerHeight - ph - 8);
+    panel.style.left = left + 'px';
+    panel.style.top  = top  + 'px';
+    // パネル外クリックで閉じる
+    setTimeout(() => document.addEventListener('click', _irpOutsideClick, { once: true }), 0);
+  }
+
+  function _irpOutsideClick(e) {
+    const panel = document.getElementById('img-resize-panel');
+    if (panel && !panel.contains(e.target)) closeImgResizePanel();
+    else document.addEventListener('click', _irpOutsideClick, { once: true });
+  }
+
+  function closeImgResizePanel() {
+    document.getElementById('img-resize-panel').style.display = 'none';
+    _irpTarget = null;
+  }
+
+  function applyImgResize() {
+    if (!_irpTarget || typeof monacoEditor === 'undefined') return;
+    const src   = _irpTarget.dataset.originalSrc || '';
+    const width = parseInt(document.getElementById('irp-width').value) || 80;
+    const align = _irpAlign;
+    // 左寄せ: Obsidian互換パイプ記法 ![alt|80%](src)
+    // 中央揃え: HTMLのまま（Obsidianのパイプ記法は中央揃え非対応）
+    const model = monacoEditor.getModel();
+    const lines = model.getValue().split('\n');
+    const newLines = lines.map(line => {
+      if (!line.includes(src)) return line;
+      if (align === 'center') {
+        return `<div style="text-align:center"><img src="${src}" width="${width}%"></div>`;
+      }
+      // 既存の ![任意のalt|任意のW](src) または ![alt](src) または <img...src...> を置換
+      const pipeMatch = line.match(/^!\[([^\]]*?)(?:\|\d+%?)?\]\((.+?)\)/);
+      const alt = pipeMatch ? pipeMatch[1].replace(/\|.*$/, '') : '図';
+      return `![${alt}|${width}%](${src})`;
+    });
+    const fullRange = model.getFullModelRange();
+    model.pushEditOperations([], [{ range: fullRange, text: newLines.join('\n') }], () => null);
+    closeImgResizePanel();
+    refreshEditorPreview();
+  }
+</script>
+
+<!-- ===== Mermaid一括清書モーダル ===== -->
+<div id="mmb-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;align-items:center;justify-content:center">
+  <div style="background:var(--base);border:1px solid var(--surface1);border-radius:12px;padding:24px;width:520px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <span style="font-size:15px;font-weight:600;color:var(--text)">✨ Mermaid一括清書</span>
+      <button onclick="closeMermaidBatchModal()" style="background:none;border:none;cursor:pointer;color:var(--subtext0);font-size:18px;line-height:1;padding:0 4px">✕</button>
+    </div>
+    <div id="mmb-file" style="font-size:12px;color:var(--subtext0);margin-bottom:4px"></div>
+    <div id="mmb-count" style="font-size:12px;color:var(--blue);margin-bottom:14px"></div>
+    <label style="font-size:12px;color:var(--text);display:block;margin-bottom:5px;font-weight:500">清書プロンプト（全図共通）</label>
+    <textarea id="mmb-prompt" rows="4" style="width:100%;box-sizing:border-box;border:2px solid var(--blue);border-radius:6px;padding:8px;font-size:13px;background:var(--mantle);color:var(--text);resize:vertical;outline:none;font-family:inherit"
+      placeholder="例: モダンで見やすく美しく清書してください。白背景。元の図の構造とアスペクト比を守ってください。"></textarea>
+    <div id="mmb-progress" style="display:none;margin-top:14px">
+      <div style="font-size:12px;color:var(--subtext0);margin-bottom:6px" id="mmb-progress-label">処理中...</div>
+      <div style="background:var(--surface1);border-radius:4px;height:6px;overflow:hidden">
+        <div id="mmb-progress-bar" style="background:var(--blue);height:100%;width:0%;transition:width 0.3s"></div>
+      </div>
+      <div id="mmb-progress-log" style="margin-top:8px;font-size:11px;color:var(--subtext0);max-height:120px;overflow-y:auto"></div>
+    </div>
+    <div id="mmb-done" style="display:none;margin-top:14px;padding:10px;background:var(--surface0);border-radius:6px;font-size:12px;color:var(--green)"></div>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <button id="mmb-cancel-btn" onclick="closeMermaidBatchModal()" style="padding:6px 16px;border:1px solid var(--surface2);border-radius:6px;background:var(--surface1);color:var(--text);cursor:pointer;font-size:13px">キャンセル</button>
+      <button id="mmb-run-btn" onclick="runMermaidBatch()" style="padding:6px 18px;border:none;border-radius:6px;background:var(--blue);color:#fff;cursor:pointer;font-size:13px;font-weight:500">実行</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ===== Mermaid一括清書 =====
+  let _mmbData = null;  // {file_path, workspace_scope, blocks}
+
+  function showMermaidBatchModal(filePath, workspaceScope, blocks, count) {
+    _mmbData = { file_path: filePath, workspace_scope: workspaceScope, blocks };
+    document.getElementById('mmb-file').textContent = '対象: ' + filePath;
+    document.getElementById('mmb-count').textContent = `Mermaid図が ${count} 個見つかりました`;
+    document.getElementById('mmb-progress').style.display = 'none';
+    document.getElementById('mmb-done').style.display = 'none';
+    document.getElementById('mmb-run-btn').disabled = false;
+    document.getElementById('mmb-run-btn').textContent = '実行';
+    document.getElementById('mmb-cancel-btn').textContent = 'キャンセル';
+    const overlay = document.getElementById('mmb-overlay');
+    overlay.style.display = 'flex';
+  }
+
+  function closeMermaidBatchModal() {
+    document.getElementById('mmb-overlay').style.display = 'none';
+    _mmbData = null;
+  }
+
+  async function runMermaidBatch() {
+    if (!_mmbData) return;
+    const prompt = document.getElementById('mmb-prompt').value.trim();
+    if (!prompt) { alert('清書プロンプトを入力してください'); return; }
+
+    const runBtn = document.getElementById('mmb-run-btn');
+    const cancelBtn = document.getElementById('mmb-cancel-btn');
+    runBtn.disabled = true;
+    runBtn.textContent = '処理中...';
+    cancelBtn.disabled = true;
+
+    const progressEl = document.getElementById('mmb-progress');
+    const progressLabel = document.getElementById('mmb-progress-label');
+    const progressBar = document.getElementById('mmb-progress-bar');
+    const progressLog = document.getElementById('mmb-progress-log');
+    progressEl.style.display = '';
+    progressLog.innerHTML = '';
+
+    const blocks = _mmbData.blocks;
+    const total = blocks.length;
+    const replacements = [];
+    let succeeded = 0;
+
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      progressLabel.textContent = `処理中... ${i + 1} / ${total}`;
+      progressBar.style.width = `${Math.round((i / total) * 100)}%`;
+      const logLine = document.createElement('div');
+      logLine.textContent = `図${i + 1}: レンダリング中...`;
+      progressLog.appendChild(logLine);
+      progressLog.scrollTop = progressLog.scrollHeight;
+
+      try {
+        // mermaid.js でSVGレンダリング
+        const id = 'mmb-render-' + i + '-' + Date.now();
+        const { svg } = await mermaid.render(id, block.code);
+
+        // SVG→PNG変換
+        const tmpDiv = document.createElement('div');
+        tmpDiv.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden';
+        tmpDiv.innerHTML = svg;
+        document.body.appendChild(tmpDiv);
+        const svgEl = tmpDiv.querySelector('svg');
+        let pngB64;
+        try {
+          pngB64 = await _svgToPngBase64(svgEl);
+        } finally {
+          tmpDiv.remove();
+        }
+
+        logLine.textContent = `図${i + 1}: 清書中 (${_mmbData.file_path})...`;
+        // /mermaid-refine で清書
+        const resp = await fetch('/mermaid-refine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: pngB64, prompt, workspace_scope: _mmbData.workspace_scope }),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        replacements.push({ block_index: block.index, saved_path: data.saved_path });
+        logLine.textContent = `図${i + 1}: 完了 → ${data.saved_path}`;
+        logLine.style.color = 'var(--green)';
+        succeeded++;
+      } catch (err) {
+        logLine.textContent = `図${i + 1}: エラー — ${err.message}`;
+        logLine.style.color = 'var(--red)';
+      }
+    }
+
+    progressBar.style.width = '100%';
+    progressLabel.textContent = `完了 ${succeeded} / ${total}`;
+
+    if (replacements.length > 0) {
+      try {
+        const rep = await fetch('/mermaid-batch-replace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_path: _mmbData.file_path,
+            workspace_scope: _mmbData.workspace_scope,
+            replacements,
+          }),
+        });
+        const repData = await rep.json();
+        const doneEl = document.getElementById('mmb-done');
+        doneEl.style.display = '';
+        doneEl.textContent = repData.ok
+          ? `✅ MDファイルを更新しました（${repData.replaced} 図を差し替え）`
+          : `⚠️ ファイル更新エラー: ${repData.error || ''}`;
+      } catch (err) {
+        document.getElementById('mmb-done').style.display = '';
+        document.getElementById('mmb-done').style.color = 'var(--red)';
+        document.getElementById('mmb-done').textContent = '⚠️ ファイル更新エラー: ' + err.message;
+      }
+    }
+
+    runBtn.textContent = '完了';
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = '閉じる';
   }
 </script>
 </body>

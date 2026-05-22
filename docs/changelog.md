@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-05-22（セッション8）
+
+### Mermaid清書・エディタ機能強化・Obsidian連携（index.html / server.py / setup.html）
+
+#### 新規実装
+
+**エディタ用紙ガイド（index.html）**
+- ツールバーに用紙サイズセレクター（ガイドなし / A4縦・横 / A3縦・横）を追加
+- 「余白 Nmm」入力欄を追加 → PDFツールの余白に合わせてリアルタイム調整可能
+- ページ区切り横線・コンテンツ幅縦線を CSS `background-image` オーバーレイで描画（コンテンツに干渉しない）
+- ガイド選択時はコンテンツ幅を `width: Xpx` 固定 → ブラウザ幅変更・ガイド切替で画像サイズが変わらない
+- プレビューコンテンツを `<div id="editor-preview-content">` でラップ
+- `p { margin: 0.7em 0 }` / `br { display: block; margin-bottom: 0.4em }` で行間調整
+
+**Obsidian互換画像リサイズ（index.html）**
+- `applyImgResize()` の保存形式を `<img width="80%">` → `![alt|80%](path)` パイプ記法に変更
+- `renderMarkdown()` に前処理を追加: `![alt|80%](path)` を `<img style="width:80%">` に変換してからmarked.jsに渡す
+- `showImgResizePanel()` がパイプ記法・旧HTML形式の両方からサイズ/配置を読み取るよう更新
+- これにより Obsidian でドラッグリサイズが効くようになった（左寄せ画像のみ；中央揃えはHTML形式のまま）
+
+**セットアップ画面フォルダブラウザ（setup.html / server.py）**
+- 「作業ディレクトリ」フィールドに「📁 参照」ボタンを追加
+- クリックで階層型フォルダブラウザモーダルを表示（Windowsドライブ一覧 → サブフォルダをたどれる）
+- Windowsパス（C:\...）入力時に WSL パス（/mnt/c/...）をリアルタイムプレビュー
+- `server.py` に `/setup/browse-dir` エンドポイントを追加（`os.listdir` + `os.path.isdir` でDrvFs対応）
+- Windowsパスを作業ディレクトリに設定 → Obsidianのvaultとして開けるようになる
+
+#### デバッグコード削除
+- `server.py`: `show_mermaid_batch_refine_dialog` SSEハンドラーの `print()` 3箇所を削除
+- `index.html`: `mermaid_batch_refine` SSEハンドラーの `try/catch alert` を削除
+
+#### GitLab Issue
+- **#57** 新規作成: MD→DOCX変換: Obsidianパイプ記法とpandocの相性問題（将来のDOCX変換ツール実装時に前処理で対応する方針）
+
+#### 運用メモ（今日判明）
+- Obsidianはstandardマークダウン画像 `![](path)` のドラッグリサイズをサポートするが、HTML `<img>` タグは非対応
+- `/mnt/c`（WindowsドライブのWSLマウント）は `Path.is_dir()` が False を返す場合がある → `os.path.isdir()` で回避
+- MDは改行位置・ページレイアウトを精密にコントロールするための形式ではない（PDFツール依存）
+
+---
+
 ## 2026-05-22（セッション7）
 
 ### Deep Research 残課題解消・品質改善（server.py / tools/web_tools.py / index.html）

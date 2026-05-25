@@ -1318,6 +1318,10 @@ class MermaidBatchReplaceRequest(BaseModel):
     workspace_scope: str = ""
     replacements: list[dict]        # [{block_index: int, saved_path: str}]
 
+class ConvertToDocxRequest(BaseModel):
+    file_path: str                  # 対象MDファイル（ALLOWED_WORK_DIR相対）
+    workspace_scope: str = ""
+
 
 # サーバー側の安全ネット: クライアントが多く送ってきても最新20件に制限
 MAX_HISTORY_MESSAGES = 20
@@ -2164,6 +2168,171 @@ async def mermaid_batch_replace(req: MermaidBatchReplaceRequest):
         replaced += 1
     target.write_text(content, encoding="utf-8")
     return JSONResponse({"ok": True, "replaced": replaced, "total": len(req.replacements)})
+
+
+@app.post("/convert-to-docx")
+async def convert_to_docx(req: ConvertToDocxRequest):
+    """MDファイルをWordのDOCX形式に変換する（PowerShell + Word COM経由）"""
+    import subprocess as _sp, tempfile as _tmp, re as _re
+    from config import ALLOWED_WORK_DIR
+    from markdown_it import MarkdownIt
+
+    target = (ALLOWED_WORK_DIR / req.file_path).resolve()
+    if not str(target).startswith(str(ALLOWED_WORK_DIR)):
+        return JSONResponse({"error": "作業ディレクトリ外のファイルへのアクセスは禁止"}, status_code=400)
+    if not target.exists():
+        return JSONResponse({"error": f"ファイルが見つかりません: {req.file_path}"}, status_code=404)
+
+    md_content = target.read_text(encoding="utf-8")
+
+    # A4 ページ本文幅（2cm余白）の実効ピクセル数（96dpi換算）
+    PAGE_WIDTH_PX = 540
+
+    def _wslpath_to_windows(wsl_path: str) -> str:
+        try:
+            r = _sp.run(["wslpath", "-w", wsl_path], capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() if r.returncode == 0 else wsl_path
+        except Exception:
+            return wsl_path
+
+    def _img_tag(alt: str, abs_path, hint_ratio: float = None) -> str:
+        """アスペクト比を保ちページ幅に収まる img タグを生成する"""
+        from PIL import Image as _Img
+        win_path = _wslpath_to_windows(str(abs_path))
+        try:
+            with _Img.open(str(abs_path)) as im:
+                orig_w, orig_h = im.size
+            if hint_ratio:
+                # パイプ記法で比率指定がある場合は横幅に適用
+                disp_w = int(PAGE_WIDTH_PX * hint_ratio)
+            else:
+                disp_w = min(orig_w, PAGE_WIDTH_PX)
+            disp_h = int(orig_h * disp_w / orig_w) if orig_w else disp_w
+            return f'<img alt="{alt}" src="{win_path}" width="{disp_w}" height="{disp_h}">'
+        except Exception:
+            # 画像を開けない場合は幅だけ指定（アスペクト比は Word に任せる）
+            return f'<img alt="{alt}" src="{win_path}" style="max-width:{PAGE_WIDTH_PX}px;height:auto">'
+
+    # パイプ記法 ![alt|80%](path) を img タグに変換
+    def _pipe_to_img(text):
+        def _replace(m):
+            inner, path = m.group(1), m.group(2)
+            if path.startswith("http://") or path.startswith("https://"):
+                return m.group(0)
+            abs_path = (target.parent / path).resolve()
+            if "|" in inner:
+                alt, size = inner.rsplit("|", 1)
+                size = size.strip()
+                ratio = float(size.rstrip("%")) / 100 if size.endswith("%") else None
+                return _img_tag(alt.strip(), abs_path, ratio)
+            return _img_tag(inner.strip(), abs_path)
+        return _re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _replace, text)
+
+    preprocessed = _pipe_to_img(md_content)
+    md_it = MarkdownIt()
+    html_body = md_it.render(preprocessed)
+
+    # markdown-it が残した通常の src="相対パス" を絶対 Windows パスに変換
+    def _resolve_img_src(m):
+        src = m.group(1)
+        if src.startswith("http://") or src.startswith("https://") or src.startswith("\\\\"):
+            return m.group(0)
+        abs_path = (target.parent / src).resolve()
+        win_path = _wslpath_to_windows(str(abs_path))
+        return f'src="{win_path}"'
+    html_body = _re.sub(r'src="([^"]+)"', _resolve_img_src, html_body)
+
+    # img タグに width/height が未設定のものに実寸ベースのサイズを付与
+    def _fix_img_size(m):
+        tag = m.group(0)
+        if 'width=' in tag or 'style=' in tag:
+            return tag
+        src_m = _re.search(r'src="([^"]+)"', tag)
+        if not src_m:
+            return tag
+        win_path = src_m.group(1)
+        try:
+            from PIL import Image as _Img
+            # Windows UNC パス → WSL パスに戻して開く
+            r = _sp.run(["wslpath", "-u", win_path], capture_output=True, text=True, timeout=5)
+            wsl_path = r.stdout.strip()
+            with _Img.open(wsl_path) as im:
+                orig_w, orig_h = im.size
+            disp_w = min(orig_w, PAGE_WIDTH_PX)
+            disp_h = int(orig_h * disp_w / orig_w)
+            return tag.rstrip('>').rstrip('/') + f' width="{disp_w}" height="{disp_h}">'
+        except Exception:
+            return tag
+    html_body = _re.sub(r'<img[^>]+>', _fix_img_size, html_body)
+
+    html_full = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body {{ font-family: "Meiryo", "Yu Gothic", sans-serif; font-size: 11pt; line-height: 1.6; margin: 2cm; }}
+h1 {{ font-size: 18pt; }} h2 {{ font-size: 15pt; }} h3 {{ font-size: 13pt; }}
+table {{ border-collapse: collapse; width: 100%; }} td, th {{ border: 1px solid #ccc; padding: 4px 8px; }}
+img {{ max-width: 100%; }}
+code {{ background: #f4f4f4; padding: 2px 4px; font-family: Consolas, monospace; }}
+pre {{ background: #f4f4f4; padding: 8px; overflow-x: auto; }}
+</style></head><body>{html_body}</body></html>"""
+
+    # 一時HTMLファイルをworkspaceに保存
+    html_path = target.with_suffix(".tmp_conv.html")
+    html_path.write_text(html_full, encoding="utf-8")
+    docx_path = target.with_suffix(".docx")
+
+    try:
+        html_win = _wslpath_to_windows(str(html_path))
+        docx_win = _wslpath_to_windows(str(docx_path))
+
+        ps_script = f"""
+$word = New-Object -ComObject Word.Application
+$word.Visible = $false
+try {{
+    $doc = $word.Documents.Open("{html_win}")
+    $doc.SaveAs2([ref]"{docx_win}", [ref]16)
+    $doc.Close($false)
+    Write-Output "ok"
+}} catch {{
+    Write-Error $_.Exception.Message
+}} finally {{
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($word) | Out-Null
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+}}
+"""
+        from tools.windows_tools import run_powershell
+        result = await asyncio.to_thread(run_powershell, ps_script, 60)
+        if result.get("error") or result.get("returncode", 0) != 0:
+            err = result.get("error") or result.get("stderr") or "変換失敗"
+            return JSONResponse({"error": err}, status_code=500)
+
+        # docxパスをworkspace相対で返す
+        rel_docx = str(docx_path.relative_to(ALLOWED_WORK_DIR))
+        return JSONResponse({"ok": True, "docx_path": rel_docx, "docx_name": docx_path.name})
+    finally:
+        if html_path.exists():
+            html_path.unlink()
+
+
+@app.get("/workspace/download")
+async def workspace_download(path: str):
+    """ワークスペースのファイルをダウンロードとして返す"""
+    import mimetypes
+    from config import ALLOWED_WORK_DIR
+    try:
+        resolved = (ALLOWED_WORK_DIR / path).resolve()
+        if not str(resolved).startswith(str(ALLOWED_WORK_DIR)):
+            return JSONResponse({"error": "作業ディレクトリ外のアクセスは禁止"}, status_code=400)
+        if not resolved.exists() or not resolved.is_file():
+            return JSONResponse({"error": "File not found"}, status_code=404)
+        mt = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+        import urllib.parse as _up
+        fname_enc = _up.quote(resolved.name, safe='')
+        headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{fname_enc}"}
+        return FileResponse(str(resolved), media_type=mt, headers=headers)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 
 @app.get("/skills")

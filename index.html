@@ -373,7 +373,8 @@
   #editor-close-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   #editor-close-btn:hover { background: #f38ba8; color: #1e1e2e; }
   #editor-body { display: flex; flex: 1; overflow: hidden; }
-  #editor-filetree { width: 220px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; overflow-y: auto; padding: 8px 0; }
+  #editor-filetree-wrap { background: #181825; }
+  #editor-filetree { background: #181825; }
   #editor-filetree .ft-dir { padding: 3px 10px; font-size: 12px; color: #89b4fa; font-weight: bold; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
   #editor-filetree .ft-dir:hover { color: #cdd6f4; background: #313244; }
   #editor-filetree .ft-dir.active { background: #313244; color: #a6e3a1 !important; border-left: 3px solid #a6e3a1; }
@@ -749,7 +750,13 @@
     <button id="editor-newtab-close-btn" onclick="window.close()" style="display:none;padding:4px 12px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">✕ タブを閉じる</button>
   </div>
   <div id="editor-body">
-    <div id="editor-filetree"></div>
+    <div id="editor-filetree-wrap" style="width:220px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid #313244">
+      <div style="padding:4px 8px;border-bottom:1px solid #313244;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <span style="font-size:11px;color:#6c7086">WORKSPACE</span>
+        <button onclick="refreshFileTree()" title="ファイル一覧を更新" style="background:none;border:none;color:#6c7086;cursor:pointer;font-size:14px;padding:2px 4px;line-height:1" onmouseover="this.style.color='#cdd6f4'" onmouseout="this.style.color='#6c7086'">↻</button>
+      </div>
+      <div id="editor-filetree" style="flex:1;overflow-y:auto;padding:8px 0"></div>
+    </div>
     <div id="editor-right">
       <div id="editor-tabs"></div>
       <div id="editor-main-area">
@@ -810,6 +817,7 @@
   <button onclick="ftRenameItem()">✏ 名前変更</button>
   <button id="ft-ctx-duplicate" onclick="ftDuplicateItem()">📋 複製</button>
   <button id="ft-ctx-download" onclick="ftDownloadItem()">⬇ ダウンロード</button>
+  <button id="ft-ctx-docx" onclick="ftConvertToDocx()" style="color:#a6e3a1">📄 Word変換（DOCX）</button>
   <button onclick="ftDeleteItem()">🗑 削除</button>
 </div>
 <div id="cleanup-overlay">
@@ -5293,6 +5301,8 @@
     ftContextTarget = { path, isDir };
     document.getElementById('ft-ctx-duplicate').style.display = isDir ? 'none' : '';
     document.getElementById('ft-ctx-download').style.display = isDir ? 'none' : '';
+    const isMd = !isDir && path.toLowerCase().endsWith('.md');
+    document.getElementById('ft-ctx-docx').style.display = isMd ? '' : 'none';
     const menu = document.getElementById('ft-context-menu');
     menu.classList.add('open');
     const x = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
@@ -5308,6 +5318,40 @@
       document.getElementById('ft-context-menu')?.classList.remove('open');
     }
   });
+  async function ftConvertToDocx() {
+    if (!ftContextTarget) return;
+    document.getElementById('ft-context-menu').classList.remove('open');
+    const { path } = ftContextTarget;
+    const statusKey = 'docx-' + path;
+    // トースト通知で進捗表示
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1e1e2e;border:1px solid #45475a;border-radius:8px;padding:12px 18px;font-size:13px;color:#cdd6f4;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);min-width:220px';
+    toast.textContent = '⏳ Word起動中・変換中...';
+    document.body.appendChild(toast);
+    try {
+      const resp = await fetch('/convert-to-docx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: path }),
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      toast.style.color = '#a6e3a1';
+      toast.textContent = `✅ 変換完了: ${data.docx_name}`;
+      const a = document.createElement('a');
+      a.href = `/workspace/download?path=${encodeURIComponent(data.docx_path)}`;
+      a.download = data.docx_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => toast.remove(), 4000);
+    } catch (err) {
+      toast.style.color = '#f38ba8';
+      toast.textContent = `⚠️ 変換エラー: ${err.message}`;
+      setTimeout(() => toast.remove(), 6000);
+    }
+  }
+
   async function ftDeleteItem() {
     if (!ftContextTarget) return;
     document.getElementById('ft-context-menu').classList.remove('open');
@@ -6052,6 +6096,10 @@
       <div id="mmb-progress-log" style="margin-top:8px;font-size:11px;color:var(--subtext0);max-height:120px;overflow-y:auto"></div>
     </div>
     <div id="mmb-done" style="display:none;margin-top:14px;padding:10px;background:var(--surface0);border-radius:6px;font-size:12px;color:var(--green)"></div>
+    <div id="mmb-docx-area" style="display:none;margin-top:10px">
+      <button id="mmb-docx-btn" onclick="convertMmbToDocx()" style="width:100%;padding:8px;border:none;border-radius:6px;background:var(--green);color:#1e1e2e;cursor:pointer;font-size:13px;font-weight:600">📄 Wordファイル（DOCX）に変換</button>
+      <div id="mmb-docx-status" style="margin-top:6px;font-size:12px;color:var(--subtext0);text-align:center;display:none"></div>
+    </div>
     <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
       <button id="mmb-cancel-btn" onclick="closeMermaidBatchModal()" style="padding:6px 16px;border:1px solid var(--surface2);border-radius:6px;background:var(--surface1);color:var(--text);cursor:pointer;font-size:13px">キャンセル</button>
       <button id="mmb-run-btn" onclick="runMermaidBatch()" style="padding:6px 18px;border:none;border-radius:6px;background:var(--blue);color:#fff;cursor:pointer;font-size:13px;font-weight:500">実行</button>
@@ -6171,6 +6219,9 @@
         doneEl.textContent = repData.ok
           ? `✅ MDファイルを更新しました（${repData.replaced} 図を差し替え）`
           : `⚠️ ファイル更新エラー: ${repData.error || ''}`;
+        if (repData.ok) {
+          document.getElementById('mmb-docx-area').style.display = '';
+        }
       } catch (err) {
         document.getElementById('mmb-done').style.display = '';
         document.getElementById('mmb-done').style.color = 'var(--red)';
@@ -6181,6 +6232,50 @@
     runBtn.textContent = '完了';
     cancelBtn.disabled = false;
     cancelBtn.textContent = '閉じる';
+  }
+
+  async function convertMmbToDocx() {
+    if (!_mmbData) return;
+    const btn = document.getElementById('mmb-docx-btn');
+    const status = document.getElementById('mmb-docx-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ Word起動中・変換中...';
+    status.style.display = '';
+    status.style.color = 'var(--subtext0)';
+    status.textContent = 'Wordを起動してDOCX形式に変換しています。しばらくお待ちください...';
+    try {
+      const resp = await fetch('/convert-to-docx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: _mmbData.file_path, workspace_scope: _mmbData.workspace_scope }),
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      status.style.color = 'var(--green)';
+      status.textContent = `✅ 変換完了: ${data.docx_name}`;
+      // 自動ダウンロード
+      const a = document.createElement('a');
+      a.href = `/workspace/download?path=${encodeURIComponent(data.docx_path)}`;
+      a.download = data.docx_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      btn.textContent = '📄 再ダウンロード';
+      btn.disabled = false;
+      btn.onclick = () => {
+        const a2 = document.createElement('a');
+        a2.href = `/workspace/download?path=${encodeURIComponent(data.docx_path)}`;
+        a2.download = data.docx_name;
+        document.body.appendChild(a2);
+        a2.click();
+        a2.remove();
+      };
+    } catch (err) {
+      status.style.color = 'var(--red)';
+      status.textContent = `⚠️ 変換エラー: ${err.message}`;
+      btn.disabled = false;
+      btn.textContent = '📄 Wordファイル（DOCX）に変換';
+    }
   }
 </script>
 </body>

@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-05-25（セッション10）
+
+### MD→DOCX変換機能・ファイルツリー更新ボタン（index.html / server.py）
+
+#### 実装内容
+
+**MD→DOCX変換（Word COM経由）**
+- `/convert-to-docx` POST エンドポイント追加
+- MD → HTML 変換（markdown-it-py）
+- Obsidian パイプ記法 `![alt|80%](path)` → `<img width=N height=M>` 前処理
+- Pillow で画像実寸取得・アスペクト比維持・A4ページ幅（540px）に収まるよう計算
+- `wslpath -w` で WSL→Windows UNC パス変換
+- PowerShell + Word COM で DOCX 保存（タイムアウト60秒）
+- 一時HTMLは変換後自動削除
+
+**ダウンロードエンドポイント**
+- `/workspace/download` GET エンドポイント追加
+- RFC 5987形式で日本語ファイル名対応（`filename*=UTF-8''...`）
+- `ALLOWED_WORK_DIR` 基準のパス解決（`_resolve_safe_path` の日本語パス問題を回避）
+
+**UI**
+- エディタファイルツリーの `.md` ファイル右クリックメニューに「📄 Word変換（DOCX）」追加
+- 変換中は右下トーストで「⏳ Word起動中・変換中...」表示
+- 完了後は「✅ 変換完了: ファイル名」表示 + 自動ダウンロード
+- 一括清書モーダル完了後にも「📄 Word変換（DOCX）に変換」ボタンを表示
+- エディタファイルツリー上部に「WORKSPACE ↻」更新ボタン追加
+
+#### 設計上の制約・課題
+
+- MD→HTML→Word の2段変換なのでレイアウトが崩れることがある
+- **次の方向性として「最初からDOCX形式でAIに書かせる」方針が浮上**（#57後継として検討中）
+  - サーバーサイド Mermaid→PNG変換（mmdc / Mermaid CLI）が必要
+  - `write_docx` ツール（python-docx）で AI が直接 DOCX 生成
+  - プロンプト更新で AI がフロー全体を理解
+
+#### Windows版の動作
+- Pillow・python-docx・markdown-it-py はすべて requirements.txt 済み → 動作可
+- `wslpath` は Windows ネイティブに存在しないが except で捕捉・フォールバック動作
+- パイプ記法画像は正常動作、通常画像は CSS max-width のみ（クラッシュなし）
+
+#### クローズしたIssue
+- **#57** MD→DOCX変換ツール → 暫定実装完了（上記制約あり・DOCX直接生成に移行予定）
+
+---
+
 ## 2026-05-23（セッション9）
 
 ### Obsidian WSL統合・環境整備（コード変更なし）

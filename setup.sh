@@ -163,13 +163,13 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         sudo apt-get install -y nodejs
         ok "Node.js をインストールしました: $(node --version)"
     fi
-    # Playwright MCP のプリキャッシュ（初回実行を高速化）
-    info "Playwright Chromium をインストール中..."
-    if npx --yes playwright install chromium 2>&1 | tail -3; then
+    # Playwright MCP 用 Chromium のプリインストール
+    info "Playwright Chromium（MCP用）をインストール中..."
+    if npx --yes @playwright/mcp install-browser chromium 2>&1 | tail -3; then
         ok "Playwright Chromium をインストールしました"
     else
         warn "Playwright Chromium のインストールに失敗しました（後で手動で実行してください）"
-        warn "  npx playwright install chromium"
+        warn "  npx @playwright/mcp install-browser chromium"
     fi
 
     # Ansible + community.vmware コレクション

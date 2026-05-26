@@ -17,6 +17,25 @@
 
 ---
 
+## 2026-05-26（セッション13）
+
+### MCP クライアント Phase 1 テスト完了・スクリーンショット UI 表示・自動再接続対応
+
+#### 変更ファイル
+
+- `config/mcp_servers.json` — `--output-dir ./workspace/playwright-screenshots` を追加（スナップショット・コンソールログをワークスペース配下に保存）
+- `tools/mcp_client.py` — ImageContent を base64 変換してワークスペースに保存・自動再接続ロジック追加（`_reconnect` メソッド・空エラーや接続切断系の例外で再接続＋1回リトライ）
+- `server.py` — `playwright__browser_take_screenshot` 等の結果テキストに含まれる PNG パスを検出してファイルを読み込み `image_generated` SSE として送信
+
+#### テスト結果（全項目 Pass）
+
+1. **`__` 既存ツール衝突チェック** — `__skipped__` は tc_id に付与、ツール名には無関係。問題なし。
+2. **スクリーンショット UI 表示** — `navigate` → `take_screenshot` でチャット UI に画像がインライン表示。
+3. **連続ツール呼び出し** — 2 ツール連続呼び出し（navigate → screenshot）正常動作。
+4. **MCP サーバークラッシュ回復** — `kill` でプロセス強制終了後、次のリクエストで自動再接続・正常動作復帰。
+
+---
+
 ## 2026-05-26（セッション12）
 
 ### MCP クライアント実装 Phase 1（Playwright MCP）

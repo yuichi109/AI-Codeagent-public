@@ -10,22 +10,9 @@
 1. **WinRT GraphicsCapture API**（★★）
    - ウィンドウ指定スクショツール（`tools/windows_tools.py` に追加）
 
-2. **#19 並列ツール実行**（★★★）
-   - 現在は逐次実行のみ。`asyncio.gather` 等で複数ツールを同時実行して高速化。
-
-3. **#20 インタラクティブプロセス管理**（★★★）
-   - バックグラウンド実行・stdin 送信・長時間プロセスの制御。
-   - `run_background` / `send_input` ツールの追加が必要。
-
-4. **#27 LLMプロバイダー切り替え Phase 2（ハイブリッドモード）**（★★★）
-   - Qwen3.5-4B をオーケストレーター（日本語会話・判断担当）として動作
-   - `delegate_to_azure` ツールを追加 — コード・ツール作業はgpt-4.1に委譲
-   - 推奨サーバー: Ollama（LM StudioはQwen3.5のテンプレート不一致問題あり）
-
-5. **PDF変換ツール `write_pdf`**（★）
-   - reportlab or weasyprint で実装。ユースケース確認後着手。
-
-6. **各ツールの単体テスト（pytest）**（★★）→ GitLab #6
+2. **#20 インタラクティブプロセス管理（残り: `send_input`）**（★★）
+   - `run_background` / `check_background` / `kill_background` は実装済み。
+   - 未実装: stdin 送信（`send_input` ツール）— 対話型プロセスへのキー入力送信。
 
 ---
 
@@ -45,6 +32,17 @@
 - **Docker化オプション**（WSL2なし環境向け）: bubblewrapをオプション化し `SANDBOX=none` で無効化可能に
 - **`docs/setup.md` 移行チェックリスト**: bubblewrap の追記
 - **`docs/design.md` 更新**: 現在の実装に合わせて更新
+
+---
+
+## 進行中の大型機能
+
+- **MCP クライアント実装**（★★★★）　**作業ブランチ: `feature/mcp-client`**
+  - 公式 `mcp` Python ライブラリを使用
+  - Phase 1: Playwright MCP（ブラウザ操作）
+  - Phase 2: Obsidian MCP
+  - 動的ツール登録・プロセス管理・OpenAI スキーマ変換が主な実装対象
+  - 完了後は main にマージしてこの項目を changelog に移動する
 
 ---
 
@@ -68,7 +66,7 @@
 
 ## 品質・テスト
 
-- [ ] 各ツールの単体テスト（pytest）を書く
+- [x] 各ツールの単体テスト（pytest）を書く（test_code/command/file/web_tools.py 実装済み）
 - [ ] bubblewrap サンドボックスの脱出テスト
 - [ ] 長いプロンプトでのトークン上限テスト
 - [ ] 別 PC（社内プロキシあり）での動作確認

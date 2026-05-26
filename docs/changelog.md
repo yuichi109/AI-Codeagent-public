@@ -5,6 +5,18 @@
 
 ---
 
+## ロードマップ整理メモ（2026-05-26確認）
+
+以下の項目がロードマップ上は「未完了」になっていたが、実装済みと確認。
+
+- **#20 バックグラウンド実行**: `tools/background_tools.py` に `run_background` / `check_background` / `kill_background` 実装済み・TOOL_REGISTRY 登録済み。未実装は `send_input`（stdin送信）のみ。
+- **#5 `write_pdf`**: `tools/pdf_tools.py` に実装済み・TOOL_REGISTRY 登録済み。
+- **#6 pytest 単体テスト**: `tests/test_code_tools.py` / `test_command_tools.py` / `test_file_tools.py` / `test_web_tools.py` 実装済み。
+- **#19 並列ツール実行**: `server.py` にて `asyncio.create_task` による並列実行実装済み。`run_command` 等ストリーミングツールのみ逐次、それ以外は全件並列。
+- **#27 LLMプロバイダー切り替え Phase 2**: Azure / Foundry 複数インスタンス（`FOUNDRY_N_*`）/ Gemini / OpenAI / ローカルモデルのクロスプロバイダー切り替えが `server.py` に実装済み。`delegate_to_azure` という特定ツールではなく `preset_id` ベースの汎用切り替えとして超えた形で完了。
+
+---
+
 ## 2026-05-26（セッション11）
 
 ### WinRM・インフラ情報収集・ホスト管理機能

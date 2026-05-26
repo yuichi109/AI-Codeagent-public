@@ -17,6 +17,45 @@
 
 ---
 
+## 2026-05-26（セッション12）
+
+### MCP クライアント実装 Phase 1（Playwright MCP）
+
+#### 新規ファイル
+
+- `tools/mcp_client.py` — MCPClientManager（AsyncExitStack で接続管理・ツール取得・OpenAI スキーマ変換・呼び出し）
+- `config/mcp_servers.json` — MCP サーバー設定ファイル（Playwright enabled / Obsidian disabled）
+
+#### 変更ファイル
+
+- `server.py` — lifespan に MCP 起動/停止・TOOL_REGISTRY/TOOLS への動的登録を統合。`execute_tool_async` に `__` を含むツール名を async で直接 await する分岐を追加
+- `requirements.txt` — `mcp>=1.0.0` 追加
+- `setup.sh` — Node.js 22.x チェック・インストール・`npx @playwright/mcp install-browser chromium` 追加
+
+#### 実装内容
+
+**`MCPClientManager`**
+- `config/mcp_servers.json` 読み込み・環境変数展開
+- `AsyncExitStack` で `stdio_client` / `ClientSession` を管理（anyio cancel scope と干渉しないよう shutdown は `BaseException` 抑制）
+- MCP ツール定義を `{server_id}__{tool_name}` 形式で OpenAI スキーマに変換
+- `execute_tool_async` から async callable として呼び出せる統一インターフェース
+
+**環境整備**
+- Node.js 22.x (nodesource) をインストール
+- mcp 1.27.1 を venv にインストール
+- `npx @playwright/mcp install-browser chromium` で Chromium Headless Shell をインストール
+
+**動作確認**
+- 起動時に Playwright MCP へ接続・23 ツールを TOOL_REGISTRY に登録（約 1〜2 秒）
+- `playwright__browser_navigate` / `playwright__browser_take_screenshot` 等が LLM から呼び出し可能であることを確認
+- シャットダウン時エラーなし
+
+**Phase 2 以降（未着手）**
+- Obsidian MCP (`config/mcp_servers.json` の enabled を true にするだけ)
+- /setup UI（MCP サーバー一覧・有効/無効トグル）
+
+---
+
 ## 2026-05-26（セッション11）
 
 ### WinRM・インフラ情報収集・ホスト管理機能

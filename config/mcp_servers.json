@@ -5,7 +5,7 @@
       "name": "Playwright MCP",
       "transport": "stdio",
       "command": "npx",
-      "args": ["@playwright/mcp@latest", "--headless", "--browser", "chromium"],
+      "args": ["@playwright/mcp@latest", "--headless", "--browser", "chromium", "--output-dir", "./workspace/playwright-screenshots"],
       "enabled": true
     },
     {

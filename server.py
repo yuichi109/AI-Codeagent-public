@@ -2093,6 +2093,38 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 except Exception:
                     pass
 
+            # MCP ツールが画像レスポンスを返した場合: UIに表示してLLM履歴を軽量化
+            if "__" in name:
+                try:
+                    result_data = json.loads(result)
+                    if result_data.get("image_base64"):
+                        # mcp_client.py が ImageContent を検出してbase64化した場合
+                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': name, 'provider': 'mcp', 'model': ''})}\n\n"
+                        tool_result_for_msg = json.dumps({
+                            "message": "スクリーンショットを撮影しました",
+                            "saved_path": result_data.get("saved_path", ""),
+                            "text": result_data.get("text", ""),
+                            "note": "画像はUIに表示済みです",
+                        }, ensure_ascii=False)
+                except Exception:
+                    pass
+                # Playwright MCP はテキスト結果でファイルパスを返すため、スクリーンショットファイルを検出して表示
+                if "take_screenshot" in name or "screenshot" in name.lower():
+                    import re as _re
+                    import base64 as _b64
+                    _img_match = _re.search(r'\]\(([^)]+\.png)\)', result)
+                    if _img_match:
+                        _img_rel = _img_match.group(1).lstrip("./")
+                        _img_abs = ALLOWED_WORK_DIR.parent / _img_rel
+                        if not _img_abs.exists():
+                            _img_abs = ALLOWED_WORK_DIR / _img_rel
+                        if _img_abs.exists():
+                            try:
+                                _b64_data = _b64.b64encode(_img_abs.read_bytes()).decode()
+                                yield f"data: {json.dumps({'type': 'image_generated', 'image': _b64_data, 'mime': 'image/png', 'prompt': name, 'provider': 'mcp', 'model': ''})}\n\n"
+                            except Exception:
+                                pass
+
             # render_manim: 画像をUIに送信 + vision message 注入のためにキュー
             if name == "render_manim":
                 try:

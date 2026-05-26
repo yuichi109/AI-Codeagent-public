@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-05-26（セッション12）— MCP クライアント Phase 1（feature/mcp-client ブランチ）
+
+### 実装内容（main 未マージ・feature/mcp-client に存在）
+
+- `tools/mcp_client.py` 新規: MCPClientManager（AsyncExitStack 接続管理・OpenAI スキーマ変換）
+- `config/mcp_servers.json` 新規: Playwright enabled / Obsidian disabled
+- `server.py`: lifespan に MCP 起動/停止・TOOL_REGISTRY 動的登録・execute_tool_async に MCP 分岐追加
+- `requirements.txt`: `mcp>=1.0.0` 追加
+- `setup.sh`: Node.js 22.x + `npx @playwright/mcp install-browser chromium` 追加（コマンド修正済み）
+- `setup.bat`: Node.js LTS winget インストール・Playwright Chromium インストール追加
+
+### 動作確認済み
+- 起動時 Playwright MCP 接続・23 ツール登録（約 1〜2 秒）
+- `playwright__browser_navigate` が LLM から呼び出し可能
+
+### 次セッションで確認する未テスト項目
+1. `__` 含む既存ツール名との衝突チェック（grep 1分）
+2. スクリーンショット UI 表示確認（チャット 5分）
+3. navigate → screenshot 連続呼び出し（チャット 5分）
+4. MCP サーバークラッシュ時の挙動（pkill → ツール呼び出し → 再起動 10分）
+5. Windows 版実動作（別環境）
+
+テスト完了後に feature/mcp-client → main / for_windows にマージする。
+
+---
+
 ## 2026-05-26（セッション11）
 
 ### WinRM・インフラ情報収集・ホスト管理機能

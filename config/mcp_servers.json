@@ -1,0 +1,20 @@
+{
+  "servers": [
+    {
+      "id": "playwright",
+      "name": "Playwright MCP",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--headless", "--browser", "chromium"],
+      "enabled": true
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian MCP",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["obsidian-mcp", "${OBSIDIAN_VAULT_PATH}"],
+      "enabled": false
+    }
+  ]
+}

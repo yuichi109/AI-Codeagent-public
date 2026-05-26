@@ -58,7 +58,10 @@ from tools.background_tools import run_background, check_background, kill_backgr
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 from tools.image_tools import generate_image, edit_image, watermark_image, apply_auto_watermark, IMAGE_MODELS_BY_PROVIDER
+from tools.mcp_client import MCPClientManager
 from pydantic import BaseModel
+
+mcp_manager = MCPClientManager()
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
 _default_provider_config = {
@@ -182,7 +185,26 @@ async def lifespan(app: FastAPI):
             )
             if result.returncode != 0:
                 print(f"[WARN] SearXNG 起動失敗: {result.stderr.strip() or result.stdout.strip()}")
+
+    # MCP クライアント起動・動的ツール登録
+    try:
+        await mcp_manager.start()
+        mcp_schemas = mcp_manager.get_tool_schemas()
+        mcp_registry = mcp_manager.get_tool_registry()
+        if mcp_registry:
+            TOOL_REGISTRY.update(mcp_registry)
+            TOOLS.extend(mcp_schemas)
+            print(f"[INFO] MCP: {len(mcp_registry)} ツールを登録しました: {list(mcp_registry.keys())}", flush=True)
+    except Exception as e:
+        print(f"[WARN] MCP 起動エラー: {e}")
+
     yield
+
+    # MCP クライアント停止（anyio cancel scope との干渉を抑制）
+    try:
+        await mcp_manager.stop()
+    except BaseException:
+        pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1181,6 +1203,18 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
+    # MCP ツール（サーバーID__ツール名 形式）は async callable なので直接 await する
+    if "__" in name and name in TOOL_REGISTRY:
+        try:
+            return await asyncio.wait_for(
+                TOOL_REGISTRY[name](**arguments),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            return json.dumps({"error": f"MCPツールがタイムアウトしました: {name}"}, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"error": f"MCPツールエラー: {e}"}, ensure_ascii=False)
+
     # ツール引数で指定されたタイムアウトがあればそれに合わせて待つ（+10秒のマージン）
     if name in ("generate_image", "edit_image", "watermark_image"):
         _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}

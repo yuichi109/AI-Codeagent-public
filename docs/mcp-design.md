@@ -118,12 +118,12 @@ await mcp_manager.stop()           # 子プロセスを正常終了
 
 ## 実装手順（セッション再開時の参照用）
 
-- [ ] `requirements.txt` に `mcp>=1.0.0` / `playwright>=1.40.0` 追加
-- [ ] `setup.sh` に Node.js チェック・`playwright install chromium` 追加
-- [ ] `config/mcp_servers.json` のサンプルファイル作成
-- [ ] `tools/mcp_client.py` 実装（接続・ツール取得・スキーマ変換・呼び出し）
-- [ ] `server.py` の startup/shutdown に統合
-- [ ] Playwright MCP で動作確認（スクリーンショット取得）
+- [x] `requirements.txt` に `mcp>=1.0.0` 追加
+- [x] `setup.sh` に Node.js チェック・`npx @playwright/mcp install-browser chromium` 追加
+- [x] `config/mcp_servers.json` のサンプルファイル作成
+- [x] `tools/mcp_client.py` 実装（接続・ツール取得・スキーマ変換・呼び出し）
+- [x] `server.py` の startup/shutdown に統合
+- [x] Playwright MCP で動作確認（browser_navigate / browser_take_screenshot 等 23 ツール登録確認済み）
 - [ ] Phase 2: Obsidian MCP 追加
-- [ ] Phase 3: /setup UI 追加
+- [ ] Phase 3: /setup UI 追加（MCP サーバー一覧・有効/無効トグル）
 - [ ] `feature/mcp-client` を main にマージ

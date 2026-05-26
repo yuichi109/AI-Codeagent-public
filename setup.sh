@@ -153,6 +153,25 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         ok "bubblewrap をインストールしました"
     fi
 
+    # Node.js（MCP サーバー用）
+    section "Node.js（MCP クライアント用）"
+    if command -v node &>/dev/null; then
+        ok "Node.js はインストール済みです: $(node --version)"
+    else
+        info "Node.js 22.x をインストール中..."
+        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+        ok "Node.js をインストールしました: $(node --version)"
+    fi
+    # Playwright MCP のプリキャッシュ（初回実行を高速化）
+    info "Playwright Chromium をインストール中..."
+    if npx --yes playwright install chromium 2>&1 | tail -3; then
+        ok "Playwright Chromium をインストールしました"
+    else
+        warn "Playwright Chromium のインストールに失敗しました（後で手動で実行してください）"
+        warn "  npx playwright install chromium"
+    fi
+
     # Ansible + community.vmware コレクション
     section "Ansible"
     if command -v ansible &>/dev/null; then

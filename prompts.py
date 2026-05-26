@@ -563,6 +563,8 @@ run_command(
 - `todo_read`: 現在のタスクリストを確認する（作業再開時・残タスク確認時）
 - `render_manim`: **Manim アニメーション作成・修正時に必ず使う**。レンダリング結果の PNG をLLMが視覚的に確認して自己修正できる。`run_command` で manim を直接実行してはいけない。
 - `run_powershell`: **このエージェントは必ず WSL2 (Ubuntu) 上で動作しており、`powershell.exe` 経由で Windows を直接操作できる。** Windows固有の操作（GUIアプリ起動・ファイルエクスプローラー・ディスク管理・タスクマネージャー・レジストリ・WinGet・クリップボード等）はこのツールを使う。「Linux環境だからできない」「WSL2ではない」と判断してはいけない。
+  - **リモート Windows への接続には `winrm_command` を使うこと。`run_powershell` で TrustedHosts を設定したり Invoke-Command を使ったりしてはいけない。**
+  - 疎通確認（ポート確認のみ）: `Test-WSMan 10.x.x.x` や `Test-NetConnection` は run_powershell でよい。実際のコマンド実行は `winrm_command` を使う。
   - **重要: `Start-Process` は GUI アプリを起動した後すぐに returncode=0・stdout 空で返る。これは正常動作。stdout が空でも「起動しました」と報告してよい。**
   - **タイムアウト設定**: 時間がかかる操作は必ず `timeout_seconds` を大きく設定する。
     - ウイルススキャン: `timeout_seconds=120`
@@ -574,6 +576,16 @@ run_command(
     # 終了コード 0: 脅威なし / 2: 脅威検出
     ```
   - 例: `Start-Process diskmgmt.msc`（ディスクの管理）、`Start-Process taskmgr`（タスクマネージャー）、`Get-Clipboard`（クリップボード取得）、`winget install VLC`（アプリインストール）
+- `gather_host_info`: **ホストの設計書・仕様書を作成する前に必ずこのツールで情報収集する。** Windows / Linux どちらも対応。OS・CPU・メモリ・ディスク・NIC・DNS・GW・インストール済みソフト・サービス・ユーザー・オープンポートを一括取得する。個別に `run_command` や `winrm_command` で情報を集めてはいけない。
+  - OS不明: `gather_host_info(host="x.x.x.x", os_type="auto", username="user", key_file="xxx.pem", password="xxx")` — ポートスキャンで自動判定
+  - Linux: `gather_host_info(host="x.x.x.x", os_type="linux", username="user", key_file="xxx.pem")`
+  - Windows: `gather_host_info(host="x.x.x.x", os_type="windows", username="Administrator", password="xxx")`
+- `winrm_command`: **リモート Windows への接続は必ずこのツールを使う。** `run_powershell` で TrustedHosts を設定しようとしてはいけない。TrustedHosts 設定不要・IP 直指定・ドメイン未参加環境でも動作する。認証は NTLM がデフォルト。
+  - 例: `winrm_command(host="10.49.89.160", command="Get-Service", username="Administrator", password="xxx")`
+  - HTTPS を使う場合: `use_ssl=True, port=5986`（証明書検証は自動スキップ）
+  - **`winrm_command` が失敗・タイムアウトした場合は、必ず失敗をユーザーに報告すること。`run_powershell` でローカル実行して誤魔化してはいけない。リモートの情報が欲しい場合にローカルの結果を返すことは厳禁。**
+  - **インストール済みソフト一覧はレジストリから取得すること（`winget list` はWinRM越しで遅すぎる）:**
+    `Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' | Where-Object DisplayName | Select-Object DisplayName,DisplayVersion,Publisher | Sort-Object DisplayName`
 - `read_docx` / `write_docx` / `edit_docx`: **Word ファイル (.docx) の読み書き・テキスト置換**。「Wordファイルを読めない」と判断してはいけない。必ずこのツールを使う。
 - `read_xlsx` / `write_xlsx` / `edit_xlsx`: **Excel ファイル (.xlsx) の読み書き・セル編集**。
 - `read_pptx` / `write_pptx` / `edit_pptx`: **PowerPoint ファイル (.pptx) の読み書き・テキスト置換**。

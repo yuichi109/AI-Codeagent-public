@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-05-26（セッション11）
+
+### WinRM・インフラ情報収集・ホスト管理機能
+
+#### 新規ファイル
+
+- `tools/winrm_tools.py` — pywinrm を使った Windows リモート実行ツール
+- `tools/host_info_tools.py` — Linux/Windows ホスト情報一括収集ツール
+- `skills/infra/SKILL.md` — `/infra` スキル（インフラ管理ツール一覧表示）
+
+#### 実装内容
+
+**`winrm_command` ツール**
+- TrustedHosts 設定不要で IP 直指定・ドメイン未参加環境でも動作
+- `session.run_ps()` でコマンドを Base64 エンコード送信（パイプ・スクリプトブロック対応）
+- NTLM/Kerberos/Basic/CredSSP 認証・HTTP(5985)/HTTPS(5986) 対応
+- WSL版・Windows版どちらでも動作（pywinrm は純粋 Python 実装）
+
+**`gather_host_info` ツール**
+- `os_type="auto"` でポートスキャン（5985→Windows / 22→Linux）によるOS自動判定
+- Linux: OS・カーネル・CPU・メモリ・ディスク・NIC・DNS・ルーティング・パッケージ・サービス・ユーザー・cron・オープンポートを一括収集（SSH鍵認証）
+- Windows: OS・CPU・メモリ・ディスク・NIC・DNS・GW・インストール済みソフト・実行中サービス・スケジュールタスク・ローカルユーザー・Windows Update履歴を一括収集（WinRM）
+- workspace 相対パスで鍵ファイルを自動検索
+
+**`requirements.txt`**
+- `pywinrm>=0.4.3` 追加（setup.sh / setup.bat 両方で自動インストール）
+
+**`prompts.py`**
+- `winrm_command` の使い方・禁止事項を明記
+- `gather_host_info` を設計書・仕様書作成前の必須ツールとして明記
+- リモート失敗時にローカル結果で誤魔化すことを明示禁止
+- インストール済みソフトはレジストリ取得（winget 禁止）を明記
+
+#### 設計上の注意
+
+- `run_powershell` はローカル Windows 操作専用。リモート接続には `winrm_command` を使う
+- Linux はSSH鍵認証のみ対応（パスワード認証は run_command 経由では不可）
+- 設計書・仕様書作成前は必ず `gather_host_info` で一括収集すること（個別コマンドは抜け漏れリスクあり）
+
+---
+
 ## 2026-05-25（セッション10）
 
 ### MD→DOCX変換機能・ファイルツリー更新ボタン（index.html / server.py）

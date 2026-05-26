@@ -52,6 +52,8 @@ from tools.office_tools import (
 )
 from tools.ansible_tools import list_ansible_playbooks, run_ansible_playbook
 from tools.windows_tools import run_powershell
+from tools.winrm_tools import winrm_command
+from tools.host_info_tools import gather_host_info
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
@@ -246,6 +248,8 @@ TOOL_REGISTRY = {
     "list_ansible_playbooks": list_ansible_playbooks,
     "run_ansible_playbook": run_ansible_playbook,
     "run_powershell": run_powershell,
+    "winrm_command": winrm_command,
+    "gather_host_info": gather_host_info,
     "run_background": run_background,
     "check_background": check_background,
     "kill_background": kill_background,
@@ -780,6 +784,72 @@ TOOLS = [
                     },
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gather_host_info",
+            "description": "Windows / Linux ホストの情報を一括収集して構造化データで返す。設計書・仕様書作成の前に必ずこのツールで情報収集すること。個別コマンドを何度も実行するより確実で抜け漏れがない。収集項目: ホスト名・OS・CPU・メモリ・ディスク・NIC・DNS・GW・オープンポート・インストール済みソフト/パッケージ・実行中サービス・ユーザー（Windows: スケジュールタスク・Windows Update履歴も含む / Linux: cron・ルーティングも含む）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "対象ホストの IP またはホスト名"},
+                    "os_type": {"type": "string", "description": "'windows' / 'linux' / 'auto'。auto を指定するとポートスキャンでOS自動判定する（5985=Windows / 22=Linux）"},
+                    "username": {"type": "string", "description": "ユーザー名"},
+                    "password": {"type": "string", "description": "パスワード（Windows必須 / Linux パスワード認証時）"},
+                    "key_file": {"type": "string", "description": "SSH 秘密鍵ファイルパス（Linux鍵認証時。workspace相対パス可）"},
+                    "port": {"type": "integer", "description": "ポート番号（省略時: Windows=5985, Linux=22）"},
+                    "use_ssl": {"type": "boolean", "description": "Windows HTTPS(5986) を使う場合 True"},
+                    "timeout_seconds": {"type": "integer", "description": "タイムアウト秒数（デフォルト 60）"},
+                },
+                "required": ["host", "os_type", "username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "winrm_command",
+            "description": "WinRM 経由でリモート Windows に PowerShell コマンドを実行する。TrustedHosts 設定不要・ドメイン未参加環境でも動作する。IP 直指定で複数の異なる環境を管理するときに使う。ローカル Windows の操作は run_powershell を使うこと。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "接続先の IP アドレスまたはホスト名（例: 10.49.89.160）",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "実行する PowerShell コマンド（例: Get-InstalledModule | Select Name,Version）",
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "ユーザー名（例: Administrator、DOMAIN\\\\user）",
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "パスワード",
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "ポート番号。HTTP=5985（デフォルト）、HTTPS=5986",
+                    },
+                    "use_ssl": {
+                        "type": "boolean",
+                        "description": "True にすると HTTPS(5986) で接続する。証明書検証はスキップする。",
+                    },
+                    "transport": {
+                        "type": "string",
+                        "description": "認証方式: ntlm（デフォルト・ほとんどの環境で動作）/ kerberos / basic / credssp",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "タイムアウト秒数（デフォルト: 30）",
+                    },
+                },
+                "required": ["host", "command", "username", "password"],
             },
         },
     },

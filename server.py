@@ -3758,6 +3758,51 @@ async def index():
     return FileResponse("index.html")
 
 
+@app.get("/drawio-proxy")
+async def drawio_proxy(request: Request):
+    """draw.io を自サーバー経由で配信し addGCP3Palette polyfill を注入する"""
+    from fastapi.responses import Response as FastAPIResponse
+    params = str(request.url.query)
+    url = f"https://embed.diagrams.net/?{params}" if params else "https://embed.diagrams.net/"
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        html = resp.content
+        polyfill = b"""<base href="https://embed.diagrams.net/">
+<script>
+(function(){
+  var _eu;
+  try {
+    Object.defineProperty(window, 'EditorUi', {
+      get: function(){ return _eu; },
+      set: function(v){
+        _eu = v;
+        if(v && v.prototype){
+          ['addGCP3Palette','addGCP2Palette','addGCPPalette'].forEach(function(m){
+            if(!v.prototype[m]) v.prototype[m] = function(){};
+          });
+        }
+      },
+      configurable: true, enumerable: true
+    });
+  } catch(e){}
+  var _oa = window.alert;
+  window.alert = function(m){
+    if(typeof m==='string' && m.indexOf('addGCP')>=0){ return; }
+    return _oa && _oa.call(window, m);
+  };
+})();
+</script>"""
+        if b"<head>" in html:
+            html = html.replace(b"<head>", b"<head>" + polyfill, 1)
+        else:
+            html = polyfill + html
+        return FastAPIResponse(content=html, media_type="text/html",
+                               headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return FastAPIResponse(content=f"<p>draw.io proxy error: {e}</p>", media_type="text/html")
+
+
 def _get_mcp_enabled(server_id: str) -> str:
     """mcp_servers.json から指定サーバーの enabled 値を返す"""
     try:

@@ -5742,6 +5742,7 @@
   let _drawioReady = false;
   let _drawioCurrentXml = null;
   let _drawioPendingLoad = null;
+  let _drawioPendingFilename = null;
 
   function _drawioIframe() { return document.getElementById('drawio-iframe'); }
 
@@ -5750,9 +5751,18 @@
     if (ifrm && ifrm.contentWindow) ifrm.contentWindow.postMessage(JSON.stringify(msg), '*');
   }
 
-  function _drawioLoad(xml) {
+  function _drawioLoad(xml, filename) {
     // AIが出力する literal \n をDraw.io改行エスケープに変換
-    const sanitized = xml.replace(/\\n/g, '&#xa;');
+    let sanitized = xml.replace(/\\n/g, '&#xa;').trim();
+    // mxfile ラッパーがない場合は diagram name 付きでラップ（draw.io タイトルバーにファイル名を表示するため）
+    if (filename && !sanitized.startsWith('<mxfile')) {
+      const name = filename.replace(/"/g, '&quot;');
+      sanitized = `<mxfile><diagram name="${name}">${sanitized}</diagram></mxfile>`;
+    } else if (filename && sanitized.startsWith('<mxfile')) {
+      // すでに mxfile だが diagram name を上書き
+      sanitized = sanitized.replace(/(<diagram\b[^>]*)\bname="[^"]*"/, `$1name="${filename.replace(/"/g, '&quot;')}"`);
+      if (!sanitized.includes('name=')) sanitized = sanitized.replace('<diagram', `<diagram name="${filename.replace(/"/g, '&quot;')}"`);
+    }
     _drawioPost({ action: 'load', xml: sanitized });
   }
 
@@ -5905,12 +5915,15 @@
       const res = await fetch(`/workspace/file?path=${encodeURIComponent(path)}`);
       const data = await res.json();
       const xml = data.content || data;
-      document.getElementById('drawio-filename').value = path.split('/').pop();
+      const fname = path.split('/').pop();
       if (!document.getElementById('drawio-panel').classList.contains('open')) toggleDrawioPanel();
+      // toggleDrawioPanel が value='' でクリアするので必ず後に設定
+      document.getElementById('drawio-filename').value = fname;
       if (_drawioReady) {
-        _drawioLoad(xml);
+        _drawioLoad(xml, fname);
       } else {
         _drawioPendingLoad = xml;
+        _drawioPendingFilename = fname;
       }
       _drawioSetStatus(path);
     } catch(e) { alert(`開けませんでした: ${e.message}`); }
@@ -5958,8 +5971,9 @@
     if (msg.event === 'init') {
       _drawioReady = true;
       const xml = _drawioPendingLoad || _DRAWIO_BLANK;
-      _drawioLoad(xml);
+      _drawioLoad(xml, _drawioPendingFilename);
       _drawioPendingLoad = null;
+      _drawioPendingFilename = null;
     } else if (msg.event === 'save') {
       _drawioCurrentXml = msg.xml;
       _drawioDoSave(msg.xml);

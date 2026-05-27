@@ -2077,11 +2077,32 @@
       bar.classList.add('scoped');
       label.textContent = `📁 workspace/${currentWorkspaceScope}`;
       btn.textContent = '変更';
+      // アーカイブ済みバッジ確認
+      fetch(`/workspace/archived-status?scope=${encodeURIComponent(currentWorkspaceScope)}`)
+        .then(r => r.json()).then(d => {
+          const badge = document.getElementById('scope-archived-badge');
+          if (d.archived) {
+            if (!badge) {
+              const b = document.createElement('span');
+              b.id = 'scope-archived-badge';
+              b.title = `アーカイブ済み: ${d.archived_at || ''}`;
+              b.textContent = '📦';
+              b.style.cssText = 'font-size:13px;cursor:default;';
+              label.after(b);
+            } else {
+              badge.title = `アーカイブ済み: ${d.archived_at || ''}`;
+            }
+          } else {
+            if (badge) badge.remove();
+          }
+        }).catch(() => {});
     } else {
       localStorage.removeItem(SCOPE_STORAGE_KEY);
       bar.classList.remove('scoped');
       label.textContent = '📁 workspace/';
       btn.textContent = '選択';
+      const badge = document.getElementById('scope-archived-badge');
+      if (badge) badge.remove();
     }
   }
 

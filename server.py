@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH
 from prompts import get_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
@@ -3114,6 +3114,45 @@ async def workspace_copy(body: dict):
         return JSONResponse({"ok": True, "new_path": rel})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/workspace/archive-info")
+async def workspace_archive_info(scope: str = ""):
+    """アーカイブスキル用: vault パス・コピー元/先・ホスト名を返す"""
+    import socket, platform as _platform
+    hostname = socket.gethostname()
+    is_wsl = "wsl" in _platform.uname().release.lower() or Path("/proc/sys/fs/binfmt_misc/WSLInterop").exists()
+    suffix = "wsl" if is_wsl else "win"
+    vault_path = OBSIDIAN_VAULT_PATH
+    archives_base = str(Path(vault_path) / "archives" / f"{hostname}_{suffix}") if vault_path else ""
+    src_path = str(ALLOWED_WORK_DIR / scope) if scope else ""
+    dst_path = str(Path(archives_base) / scope) if (archives_base and scope) else ""
+    return JSONResponse({
+        "vault_path": vault_path,
+        "archives_base": archives_base,
+        "hostname": hostname,
+        "platform": suffix,
+        "scope": scope,
+        "src_path": src_path,
+        "dst_path": dst_path,
+    })
+
+
+@app.get("/workspace/archived-status")
+async def workspace_archived_status(scope: str = ""):
+    """指定スコープの .archived マーカーファイルの有無・内容を返す"""
+    if not scope:
+        return JSONResponse({"archived": False})
+    marker = ALLOWED_WORK_DIR / scope / ".archived"
+    if not marker.exists():
+        return JSONResponse({"archived": False})
+    content = marker.read_text(encoding="utf-8")
+    archived_at = ""
+    for line in content.splitlines():
+        if line.startswith("archived_at:"):
+            archived_at = line.split(":", 1)[1].strip()
+            break
+    return JSONResponse({"archived": True, "archived_at": archived_at})
 
 
 @app.post("/workspace/rename")

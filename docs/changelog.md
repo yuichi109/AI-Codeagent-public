@@ -17,6 +17,33 @@
 
 ---
 
+## 2026-05-27（セッション15）
+
+### MCP サーバー管理 UI・draw.io 「開く」ボタン
+
+#### 変更ファイル
+
+- `setup.html` — MCP サーバー管理セクション追加
+  - 登録済みサーバーの一覧・有効/無効切り替え・削除
+  - テンプレート選択（Playwright / Obsidian / Filesystem / GitHub / Brave Search / Memory / Sequential Thinking / Draw.io）→ 名前・コマンドを自動入力
+  - 新規サーバー追加フォーム（コマンド＋引数をスペース区切りで1行入力）
+  - デフォルトリセットボタン（Playwright + Obsidian に戻す）
+- `server.py` — `GET /mcp/servers`・`POST /mcp/servers` エンドポイント追加（`mcp_servers.json` の読み書き・サービス再起動）
+- `index.html` — `write_file` で `.drawio` ファイル保存時に「📐 Draw.io で開く」ボタンを表示
+  - ストリーミング時：ツールグループの外（常に見える位置）に表示
+  - 履歴復元時（ページ更新後）も同様にボタンを復元
+  - draw.io ロード後に `fit` アクションを送信してビューを自動調整
+
+#### 動作確認済み
+
+- MCP サーバー管理セクション表示・テンプレート自動入力 ✅
+- MCP クラッシュ回復テスト（kill -9 → 自動再接続・ツール呼び出し正常） ✅
+- draw.io 保存後「📐 Draw.io で開く」ボタン表示 ✅
+- ページ更新後もボタン復元 ✅（未確認・次セッションで要確認）
+- draw.io fit アクション ✅（未確認・次セッションで要確認）
+
+---
+
 ## 2026-05-27（セッション14）
 
 ### メール通知・Obsidian MCP・/setup UI 拡張

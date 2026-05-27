@@ -5,29 +5,134 @@
 
 ---
 
-## 2026-05-26（セッション12）— MCP クライアント Phase 1（feature/mcp-client ブランチ）
+## ロードマップ整理メモ（2026-05-26確認）
 
-### 実装内容（main 未マージ・feature/mcp-client に存在）
+以下の項目がロードマップ上は「未完了」になっていたが、実装済みと確認。
 
-- `tools/mcp_client.py` 新規: MCPClientManager（AsyncExitStack 接続管理・OpenAI スキーマ変換）
-- `config/mcp_servers.json` 新規: Playwright enabled / Obsidian disabled
-- `server.py`: lifespan に MCP 起動/停止・TOOL_REGISTRY 動的登録・execute_tool_async に MCP 分岐追加
-- `requirements.txt`: `mcp>=1.0.0` 追加
-- `setup.sh`: Node.js 22.x + `npx @playwright/mcp install-browser chromium` 追加（コマンド修正済み）
-- `setup.bat`: Node.js LTS winget インストール・Playwright Chromium インストール追加
+- **#20 バックグラウンド実行**: `tools/background_tools.py` に `run_background` / `check_background` / `kill_background` 実装済み・TOOL_REGISTRY 登録済み。未実装は `send_input`（stdin送信）のみ。
+- **#5 `write_pdf`**: `tools/pdf_tools.py` に実装済み・TOOL_REGISTRY 登録済み。
+- **#6 pytest 単体テスト**: `tests/test_code_tools.py` / `test_command_tools.py` / `test_file_tools.py` / `test_web_tools.py` 実装済み。
+- **#19 並列ツール実行**: `server.py` にて `asyncio.create_task` による並列実行実装済み。`run_command` 等ストリーミングツールのみ逐次、それ以外は全件並列。
+- **#27 LLMプロバイダー切り替え Phase 2**: Azure / Foundry 複数インスタンス（`FOUNDRY_N_*`）/ Gemini / OpenAI / ローカルモデルのクロスプロバイダー切り替えが `server.py` に実装済み。`delegate_to_azure` という特定ツールではなく `preset_id` ベースの汎用切り替えとして超えた形で完了。
 
-### 動作確認済み
-- 起動時 Playwright MCP 接続・23 ツール登録（約 1〜2 秒）
-- `playwright__browser_navigate` が LLM から呼び出し可能
+---
 
-### 次セッションで確認する未テスト項目
-1. `__` 含む既存ツール名との衝突チェック（grep 1分）
-2. スクリーンショット UI 表示確認（チャット 5分）
-3. navigate → screenshot 連続呼び出し（チャット 5分）
-4. MCP サーバークラッシュ時の挙動（pkill → ツール呼び出し → 再起動 10分）
-5. Windows 版実動作（別環境）
+## 2026-05-27（セッション14）
 
-テスト完了後に feature/mcp-client → main / for_windows にマージする。
+### メール通知・Obsidian MCP・/setup UI 拡張
+
+#### 新規ファイル
+
+- `tools/notify_tools.py` — Gmail メール通知（smtplib）・10分クールダウン
+
+#### 変更ファイル
+
+- `server.py` — スクリーンショットを `workspace/playwright-screenshots/` に自動移動・`.jpg/.webp/.gif` 対応・メール通知フック（エラー時・「メールで通知して」指示時）・Obsidian MCP 有効化 API（`_get_mcp_enabled` / `_set_mcp_enabled`）・`SetupSaveRequest` に `email_notify` / `obsidian` フィールド追加
+- `setup.html` — draw.io iframe 遅延読み込み（起動時エラーダイアログ解消）・メール通知セクション追加・Obsidian 連携セクション追加（Vault パス・MCP 有効/無効）
+- `config.py` — `NOTIFY_EMAIL_*` / `OBSIDIAN_VAULT_PATH` 追加・Vault パスを `ALLOWED_WORK_DIRS` に自動追加
+- `config/mcp_servers.json` — Obsidian MCP を有効化（標準暗号化 Vault で動作確認済み）
+- `prompts.py` — メール通知ルール追加（設定済み/未設定で案内を分岐）・Obsidian MCP 空クエリ禁止・`list_files` 誘導
+
+#### 動作確認済み
+
+- Gmail メール通知（天気調査 → メール送信 Pass）
+- Obsidian MCP `read-note` / `list_files` によるノート読み取り Pass
+- `/setup` からの Vault パス・MCP 有効化の保存 Pass
+- draw.io 起動時エラーダイアログ解消 Pass
+
+### draw.io `addGCP3Palette is not a function` エラー調査・対応（セッション14後半）
+
+#### 問題の概要
+
+draw.io パネルを開くと `this.addGCP3Palette is not a function` という**別ウィンドウの alert ダイアログ**が表示されるバグ。
+
+- **原因**: draw.io サービス側（`embed.diagrams.net`）のバグ。`kennedy` テーマ使用時に GCP3 パレット初期化コードが実行されるが、`addGCP3Palette` メソッドが `EditorUi` インスタンスに存在しない
+- **進行性**: `embed.diagrams.net` の localStorage に GCP3 設定が蓄積されるにつれて悪化し、数回使用後に毎回発生するようになる
+- **draw.io 側のバグと確認**: プルしていない旧バージョン（localhost:8001）でも同様に再現。我々のコード変更が原因ではない
+
+#### 試みた修正（効果なし）
+
+1. `&ui=kennedy` テーマ削除 → エラー解消せず
+2. `&libs=0` 追加 → 解消せず
+3. `&configure=1` 追加 → draw.io が `configure` イベント待ちのまま `init` を送信しなくなり描画不可に（**破壊的**・取り消し済み）
+4. `/drawio-proxy` サーバーサイドプロキシ + polyfill 注入 → draw.io JS が非 diagrams.net ドメインを拒否して `init` 未発火
+5. iframe を `data-src` に変更して遅延読み込み → 解消せず（取り消し済み・`src=` に戻した）
+
+#### 現在適用中の対応
+
+```html
+<iframe id="drawio-iframe"
+  src="https://embed.diagrams.net/?embed=1&spin=1&modified=unsavedChanges&proto=json&lang=ja&ui=kennedy"
+  allow="clipboard-read; clipboard-write"
+  sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+  style="color-scheme: light">
+</iframe>
+```
+
+`sandbox` 属性で **`allow-same-origin` を除外** → iframe に opaque オリジンが付与され `embed.diagrams.net` の localStorage にアクセス不可になるため GCP3 設定が読み込まれない。加えて **`allow-modals` を除外** → alert ダイアログが表示されない。
+
+#### 未確認事項
+
+- sandbox 適用後の実動作テスト（ユーザー側で未実施・次セッションで確認）
+- draw.io 公式 GitHub Issue の調査（次セッションで実施予定）
+
+---
+
+## 2026-05-26（セッション13）
+
+### MCP クライアント Phase 1 テスト完了・スクリーンショット UI 表示・自動再接続対応
+
+#### 変更ファイル
+
+- `config/mcp_servers.json` — `--output-dir ./workspace/playwright-screenshots` を追加（スナップショット・コンソールログをワークスペース配下に保存）
+- `tools/mcp_client.py` — ImageContent を base64 変換してワークスペースに保存・自動再接続ロジック追加（`_reconnect` メソッド・空エラーや接続切断系の例外で再接続＋1回リトライ）
+- `server.py` — `playwright__browser_take_screenshot` 等の結果テキストに含まれる PNG パスを検出してファイルを読み込み `image_generated` SSE として送信
+
+#### テスト結果（全項目 Pass）
+
+1. **`__` 既存ツール衝突チェック** — `__skipped__` は tc_id に付与、ツール名には無関係。問題なし。
+2. **スクリーンショット UI 表示** — `navigate` → `take_screenshot` でチャット UI に画像がインライン表示。
+3. **連続ツール呼び出し** — 2 ツール連続呼び出し（navigate → screenshot）正常動作。
+4. **MCP サーバークラッシュ回復** — `kill` でプロセス強制終了後、次のリクエストで自動再接続・正常動作復帰。
+
+---
+
+## 2026-05-26（セッション12）
+
+### MCP クライアント実装 Phase 1（Playwright MCP）
+
+#### 新規ファイル
+
+- `tools/mcp_client.py` — MCPClientManager（AsyncExitStack で接続管理・ツール取得・OpenAI スキーマ変換・呼び出し）
+- `config/mcp_servers.json` — MCP サーバー設定ファイル（Playwright enabled / Obsidian disabled）
+
+#### 変更ファイル
+
+- `server.py` — lifespan に MCP 起動/停止・TOOL_REGISTRY/TOOLS への動的登録を統合。`execute_tool_async` に `__` を含むツール名を async で直接 await する分岐を追加
+- `requirements.txt` — `mcp>=1.0.0` 追加
+- `setup.sh` — Node.js 22.x チェック・インストール・`npx @playwright/mcp install-browser chromium` 追加
+
+#### 実装内容
+
+**`MCPClientManager`**
+- `config/mcp_servers.json` 読み込み・環境変数展開
+- `AsyncExitStack` で `stdio_client` / `ClientSession` を管理（anyio cancel scope と干渉しないよう shutdown は `BaseException` 抑制）
+- MCP ツール定義を `{server_id}__{tool_name}` 形式で OpenAI スキーマに変換
+- `execute_tool_async` から async callable として呼び出せる統一インターフェース
+
+**環境整備**
+- Node.js 22.x (nodesource) をインストール
+- mcp 1.27.1 を venv にインストール
+- `npx @playwright/mcp install-browser chromium` で Chromium Headless Shell をインストール
+
+**動作確認**
+- 起動時に Playwright MCP へ接続・23 ツールを TOOL_REGISTRY に登録（約 1〜2 秒）
+- `playwright__browser_navigate` / `playwright__browser_take_screenshot` 等が LLM から呼び出し可能であることを確認
+- シャットダウン時エラーなし
+
+**Phase 2 以降（未着手）**
+- Obsidian MCP (`config/mcp_servers.json` の enabled を true にするだけ)
+- /setup UI（MCP サーバー一覧・有効/無効トグル）
 
 ---
 

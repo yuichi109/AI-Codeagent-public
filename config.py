@@ -65,6 +65,13 @@ ALLOWED_WORK_DIR: Path = ALLOWED_WORK_DIRS[0]
 # デフォルトの workspace のみ自動作成（外部プロジェクトは存在前提）
 ALLOWED_WORK_DIRS[0].mkdir(parents=True, exist_ok=True)
 
+# Obsidian Vault パス（設定済みの場合は ALLOWED_WORK_DIRS に自動追加）
+OBSIDIAN_VAULT_PATH: str = os.getenv("OBSIDIAN_VAULT_PATH", "")
+if OBSIDIAN_VAULT_PATH:
+    _vault_path = _normalize_to_wsl_path(OBSIDIAN_VAULT_PATH)
+    if _vault_path not in ALLOWED_WORK_DIRS:
+        ALLOWED_WORK_DIRS.append(_vault_path)
+
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
 
 # Azure AI Foundry (省略可) — 後方互換用（= FOUNDRY_INSTANCES[0]）
@@ -218,3 +225,9 @@ MULTI_AGENT_PRESETS: dict = {
 MULTI_AGENT_MAX_ITERATIONS: int = int(os.getenv("MULTI_AGENT_MAX_ITERATIONS", "20"))
 MULTI_AGENT_TIMEOUT_SEC: int    = int(os.getenv("MULTI_AGENT_TIMEOUT_SEC", "300"))
 MULTI_AGENT_MAX_RETRIES: int    = int(os.getenv("MULTI_AGENT_MAX_RETRIES", "2"))
+
+# ---- メール通知設定 ----
+NOTIFY_EMAIL_ENABLED: bool = os.getenv("NOTIFY_EMAIL_ENABLED", "false").lower() == "true"
+NOTIFY_EMAIL: str          = os.getenv("NOTIFY_EMAIL", "")
+NOTIFY_EMAIL_PASSWORD: str = os.getenv("NOTIFY_EMAIL_PASSWORD", "")
+NOTIFY_EMAIL_TO: str       = os.getenv("NOTIFY_EMAIL_TO", "")

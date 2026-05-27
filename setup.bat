@@ -55,6 +55,20 @@ if not exist "venv\Scripts\activate.bat" (
     echo [1/4] Virtual environment already exists.
 )
 
+:: --- Find / Install Node.js ---
+call :find_nodejs
+if not defined NODE_FOUND (
+    call :install_nodejs
+    call :find_nodejs
+    if not defined NODE_FOUND (
+        echo [WARN] Node.js not found. MCP features (Playwright) will be disabled.
+        echo        Install manually: https://nodejs.org/
+    )
+)
+if defined NODE_FOUND (
+    for /f "tokens=*" %%v in ('node --version 2^>^&1') do echo [OK] Node.js %%v
+)
+
 :: --- Install packages ---
 echo [2/4] Installing packages...
 call venv\Scripts\activate.bat
@@ -62,6 +76,17 @@ set PIP_DISABLE_PIP_VERSION_CHECK=1
 python.exe -m pip install --upgrade pip --quiet
 python.exe -m pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] pip install failed. & pause & exit /b 1 )
+
+:: --- Install Playwright Chromium for MCP ---
+if defined NODE_FOUND (
+    echo [2b] Installing Playwright Chromium for MCP...
+    npx --yes @playwright/mcp install-browser chromium >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Playwright Chromium install failed. Run manually: npx @playwright/mcp install-browser chromium
+    ) else (
+        echo [OK] Playwright Chromium ready.
+    )
+)
 
 :: --- Create .env ---
 if not exist ".env" (
@@ -150,4 +175,28 @@ if %HAVE_WINGET%==0 (
 )
 echo [--] Git not found. Installing Git via winget...
 winget install -e --id Git.Git --source winget --silent --accept-package-agreements --accept-source-agreements
+goto :eof
+
+:find_nodejs
+set "NODE_FOUND="
+node --version >nul 2>&1
+if not errorlevel 1 ( set "NODE_FOUND=1" & goto :eof )
+:: Check common install paths
+if exist "%ProgramFiles%\nodejs\node.exe" (
+    set "PATH=%PATH%;%ProgramFiles%\nodejs"
+    set "NODE_FOUND=1"
+)
+if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
+    set "PATH=%PATH%;%LOCALAPPDATA%\Programs\nodejs"
+    set "NODE_FOUND=1"
+)
+goto :eof
+
+:install_nodejs
+if %HAVE_WINGET%==0 (
+    echo [WARN] winget not found. Install Node.js manually from https://nodejs.org/
+    goto :eof
+)
+echo [--] Node.js not found. Installing Node.js LTS via winget...
+winget install -e --id OpenJS.NodeJS.LTS --source winget --silent --accept-package-agreements --accept-source-agreements
 goto :eof

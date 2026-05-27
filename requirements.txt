@@ -18,3 +18,4 @@ Pillow>=10.0.0
 chromadb>=1.5.0
 onnxruntime>=1.17.0
 pywinrm>=0.4.3
+mcp>=1.0.0

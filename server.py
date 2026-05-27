@@ -58,7 +58,11 @@ from tools.background_tools import run_background, check_background, kill_backgr
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 from tools.image_tools import generate_image, edit_image, watermark_image, apply_auto_watermark, IMAGE_MODELS_BY_PROVIDER
+from tools.mcp_client import MCPClientManager
+from tools.notify_tools import send_email_notification
 from pydantic import BaseModel
+
+mcp_manager = MCPClientManager()
 
 # デフォルトのプロバイダー設定（.env のAzure設定）
 _default_provider_config = {
@@ -182,7 +186,26 @@ async def lifespan(app: FastAPI):
             )
             if result.returncode != 0:
                 print(f"[WARN] SearXNG 起動失敗: {result.stderr.strip() or result.stdout.strip()}")
+
+    # MCP クライアント起動・動的ツール登録
+    try:
+        await mcp_manager.start()
+        mcp_schemas = mcp_manager.get_tool_schemas()
+        mcp_registry = mcp_manager.get_tool_registry()
+        if mcp_registry:
+            TOOL_REGISTRY.update(mcp_registry)
+            TOOLS.extend(mcp_schemas)
+            print(f"[INFO] MCP: {len(mcp_registry)} ツールを登録しました: {list(mcp_registry.keys())}", flush=True)
+    except Exception as e:
+        print(f"[WARN] MCP 起動エラー: {e}")
+
     yield
+
+    # MCP クライアント停止（anyio cancel scope との干渉を抑制）
+    try:
+        await mcp_manager.stop()
+    except BaseException:
+        pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1181,6 +1204,18 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 async def execute_tool_async(name: str, arguments: dict) -> str:
     """execute_tool をスレッドプールで非同期実行するラッパー"""
+    # MCP ツール（サーバーID__ツール名 形式）は async callable なので直接 await する
+    if "__" in name and name in TOOL_REGISTRY:
+        try:
+            return await asyncio.wait_for(
+                TOOL_REGISTRY[name](**arguments),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            return json.dumps({"error": f"MCPツールがタイムアウトしました: {name}"}, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"error": f"MCPツールエラー: {e}"}, ensure_ascii=False)
+
     # ツール引数で指定されたタイムアウトがあればそれに合わせて待つ（+10秒のマージン）
     if name in ("generate_image", "edit_image", "watermark_image"):
         _HIGH_RES = {"1536x1024", "1024x1536", "1792x1024", "1024x1792"}
@@ -1514,6 +1549,7 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
         err = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
         yield f"data: {json.dumps({'type': 'answer_chunk', 'content': f'エラー: {type(e).__name__}: {e}'})}\n\n"
         yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+        send_email_notification(f"❌ エージェントエラー: {type(e).__name__}", str(e)[:500])
         print(err)  # uvicornログに出力
 
 
@@ -1751,7 +1787,10 @@ def _sanitize_history(history: list) -> list:
     ]
 
 
+_NOTIFY_KEYWORDS = ["メールして", "メールで教えて", "メールで知らせて", "メールで報告", "メールで通知", "終わったら知らせて", "終わったら教えて", "完了したらメール", "通知して"]
+
 async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = ""):
+    _notify_on_done = any(kw in user_message for kw in _NOTIFY_KEYWORDS)
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
 
@@ -1865,6 +1904,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             turn_messages.append({"role": "assistant", "content": final_answer})
             yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
             yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
+            if _notify_on_done:
+                send_email_notification("✅ エージェント処理完了", final_answer[:500])
             break
 
         # ツール呼び出しあり → アシスタントメッセージを履歴に追加してツール実行
@@ -2058,6 +2099,46 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         }, ensure_ascii=False)
                 except Exception:
                     pass
+
+            # MCP ツールが画像レスポンスを返した場合: UIに表示してLLM履歴を軽量化
+            if "__" in name:
+                try:
+                    result_data = json.loads(result)
+                    if result_data.get("image_base64"):
+                        # mcp_client.py が ImageContent を検出してbase64化した場合
+                        yield f"data: {json.dumps({'type': 'image_generated', 'image': result_data['image_base64'], 'mime': result_data.get('mime', 'image/png'), 'prompt': name, 'provider': 'mcp', 'model': ''})}\n\n"
+                        tool_result_for_msg = json.dumps({
+                            "message": "スクリーンショットを撮影しました",
+                            "saved_path": result_data.get("saved_path", ""),
+                            "text": result_data.get("text", ""),
+                            "note": "画像はUIに表示済みです",
+                        }, ensure_ascii=False)
+                except Exception:
+                    pass
+                # Playwright MCP はテキスト結果でファイルパスを返すため、スクリーンショットファイルを検出して表示
+                if "take_screenshot" in name or "screenshot" in name.lower():
+                    import re as _re
+                    import base64 as _b64
+                    import shutil as _shutil
+                    _img_match = _re.search(r'\]\(([^)]+\.(?:png|jpg|jpeg|webp|gif))\)', result)
+                    if _img_match:
+                        _img_rel = _img_match.group(1).lstrip("./")
+                        _img_abs = ALLOWED_WORK_DIR.parent / _img_rel
+                        if not _img_abs.exists():
+                            _img_abs = ALLOWED_WORK_DIR / _img_rel
+                        if _img_abs.exists():
+                            try:
+                                _ss_dir = ALLOWED_WORK_DIR / "playwright-screenshots"
+                                _ss_dir.mkdir(parents=True, exist_ok=True)
+                                _dest = _ss_dir / _img_abs.name
+                                if _img_abs.resolve() != _dest.resolve():
+                                    _shutil.move(str(_img_abs), str(_dest))
+                                _ext = _dest.suffix.lower().lstrip(".")
+                                _mime = f"image/{'jpeg' if _ext == 'jpg' else _ext}"
+                                _b64_data = _b64.b64encode(_dest.read_bytes()).decode()
+                                yield f"data: {json.dumps({'type': 'image_generated', 'image': _b64_data, 'mime': _mime, 'prompt': name, 'provider': 'mcp', 'model': ''})}\n\n"
+                            except Exception:
+                                pass
 
             # render_manim: 画像をUIに送信 + vision message 注入のためにキュー
             if name == "render_manim":
@@ -3677,6 +3758,76 @@ async def index():
     return FileResponse("index.html")
 
 
+@app.get("/drawio-proxy")
+async def drawio_proxy(request: Request):
+    """draw.io を自サーバー経由で配信し addGCP3Palette polyfill を注入する"""
+    from fastapi.responses import Response as FastAPIResponse
+    params = str(request.url.query)
+    url = f"https://embed.diagrams.net/?{params}" if params else "https://embed.diagrams.net/"
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        html = resp.content
+        polyfill = b"""<base href="https://embed.diagrams.net/">
+<script>
+(function(){
+  var _eu;
+  try {
+    Object.defineProperty(window, 'EditorUi', {
+      get: function(){ return _eu; },
+      set: function(v){
+        _eu = v;
+        if(v && v.prototype){
+          ['addGCP3Palette','addGCP2Palette','addGCPPalette'].forEach(function(m){
+            if(!v.prototype[m]) v.prototype[m] = function(){};
+          });
+        }
+      },
+      configurable: true, enumerable: true
+    });
+  } catch(e){}
+  var _oa = window.alert;
+  window.alert = function(m){
+    if(typeof m==='string' && m.indexOf('addGCP')>=0){ return; }
+    return _oa && _oa.call(window, m);
+  };
+})();
+</script>"""
+        if b"<head>" in html:
+            html = html.replace(b"<head>", b"<head>" + polyfill, 1)
+        else:
+            html = polyfill + html
+        return FastAPIResponse(content=html, media_type="text/html",
+                               headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return FastAPIResponse(content=f"<p>draw.io proxy error: {e}</p>", media_type="text/html")
+
+
+def _get_mcp_enabled(server_id: str) -> str:
+    """mcp_servers.json から指定サーバーの enabled 値を返す"""
+    try:
+        mcp_conf = json.loads((Path(__file__).parent / "config" / "mcp_servers.json").read_text(encoding="utf-8"))
+        for s in mcp_conf.get("servers", []):
+            if s.get("id") == server_id:
+                return "true" if s.get("enabled") else "false"
+    except Exception:
+        pass
+    return "false"
+
+
+def _set_mcp_enabled(server_id: str, enabled: bool):
+    """mcp_servers.json の指定サーバーの enabled を更新する"""
+    conf_path = Path(__file__).parent / "config" / "mcp_servers.json"
+    try:
+        mcp_conf = json.loads(conf_path.read_text(encoding="utf-8"))
+        for s in mcp_conf.get("servers", []):
+            if s.get("id") == server_id:
+                s["enabled"] = enabled
+        conf_path.write_text(json.dumps(mcp_conf, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[setup] mcp_servers.json 更新失敗: {e}")
+
+
 @app.get("/setup")
 async def setup_page():
     return FileResponse("setup.html")
@@ -3819,6 +3970,16 @@ async def setup_current():
             "watermark_opacity":   raw.get("WATERMARK_OPACITY", "0.6"),
             "watermark_font_size": raw.get("WATERMARK_FONT_SIZE", "0"),
         },
+        "email_notify": {
+            "address":      raw.get("NOTIFY_EMAIL", ""),
+            "password_set": bool(raw.get("NOTIFY_EMAIL_PASSWORD")),
+            "to":           raw.get("NOTIFY_EMAIL_TO", ""),
+            "enabled":      raw.get("NOTIFY_EMAIL_ENABLED", "false"),
+        },
+        "obsidian": {
+            "vault_path":  raw.get("OBSIDIAN_VAULT_PATH", ""),
+            "mcp_enabled": _get_mcp_enabled("obsidian"),
+        },
     })
 
 
@@ -3921,6 +4082,8 @@ class SetupSaveRequest(BaseModel):
     responses_api: dict = {}
     rag_embed: dict = {}
     image_gen: dict = {}
+    email_notify: dict = {}
+    obsidian: dict = {}
 
 
 @app.post("/setup/save")
@@ -3944,6 +4107,8 @@ async def setup_save(req: SetupSaveRequest):
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
         "RAG_ENABLED", "RAG_EMBED_",
         "IMAGE_",
+        "NOTIFY_",
+        "OBSIDIAN_",
         "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
@@ -4143,6 +4308,28 @@ async def setup_save(req: SetupSaveRequest):
     if ig_foundry_key:
         lines.append(f"IMAGE_FOUNDRY_API_KEY={ig_foundry_key}")
     lines.append("")
+
+    # メール通知
+    em = req.email_notify
+    em_password = api_key_val(em.get("password", ""), "NOTIFY_EMAIL_PASSWORD")
+    lines += [
+        "# メール通知",
+        f"NOTIFY_EMAIL_ENABLED={em.get('enabled', 'false')}",
+    ]
+    if em.get("address"):
+        lines.append(f"NOTIFY_EMAIL={em['address']}")
+    if em_password:
+        lines.append(f"NOTIFY_EMAIL_PASSWORD={em_password}")
+    if em.get("to"):
+        lines.append(f"NOTIFY_EMAIL_TO={em['to']}")
+    lines.append("")
+
+    # Obsidian 連携
+    ob = req.obsidian
+    if ob.get("vault_path"):
+        lines += ["# Obsidian 連携", f"OBSIDIAN_VAULT_PATH={ob['vault_path']}", ""]
+    if ob.get("mcp_enabled") in ("true", "false"):
+        _set_mcp_enabled("obsidian", ob["mcp_enabled"] == "true")
 
     # プロキシ行（既存から保持）
     proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]

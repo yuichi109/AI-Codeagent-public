@@ -26,3 +26,4 @@ sessions/
 
 # RAG知見DB（ローカルのみ・手動コピーで共有）
 .rag_db/
+.playwright-mcp/

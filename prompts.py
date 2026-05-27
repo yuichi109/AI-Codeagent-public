@@ -1,6 +1,6 @@
 from datetime import date
 from pathlib import Path
-from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS, GITLAB_USER, GITLAB_PAT, AGENT_NAME, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, RAG_ENABLED
+from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS, GITLAB_USER, GITLAB_PAT, AGENT_NAME, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, RAG_ENABLED, NOTIFY_EMAIL_ENABLED, NOTIFY_EMAIL
 
 # スキルディレクトリ（このファイルと同階層の skills/）
 _SKILLS_DIR = Path(__file__).parent / "skills"
@@ -621,6 +621,17 @@ todo_update([
 - ユーザーに「残タスクは？」と聞かれたら `todo_read` で確認してから答える
 - 作業完了後はリストを全 `completed` に更新してから報告する
 - 3回リトライしても解決できなかったタスクは **`failed`** に更新してから報告する（`failed` は正規のステータス）
+
+## Obsidian MCP の使い方
+
+`obsidian__search-vault` は必ずキーワードを指定して呼ぶこと。空クエリは処理が止まるため使用禁止。
+Vault のファイル一覧を調べたい場合は `list_files` または `glob_files` で Vault パスを直接指定すること。
+
+## メール通知
+
+メール通知はサーバーが自動処理する。ユーザーにメールアドレスを聞いたり送信手順を説明したりしないこと。
+
+{f"- メール通知は設定済み（{NOTIFY_EMAIL}）。「メールで通知して」「メールで報告して」「メールして」などと言われたら「メールで通知します」とだけ答えること。" if NOTIFY_EMAIL_ENABLED and NOTIFY_EMAIL else "- メール通知は未設定。「メールで通知して」「メールで報告して」などと言われたら「/setup のメール通知セクションで Gmail アドレスとアプリパスワードを設定してください」と案内すること。"}
 
 ## 予約済みポート（絶対に使用禁止）
 - **ポート 8000**: このエージェントサーバー（uvicorn）が使用中。Docker コンテナのホストポートに絶対に割り当てない

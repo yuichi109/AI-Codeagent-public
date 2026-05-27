@@ -40,6 +40,42 @@
 - `/setup` からの Vault パス・MCP 有効化の保存 Pass
 - draw.io 起動時エラーダイアログ解消 Pass
 
+### draw.io `addGCP3Palette is not a function` エラー調査・対応（セッション14後半）
+
+#### 問題の概要
+
+draw.io パネルを開くと `this.addGCP3Palette is not a function` という**別ウィンドウの alert ダイアログ**が表示されるバグ。
+
+- **原因**: draw.io サービス側（`embed.diagrams.net`）のバグ。`kennedy` テーマ使用時に GCP3 パレット初期化コードが実行されるが、`addGCP3Palette` メソッドが `EditorUi` インスタンスに存在しない
+- **進行性**: `embed.diagrams.net` の localStorage に GCP3 設定が蓄積されるにつれて悪化し、数回使用後に毎回発生するようになる
+- **draw.io 側のバグと確認**: プルしていない旧バージョン（localhost:8001）でも同様に再現。我々のコード変更が原因ではない
+
+#### 試みた修正（効果なし）
+
+1. `&ui=kennedy` テーマ削除 → エラー解消せず
+2. `&libs=0` 追加 → 解消せず
+3. `&configure=1` 追加 → draw.io が `configure` イベント待ちのまま `init` を送信しなくなり描画不可に（**破壊的**・取り消し済み）
+4. `/drawio-proxy` サーバーサイドプロキシ + polyfill 注入 → draw.io JS が非 diagrams.net ドメインを拒否して `init` 未発火
+5. iframe を `data-src` に変更して遅延読み込み → 解消せず（取り消し済み・`src=` に戻した）
+
+#### 現在適用中の対応
+
+```html
+<iframe id="drawio-iframe"
+  src="https://embed.diagrams.net/?embed=1&spin=1&modified=unsavedChanges&proto=json&lang=ja&ui=kennedy"
+  allow="clipboard-read; clipboard-write"
+  sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+  style="color-scheme: light">
+</iframe>
+```
+
+`sandbox` 属性で **`allow-same-origin` を除外** → iframe に opaque オリジンが付与され `embed.diagrams.net` の localStorage にアクセス不可になるため GCP3 設定が読み込まれない。加えて **`allow-modals` を除外** → alert ダイアログが表示されない。
+
+#### 未確認事項
+
+- sandbox 適用後の実動作テスト（ユーザー側で未実施・次セッションで確認）
+- draw.io 公式 GitHub Issue の調査（次セッションで実施予定）
+
 ---
 
 ## 2026-05-26（セッション13）

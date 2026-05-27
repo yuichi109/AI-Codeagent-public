@@ -5465,7 +5465,7 @@
     <button class="drawio-tb-btn" id="drawio-close-btn" onclick="toggleDrawioPanel()">✕ 閉じる</button>
   </div>
   <iframe id="drawio-iframe"
-    src="https://embed.diagrams.net/?embed=1&spin=1&modified=unsavedChanges&proto=json&lang=ja&ui=kennedy"
+    data-src="https://embed.diagrams.net/?embed=1&spin=1&modified=unsavedChanges&proto=json&lang=ja&ui=kennedy"
     allow="clipboard-read; clipboard-write"
     style="color-scheme: light">
   </iframe>
@@ -5821,11 +5821,13 @@
     if (isOpen) {
       document.getElementById('drawio-filename').value = '';
       _drawioCurrentXml = null;
-      if (_drawioReady) {
+      const ifrm = _drawioIframe();
+      if (!ifrm.src || ifrm.src === 'about:blank') {
+        ifrm.src = ifrm.dataset.src;
+      } else if (_drawioReady) {
         _drawioLoad(_DRAWIO_BLANK);
         _drawioSetStatus('新規ダイアグラム');
       } else {
-        const ifrm = _drawioIframe();
         ifrm.src = ifrm.src;
       }
     }

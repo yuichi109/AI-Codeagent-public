@@ -5,7 +5,14 @@
       "name": "Playwright MCP",
       "transport": "stdio",
       "command": "npx",
-      "args": ["@playwright/mcp@latest", "--headless", "--browser", "chromium", "--output-dir", "./workspace/playwright-screenshots"],
+      "args": [
+        "@playwright/mcp@latest",
+        "--headless",
+        "--browser",
+        "chromium",
+        "--output-dir",
+        "./workspace/playwright-screenshots"
+      ],
       "enabled": true
     },
     {
@@ -13,8 +20,11 @@
       "name": "Obsidian MCP",
       "transport": "stdio",
       "command": "npx",
-      "args": ["obsidian-mcp", "${OBSIDIAN_VAULT_PATH}"],
-      "enabled": false
+      "args": [
+        "obsidian-mcp",
+        "${OBSIDIAN_VAULT_PATH}"
+      ],
+      "enabled": true
     }
   ]
 }

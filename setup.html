@@ -482,6 +482,68 @@
     </div>
   </div>
 
+  <!-- メール通知 -->
+  <div class="section collapsed" id="sec-email">
+    <div class="section-header" onclick="toggleSection('sec-email')">
+      📧 メール通知 <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <p class="hint" style="margin-bottom:12px">エージェントの処理完了時などにメールで通知します。Gmail のアプリパスワードを使用します。</p>
+      <div class="row">
+        <div class="field">
+          <label>送信元 Gmail アドレス</label>
+          <input id="email-address" type="email" placeholder="your@gmail.com">
+        </div>
+        <div class="field">
+          <label>アプリパスワード</label>
+          <input id="email-password" type="password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="off">
+          <span class="hint">Google アカウント → セキュリティ → アプリパスワード で発行（16文字）</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>通知先メールアドレス</label>
+          <input id="email-to" type="email" placeholder="送信先（空欄の場合は送信元と同じ）">
+          <span class="hint">省略すると送信元アドレス宛に送信します</span>
+        </div>
+        <div class="field">
+          <label>メール通知を有効化</label>
+          <select id="email-enabled">
+            <option value="false">無効</option>
+            <option value="true">有効</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Obsidian 連携 -->
+  <div class="section collapsed" id="sec-obsidian">
+    <div class="section-header" onclick="toggleSection('sec-obsidian')">
+      🗒️ Obsidian 連携 <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <p class="hint" style="margin-bottom:12px">Obsidian の Vault パスを設定すると、エージェントが Vault 内のファイルを読み書きできます。</p>
+      <div class="row">
+        <div class="field">
+          <label>Vault パス</label>
+          <input id="obsidian-vault-path" type="text" placeholder="/home/user/Obsidian-Vault/MyDATA">
+          <span class="hint">Obsidian の保管庫フォルダの絶対パス（WSL パスで指定）</span>
+        </div>
+        <div class="field">
+          <label>Obsidian MCP を有効化</label>
+          <select id="obsidian-mcp-enabled">
+            <option value="false">無効</option>
+            <option value="true">有効</option>
+          </select>
+          <span class="hint">有効にするとエージェントが Vault のノートを読み書きできます</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- マルチエージェント設定 -->
   <div class="section collapsed" id="sec-multi-agent">
     <div class="section-header" onclick="toggleSection('sec-multi-agent')">
@@ -949,6 +1011,21 @@ async function loadConfig() {
     document.getElementById('gl-email').value = d.gitlab.email || '';
     document.getElementById('gl-email-hint').textContent = d.gitlab.email ? `現在の git config: ${d.gitlab.email}` : '未設定（保存時に git config --global user.email を更新）';
 
+    // Obsidian 連携
+    if (d.obsidian) {
+      document.getElementById('obsidian-vault-path').value    = d.obsidian.vault_path || '';
+      document.getElementById('obsidian-mcp-enabled').value   = d.obsidian.mcp_enabled || 'false';
+    }
+
+    // メール通知
+    if (d.email_notify) {
+      const en = d.email_notify;
+      document.getElementById('email-address').value  = en.address || '';
+      document.getElementById('email-password').placeholder = en.password_set ? '（設定済み — 変更する場合のみ入力）' : 'xxxx xxxx xxxx xxxx';
+      document.getElementById('email-to').value       = en.to || '';
+      document.getElementById('email-enabled').value  = en.enabled || 'false';
+    }
+
     // SearXNG / 検索
     document.getElementById('sx-url').value     = d.searxng.url;
     document.getElementById('sx-enabled').value = d.searxng.enabled;
@@ -1080,6 +1157,16 @@ async function saveConfig() {
       api_key:     document.getElementById('rag-api-key').value,
       deployment:  document.getElementById('rag-deployment').value,
       api_version: document.getElementById('rag-api-version').value,
+    },
+    obsidian: {
+      vault_path:   document.getElementById('obsidian-vault-path').value,
+      mcp_enabled:  document.getElementById('obsidian-mcp-enabled').value,
+    },
+    email_notify: {
+      address:  document.getElementById('email-address').value,
+      password: document.getElementById('email-password').value,
+      to:       document.getElementById('email-to').value,
+      enabled:  document.getElementById('email-enabled').value,
     },
     image_gen: {
       provider:          document.getElementById('img-provider').value,

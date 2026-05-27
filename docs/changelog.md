@@ -17,6 +17,31 @@
 
 ---
 
+## 2026-05-27（セッション14）
+
+### メール通知・Obsidian MCP・/setup UI 拡張
+
+#### 新規ファイル
+
+- `tools/notify_tools.py` — Gmail メール通知（smtplib）・10分クールダウン
+
+#### 変更ファイル
+
+- `server.py` — スクリーンショットを `workspace/playwright-screenshots/` に自動移動・`.jpg/.webp/.gif` 対応・メール通知フック（エラー時・「メールで通知して」指示時）・Obsidian MCP 有効化 API（`_get_mcp_enabled` / `_set_mcp_enabled`）・`SetupSaveRequest` に `email_notify` / `obsidian` フィールド追加
+- `setup.html` — draw.io iframe 遅延読み込み（起動時エラーダイアログ解消）・メール通知セクション追加・Obsidian 連携セクション追加（Vault パス・MCP 有効/無効）
+- `config.py` — `NOTIFY_EMAIL_*` / `OBSIDIAN_VAULT_PATH` 追加・Vault パスを `ALLOWED_WORK_DIRS` に自動追加
+- `config/mcp_servers.json` — Obsidian MCP を有効化（標準暗号化 Vault で動作確認済み）
+- `prompts.py` — メール通知ルール追加（設定済み/未設定で案内を分岐）・Obsidian MCP 空クエリ禁止・`list_files` 誘導
+
+#### 動作確認済み
+
+- Gmail メール通知（天気調査 → メール送信 Pass）
+- Obsidian MCP `read-note` / `list_files` によるノート読み取り Pass
+- `/setup` からの Vault パス・MCP 有効化の保存 Pass
+- draw.io 起動時エラーダイアログ解消 Pass
+
+---
+
 ## 2026-05-26（セッション13）
 
 ### MCP クライアント Phase 1 テスト完了・スクリーンショット UI 表示・自動再接続対応

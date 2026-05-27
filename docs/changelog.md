@@ -17,6 +17,40 @@
 
 ---
 
+## 2026-05-27（セッション16）
+
+### draw.io タイトルバーファイル名表示・/archive スキル（Obsidian アーカイブ）
+
+#### 変更ファイル
+
+- `index.html`
+  - draw.io「開く」ボタンからファイルを開いたとき、タイトルバーにファイル名が表示されない問題を修正
+    - `toggleDrawioPanel()` が `value=''` でクリアする前にファイル名を設定していた順序バグを修正
+    - `_drawioLoad()` に `filename` 引数を追加し `<mxfile><diagram name="...">` でラップして送信
+  - `updateScopeBar()` にアーカイブ済みバッジ（📦）表示を追加
+    - `.archived` マーカーファイルが存在する場合にスコープバー横に📦を表示（ホバーで日時確認可）
+  - `archive_workspace` ツール完了時に📦バッジをリアルタイム更新
+- `tools/workspace_tools.py` — `archive_workspace(scope)` 関数を追加
+  - 現在の作業ディレクトリを `{vault}/archives/{hostname}_wsl|win/{scope}/` にコピー（`cp -u` 相当・削除は反映しない）
+  - 完了後に `workspace/{scope}/.archived` マーカーファイルを書き込み
+  - ホスト名＋プラットフォーム（wsl/win）でパス分岐し、同一PC上のWSL版/Windows版衝突を防止
+- `server.py`
+  - `archive_workspace` を TOOL_REGISTRY・TOOLS に登録
+  - `OBSIDIAN_VAULT_PATH` を import に追加
+  - `GET /workspace/archive-info` エンドポイント追加（スキル用・vault パス・コピー先などを返す）
+  - `GET /workspace/archived-status` エンドポイント追加（.archived の有無・日時を返す）
+- `skills/archive/SKILL.md` — `/archive` スキル追加
+  - 「アーカイブして」で `archive_workspace` ツールを呼ぶだけのシンプルな定義
+
+#### 動作確認済み
+
+- draw.io「開く」ボタン → タイトルバーにファイル名表示 ✅
+- 「アーカイブして」→ Obsidian vault の正しいパスにコピー ✅（nano/mini 両モデルで確認）
+- アーカイブ完了後に📦バッジが即時表示 ✅
+- ページ更新後も📦バッジが復元 ✅
+
+---
+
 ## 2026-05-27（セッション15）
 
 ### MCP サーバー管理 UI・draw.io 「開く」ボタン

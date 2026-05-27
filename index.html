@@ -3819,6 +3819,13 @@
               const liveEl = currentResultEl.querySelector('.live-stdout');
               if (liveEl) liveEl.remove();
               setResult(currentResultEl, currentToolName, data.result);
+              // アーカイブ完了時にスコープバーの📦バッジを即時更新
+              if (currentToolName === 'archive_workspace') {
+                try {
+                  const r = JSON.parse(data.result);
+                  if (r.ok) updateScopeBar();
+                } catch (_) {}
+              }
               // .drawio ファイルを保存したとき「Draw.io で開く」ボタンをツールグループの外に表示
               if (currentToolName === 'write_file') {
                 const p = (currentToolArgs?.path || '');

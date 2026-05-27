@@ -3828,6 +3828,34 @@ def _set_mcp_enabled(server_id: str, enabled: bool):
         print(f"[setup] mcp_servers.json 更新失敗: {e}")
 
 
+@app.get("/mcp/servers")
+async def mcp_servers_get():
+    conf_path = Path(__file__).parent / "config" / "mcp_servers.json"
+    try:
+        return JSONResponse(json.loads(conf_path.read_text(encoding="utf-8")))
+    except Exception:
+        return JSONResponse({"servers": []})
+
+
+@app.post("/mcp/servers")
+async def mcp_servers_save(data: dict):
+    conf_path = Path(__file__).parent / "config" / "mcp_servers.json"
+    try:
+        conf_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
+    if sys.platform == "win32":
+        import os
+        threading.Timer(0.5, lambda: os._exit(0)).start()
+        return JSONResponse({"status": "ok"})
+    else:
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+            return JSONResponse({"status": "ok"})
+        except Exception as e:
+            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+
+
 @app.get("/setup")
 async def setup_page():
     return FileResponse("setup.html")

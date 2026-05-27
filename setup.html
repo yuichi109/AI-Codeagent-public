@@ -544,6 +544,52 @@
     </div>
   </div>
 
+  <!-- MCP サーバー管理 -->
+  <div class="section collapsed" id="sec-mcp">
+    <div class="section-header" onclick="toggleSection('sec-mcp')">
+      🔌 MCP サーバー管理 <span class="tag">省略可</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="section-body">
+      <p class="hint" style="margin-bottom:12px">MCP サーバーの有効/無効の切り替えや新規追加ができます。保存するとサービスが再起動されます。</p>
+      <div id="mcp-server-list"></div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid #313244;">
+        <div style="font-size:13px;font-weight:bold;color:#cdd6f4;margin-bottom:10px;">新規サーバーを追加</div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>テンプレートから選択</label>
+          <select id="mcp-template" onchange="mcpSelectTemplate()" style="padding:6px 10px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:13px;">
+            <option value="">── テンプレートを選択 ──</option>
+            <option value="playwright">Playwright MCP（ブラウザ操作・スクリーンショット）</option>
+            <option value="obsidian">Obsidian MCP（ノート読み書き）</option>
+            <option value="filesystem">Filesystem MCP（ファイル操作）</option>
+            <option value="github">GitHub MCP</option>
+            <option value="brave">Brave Search MCP（Web 検索）</option>
+            <option value="memory">Memory MCP（会話記憶）</option>
+            <option value="thinking">Sequential Thinking MCP（思考チェーン）</option>
+            <option value="drawio">Draw.io MCP</option>
+            <option value="custom">手動入力</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>名前</label>
+            <input id="mcp-new-name" type="text" placeholder="My MCP Server">
+          </div>
+          <div class="field">
+            <label>コマンド（引数もスペース区切りで）</label>
+            <input id="mcp-new-cmd" type="text" placeholder="npx some-mcp-server --option value">
+          </div>
+        </div>
+        <div id="mcp-template-note" style="font-size:12px;color:#a6e3a1;margin-bottom:8px;display:none;"></div>
+        <button onclick="mcpAddServer()" style="margin-top:4px;padding:5px 16px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">＋ 追加</button>
+      </div>
+      <div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;">
+        <button onclick="mcpReset()" style="padding:6px 16px;background:#45475a;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer;font-size:13px;">↩ デフォルトに戻す</button>
+        <button onclick="mcpSave()" style="padding:8px 24px;background:#89b4fa;color:#1e1e2e;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:14px;">💾 保存して再起動</button>
+      </div>
+    </div>
+  </div>
+
   <!-- マルチエージェント設定 -->
   <div class="section collapsed" id="sec-multi-agent">
     <div class="section-header" onclick="toggleSection('sec-multi-agent')">
@@ -1417,6 +1463,145 @@ async function saveMaConfig() {
 }
 
 loadMaConfig();
+
+// ── MCP サーバー管理 ──────────────────────────────────────────
+const MCP_TEMPLATES = {
+  playwright: { name: 'Playwright MCP', cmd: 'npx @playwright/mcp@latest --headless --browser chromium --output-dir ./workspace/playwright-screenshots', note: '' },
+  obsidian:   { name: 'Obsidian MCP',   cmd: 'npx obsidian-mcp /path/to/vault', note: '⚠ /path/to/vault を実際の Vault パスに変更してください' },
+  filesystem: { name: 'Filesystem MCP', cmd: 'npx @modelcontextprotocol/server-filesystem /path/to/dir', note: '⚠ /path/to/dir を許可するディレクトリパスに変更してください' },
+  github:     { name: 'GitHub MCP',     cmd: 'npx @modelcontextprotocol/server-github', note: '⚠ 環境変数 GITHUB_PERSONAL_ACCESS_TOKEN の設定が必要です' },
+  brave:      { name: 'Brave Search MCP', cmd: 'npx @modelcontextprotocol/server-brave-search', note: '⚠ 環境変数 BRAVE_API_KEY の設定が必要です' },
+  memory:     { name: 'Memory MCP',     cmd: 'npx @modelcontextprotocol/server-memory', note: '' },
+  thinking:   { name: 'Sequential Thinking MCP', cmd: 'npx @modelcontextprotocol/server-sequential-thinking', note: '' },
+  drawio:     { name: 'Draw.io MCP',    cmd: 'npx @jgraph/drawio-mcp', note: '' },
+};
+
+const MCP_DEFAULTS = [
+  { id: 'playwright', name: 'Playwright MCP', transport: 'stdio', command: 'npx', args: ['@playwright/mcp@latest', '--headless', '--browser', 'chromium', '--output-dir', './workspace/playwright-screenshots'], enabled: true },
+  { id: 'obsidian',   name: 'Obsidian MCP',   transport: 'stdio', command: 'npx', args: ['obsidian-mcp', '${OBSIDIAN_VAULT_PATH}'], enabled: true },
+];
+
+let _mcpServers = [];
+
+async function loadMcpServers() {
+  try {
+    const r = await fetch('/mcp/servers');
+    const d = await r.json();
+    _mcpServers = d.servers || [];
+    renderMcpServers();
+  } catch(e) {
+    console.error('MCP サーバー読み込み失敗', e);
+  }
+}
+
+function renderMcpServers() {
+  const el = document.getElementById('mcp-server-list');
+  if (!el) return;
+  if (_mcpServers.length === 0) {
+    el.innerHTML = '<p class="hint">サーバーが登録されていません。</p>';
+    return;
+  }
+  el.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr style="font-size:12px;color:#6c7086;text-align:left;border-bottom:1px solid #313244;">
+          <th style="padding:6px 8px;">名前</th>
+          <th style="padding:6px 8px;">コマンド</th>
+          <th style="padding:6px 8px;width:90px;">状態</th>
+          <th style="padding:6px 8px;width:60px;"></th>
+        </tr>
+      </thead>
+      <tbody id="mcp-server-tbody"></tbody>
+    </table>`;
+  const tbody = document.getElementById('mcp-server-tbody');
+  _mcpServers.forEach((s, i) => {
+    const cmd = [s.command, ...(s.args || [])].join(' ');
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #313244';
+    tr.innerHTML = `
+      <td style="padding:8px;font-size:13px;color:#cdd6f4;">${s.name || s.id}</td>
+      <td style="padding:8px;font-size:11px;color:#6c7086;word-break:break-all;">${cmd}</td>
+      <td style="padding:8px;">
+        <select data-mcp-idx="${i}" style="padding:3px 6px;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;font-size:12px;">
+          <option value="true"  ${s.enabled ? 'selected' : ''}>有効</option>
+          <option value="false" ${!s.enabled ? 'selected' : ''}>無効</option>
+        </select>
+      </td>
+      <td style="padding:8px;">
+        <button onclick="mcpDelete(${i})" style="padding:3px 10px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-size:12px;">削除</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function mcpSelectTemplate() {
+  const key = document.getElementById('mcp-template').value;
+  const noteEl = document.getElementById('mcp-template-note');
+  if (!key || key === 'custom') {
+    noteEl.style.display = 'none';
+    return;
+  }
+  const t = MCP_TEMPLATES[key];
+  if (!t) return;
+  document.getElementById('mcp-new-name').value = t.name;
+  document.getElementById('mcp-new-cmd').value  = t.cmd;
+  if (t.note) {
+    noteEl.textContent = t.note;
+    noteEl.style.display = 'block';
+  } else {
+    noteEl.style.display = 'none';
+  }
+}
+
+async function mcpReset() {
+  if (!confirm('Playwright MCP と Obsidian MCP のデフォルト設定に戻します。現在のリストは上書きされます。よろしいですか？')) return;
+  _mcpServers = JSON.parse(JSON.stringify(MCP_DEFAULTS));
+  renderMcpServers();
+}
+
+function mcpDelete(i) {
+  if (!confirm(`「${_mcpServers[i].name || _mcpServers[i].id}」を削除しますか？`)) return;
+  _mcpServers.splice(i, 1);
+  renderMcpServers();
+}
+
+function mcpAddServer() {
+  const name = document.getElementById('mcp-new-name').value.trim();
+  const cmdLine = document.getElementById('mcp-new-cmd').value.trim();
+  if (!name || !cmdLine) { alert('名前とコマンドを入力してください'); return; }
+  const parts = cmdLine.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+  const command = parts[0] || '';
+  const args = parts.slice(1).map(a => a.replace(/^"|"$/g, ''));
+  const id = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  _mcpServers.push({ id, name, transport: 'stdio', command, args, enabled: true });
+  document.getElementById('mcp-new-name').value = '';
+  document.getElementById('mcp-new-cmd').value = '';
+  renderMcpServers();
+}
+
+async function mcpSave() {
+  document.querySelectorAll('[data-mcp-idx]').forEach(sel => {
+    const i = parseInt(sel.dataset.mcpIdx);
+    _mcpServers[i].enabled = sel.value === 'true';
+  });
+  try {
+    const r = await fetch('/mcp/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ servers: _mcpServers }),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      alert('保存しました。サービスを再起動しています…');
+    } else {
+      alert('エラー: ' + (d.detail || d.warning || '不明'));
+    }
+  } catch(e) {
+    alert('保存失敗: ' + e.message);
+  }
+}
+
+loadMcpServers();
 </script>
 </body>
 </html>

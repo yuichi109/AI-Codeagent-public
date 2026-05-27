@@ -2677,6 +2677,18 @@
             }
           } catch(_) {}
         }
+        // .drawio 保存ツールがあればボタンを turnEl に追加（リロード後も表示）
+        if (name === 'write_file') {
+          let a = {};
+          try { a = JSON.parse(tc.function?.arguments || '{}'); } catch(_) {}
+          if ((a.path || '').endsWith('.drawio')) {
+            const btn = document.createElement('button');
+            btn.textContent = '📐 Draw.io で開く';
+            btn.className = 'drawio-open-btn';
+            btn.onclick = () => drawioOpenFile(a.path);
+            turnEl.appendChild(btn);
+          }
+        }
       }
     }
   }
@@ -3656,6 +3668,7 @@
     }
     let currentResultEl = null;
     let currentToolName = null;
+    let currentToolArgs = null;
     let currentToolGroupEl = null;      // ターン内のツールをまとめる <details>
     let currentToolGroupInnerEl = null; // ツールブロックを入れる内側 div
     let currentToolGroupNames = [];     // グループ内のツール名リスト
@@ -3739,6 +3752,7 @@
             finalAnswer = '';
             _ttsReset();
             currentToolName = data.name;
+            currentToolArgs = data.args || {};
             // ツールグループを作成（ターン内の初回のみ）
             if (!currentToolGroupEl) {
               currentToolGroupEl = document.createElement('details');
@@ -3784,6 +3798,21 @@
               const liveEl = currentResultEl.querySelector('.live-stdout');
               if (liveEl) liveEl.remove();
               setResult(currentResultEl, currentToolName, data.result);
+              // .drawio ファイルを保存したとき「Draw.io で開く」ボタンをツールグループの外に表示
+              if (currentToolName === 'write_file') {
+                const p = (currentToolArgs?.path || '');
+                if (p.endsWith('.drawio')) {
+                  const btn = document.createElement('button');
+                  btn.textContent = '📐 Draw.io で開く';
+                  btn.className = 'drawio-open-btn';
+                  btn.onclick = () => drawioOpenFile(p);
+                  if (currentToolGroupEl && currentToolGroupEl.parentNode) {
+                    currentToolGroupEl.parentNode.insertBefore(btn, currentToolGroupEl.nextSibling);
+                  } else {
+                    turnEl.appendChild(btn);
+                  }
+                }
+              }
             }
           } else if (data.type === 'answer_chunk') {
             genPhase = 'responding'; genTokenChars += data.content.length; updateGenStatus();
@@ -5939,6 +5968,7 @@
       _drawioDoSave(_drawioCurrentXml);
     } else if (msg.event === 'load') {
       _drawioSetStatus('読み込み完了');
+      setTimeout(() => _drawioPost({ action: 'fit' }), 100);
     } else if (msg.event === 'exit') {
       if (document.getElementById('drawio-panel').classList.contains('open')) toggleDrawioPanel();
     }

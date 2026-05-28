@@ -23,3 +23,8 @@ print(res.json())
 
 inbox 監視は `.env` の `OBSIDIAN_INBOX_ENABLED=true` で有効化。
 未設定の場合は「inbox 監視が無効です。/setup → Obsidian 連携で有効にしてください」と伝える。
+
+## 将来案（未実装）
+
+`/send-to-inbox <指示テキスト>` スキル — チャット内の指示を inbox の MD として保存するショートカット。
+自然言語でも「これをインボックスに置いて」と言えば `write_file` で対応可能（追加実装不要）。

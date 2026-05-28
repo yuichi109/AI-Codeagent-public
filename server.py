@@ -175,6 +175,7 @@ async def _inbox_process(md_path):
         raw = md_path.read_text(encoding="utf-8")
     except Exception as e:
         print(f"[WARN] inbox 読み込みエラー: {e}", flush=True)
+        complete_request(md_path, "error")
         return
 
     # frontmatter パース（--- ... --- ブロック）
@@ -190,6 +191,7 @@ async def _inbox_process(md_path):
 
     if not body:
         print(f"[WARN] inbox: {md_path.name} の本文が空のためスキップ", flush=True)
+        complete_request(md_path, "skipped")
         return
 
     job_id = datetime.now().strftime("%H%M%S")

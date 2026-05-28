@@ -186,7 +186,8 @@ class MCPClientManager:
                 await conn.connect()
                 print(f"[MCP] {cfg['id']} 接続完了: {len(conn.tools)} ツール", flush=True)
                 self._connections[cfg["id"]] = conn
-            except Exception as e:
+            except (Exception, asyncio.CancelledError) as e:
+                # CancelledError は Python 3.8+ で BaseException のため Exception では捕捉できない
                 print(f"[MCP] {cfg['id']} 起動失敗: {e}", flush=True)
 
     async def stop(self):

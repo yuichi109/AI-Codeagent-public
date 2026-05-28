@@ -287,9 +287,14 @@
   #workspace-scope-bar.scoped #scope-label { color: #a6e3a1; text-shadow: 0 0 8px #a6e3a150; }
   #scope-btn { padding: 2px 10px; background: #313244; color: #cdd6f4; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; }
   #scope-btn:hover { background: #45475a; }
-  #inbox-scan-btn { display:none; padding: 2px 10px; background: #313244; color: #89b4fa; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; }
+  #inbox-scan-btn { display:none; padding: 2px 10px; background: #313244; color: #89b4fa; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; position: relative; }
   #inbox-scan-btn:hover { background: #45475a; }
   #inbox-scan-btn.busy { color: #6c7086; cursor: default; }
+  #inbox-draft-badge { display:none; position:absolute; top:-5px; right:-5px; background:#f38ba8; color:#1e1e2e; border-radius:50%; width:16px; height:16px; font-size:10px; font-weight:bold; line-height:16px; text-align:center; cursor:pointer; }
+  #inbox-draft-popup { display:none; position:absolute; top:28px; left:0; background:#1e1e2e; border:1px solid #f38ba8; border-radius:8px; padding:10px 14px; min-width:260px; z-index:100; font-size:12px; box-shadow:0 4px 16px rgba(0,0,0,0.5); }
+  #inbox-draft-popup .draft-title { color:#f38ba8; font-weight:bold; margin-bottom:6px; }
+  #inbox-draft-popup .draft-item { color:#cdd6f4; padding:2px 0; }
+  #inbox-draft-popup .draft-hint { color:#6c7086; margin-top:6px; font-size:11px; }
   /* ---- ワークスペーススコープ選択モーダル ---- */
   #scope-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; align-items: center; justify-content: center; }
   #scope-overlay.open { display: flex; }
@@ -588,7 +593,14 @@
   <span id="scope-dot"></span>
   <span id="scope-label">📁 workspace/</span>
   <button id="scope-btn" onclick="openWorkspaceScopeModal()">選択</button>
-  <button id="inbox-scan-btn" onclick="triggerInboxScan()" title="inbox をスキャンして処理待ちリクエストを実行">📥 inbox</button>
+  <button id="inbox-scan-btn" onclick="triggerInboxScan()" title="inbox をスキャンして処理待ちリクエストを実行">📥 inbox
+    <span id="inbox-draft-badge" onclick="event.stopPropagation(); toggleDraftPopup()"></span>
+    <div id="inbox-draft-popup">
+      <div class="draft-title">⚠️ 放置中の下書き</div>
+      <div id="inbox-draft-list"></div>
+      <div class="draft-hint">drafts/ → inbox/{PC名}/ に移動すると処理されます</div>
+    </div>
+  </button>
 </div>
 <div id="header">
   ⚛️ AI Code Agent
@@ -2118,6 +2130,40 @@
       if (d.enabled) {
         btn.style.display = 'inline-block';
         if (d.pending > 0) btn.title = `inbox をスキャン（${d.pending} 件待機中）`;
+        checkDraftAlerts();
+        setInterval(checkDraftAlerts, 5 * 60 * 1000); // 5分ごとに確認
+      }
+    } catch {}
+  }
+
+  let _draftPopupOpen = false;
+  function toggleDraftPopup() {
+    const popup = document.getElementById('inbox-draft-popup');
+    _draftPopupOpen = !_draftPopupOpen;
+    popup.style.display = _draftPopupOpen ? 'block' : 'none';
+  }
+  document.addEventListener('click', e => {
+    if (_draftPopupOpen && !e.target.closest('#inbox-scan-btn')) {
+      _draftPopupOpen = false;
+      document.getElementById('inbox-draft-popup').style.display = 'none';
+    }
+  });
+
+  async function checkDraftAlerts() {
+    try {
+      const res = await fetch('/inbox/draft-alerts');
+      const d = await res.json();
+      const badge = document.getElementById('inbox-draft-badge');
+      const list  = document.getElementById('inbox-draft-list');
+      if (d.stale && d.stale.length > 0) {
+        badge.textContent = d.stale.length;
+        badge.style.display = 'block';
+        list.innerHTML = d.stale.map(f =>
+          `<div class="draft-item">📄 ${f.name} <span style="color:#6c7086">(${f.label}経過)</span></div>`
+        ).join('');
+      } else {
+        badge.style.display = 'none';
+        list.innerHTML = '';
       }
     } catch {}
   }

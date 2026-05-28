@@ -15,8 +15,11 @@ import asyncio
 import platform
 import shutil
 import socket
+import time
 from datetime import datetime
 from pathlib import Path
+
+STALE_DRAFT_HOURS = 2
 
 from config import OBSIDIAN_INBOX_ENABLED, OBSIDIAN_INBOX_POLL_SEC, OBSIDIAN_VAULT_PATH
 
@@ -39,7 +42,34 @@ def _get_inbox_dirs() -> dict[str, Path] | None:
         "processing": base / "processing" / suffix,
         "done":       base / "done"       / suffix,
         "results":    base / "results"    / suffix,
+        "drafts":     base / "drafts",
     }
+
+
+def get_stale_drafts() -> list[dict]:
+    """drafts/ 内で最終更新から STALE_DRAFT_HOURS 以上経過した MD ファイルを返す。"""
+    if not OBSIDIAN_VAULT_PATH:
+        return []
+    drafts_dir = Path(OBSIDIAN_VAULT_PATH) / "AI-Codeagent" / "drafts"
+    if not drafts_dir.exists():
+        return []
+    now = time.time()
+    threshold = STALE_DRAFT_HOURS * 3600
+    stale = []
+    for p in sorted(drafts_dir.glob("*.md")):
+        if p.name.startswith("_"):
+            continue
+        elapsed = now - p.stat().st_mtime
+        if elapsed >= threshold:
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            stale.append({
+                "name": p.name,
+                "elapsed_hours": hours,
+                "elapsed_minutes": minutes,
+                "label": f"{hours}時間{minutes}分" if hours > 0 else f"{minutes}分",
+            })
+    return stale
 
 
 def ensure_inbox_dirs() -> dict[str, Path] | None:
@@ -49,7 +79,20 @@ def ensure_inbox_dirs() -> dict[str, Path] | None:
     for d in dirs.values():
         d.mkdir(parents=True, exist_ok=True)
     _ensure_template(dirs["inbox"])
+    _ensure_draft_readme(dirs["drafts"])
     return dirs
+
+
+def _ensure_draft_readme(drafts_dir: Path):
+    readme = drafts_dir / "_README.md"
+    if not readme.exists():
+        readme.write_text(
+            "# drafts フォルダ\n\n"
+            "ここで下書きを作成し、書き終えたら `inbox/{PC名}_wsl/` または `inbox/{PC名}_win/` に移動してください。\n\n"
+            "- アンダースコア(_)始まりのファイルは通知対象外です\n"
+            f"- 最終更新から {STALE_DRAFT_HOURS} 時間以上放置するとチャット UI に通知が表示されます\n",
+            encoding="utf-8",
+        )
 
 
 _TEMPLATE_CONTENT = """\

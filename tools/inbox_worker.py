@@ -48,18 +48,68 @@ def ensure_inbox_dirs() -> dict[str, Path] | None:
         return None
     for d in dirs.values():
         d.mkdir(parents=True, exist_ok=True)
+    _ensure_template(dirs["inbox"])
     return dirs
 
 
+_TEMPLATE_CONTENT = """\
+# inbox リクエストテンプレート
+
+このファイルをコピーして、ファイル名を変えてから本文を書いてください。
+アンダースコア(_)始まりのファイルはスキャン対象外です。
+
+---
+
+## シンプルな指示（frontmatter なし）
+
+ファイル内容:
+```
+Pythonで1から100の合計を計算して結果を教えて
+```
+
+---
+
+## frontmatter 付き（モード指定）
+
+```
+---
+mode: single
+---
+
+Web で最新の Python リリース情報を調べてまとめて
+```
+
+---
+
+## 利用可能な frontmatter キー
+
+| キー | 値 | 説明 |
+|---|---|---|
+| mode | single（デフォルト） | 通常のエージェントで処理 |
+
+## 結果の確認場所
+
+results/{このPCのホスト名}_wsl/{日付}/{job-id}/result.md
+"""
+
+_TEMPLATE_FILE = "_TEMPLATE.md"
+
+
+def _ensure_template(inbox_dir: Path):
+    template_path = inbox_dir / _TEMPLATE_FILE
+    if not template_path.exists():
+        template_path.write_text(_TEMPLATE_CONTENT, encoding="utf-8")
+
+
 def scan_inbox() -> list[Path]:
-    """inbox フォルダ内の .md ファイル一覧を返す。"""
+    """inbox フォルダ内の .md ファイル一覧を返す（_ 始まりは除外）。"""
     dirs = _get_inbox_dirs()
     if dirs is None:
         return []
     inbox = dirs["inbox"]
     if not inbox.exists():
         return []
-    return sorted(inbox.glob("*.md"))
+    return sorted(p for p in inbox.glob("*.md") if not p.name.startswith("_"))
 
 
 def accept_request(md_path: Path) -> Path | None:

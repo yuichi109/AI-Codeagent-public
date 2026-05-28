@@ -2116,7 +2116,7 @@
       const d = await res.json();
       const btn = document.getElementById('inbox-scan-btn');
       if (d.enabled) {
-        btn.style.display = '';
+        btn.style.display = 'inline-block';
         if (d.pending > 0) btn.title = `inbox をスキャン（${d.pending} 件待機中）`;
       }
     } catch {}

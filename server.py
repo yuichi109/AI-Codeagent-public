@@ -4147,8 +4147,10 @@ async def setup_current():
             "enabled":      raw.get("NOTIFY_EMAIL_ENABLED", "false"),
         },
         "obsidian": {
-            "vault_path":  raw.get("OBSIDIAN_VAULT_PATH", ""),
-            "mcp_enabled": _get_mcp_enabled("obsidian"),
+            "vault_path":    raw.get("OBSIDIAN_VAULT_PATH", ""),
+            "mcp_enabled":   _get_mcp_enabled("obsidian"),
+            "inbox_enabled": raw.get("OBSIDIAN_INBOX_ENABLED", "false"),
+            "inbox_poll_sec": raw.get("OBSIDIAN_INBOX_POLL_SEC", "900"),
         },
     })
 
@@ -4497,7 +4499,13 @@ async def setup_save(req: SetupSaveRequest):
     # Obsidian 連携
     ob = req.obsidian
     if ob.get("vault_path"):
-        lines += ["# Obsidian 連携", f"OBSIDIAN_VAULT_PATH={ob['vault_path']}", ""]
+        lines.append("# Obsidian 連携")
+        lines.append(f"OBSIDIAN_VAULT_PATH={ob['vault_path']}")
+        if ob.get("inbox_enabled") in ("true", "false"):
+            lines.append(f"OBSIDIAN_INBOX_ENABLED={ob['inbox_enabled']}")
+        if ob.get("inbox_poll_sec"):
+            lines.append(f"OBSIDIAN_INBOX_POLL_SEC={ob['inbox_poll_sec']}")
+        lines.append("")
     if ob.get("mcp_enabled") in ("true", "false"):
         _set_mcp_enabled("obsidian", ob["mcp_enabled"] == "true")
 

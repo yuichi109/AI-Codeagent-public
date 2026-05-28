@@ -541,6 +541,21 @@
           <span class="hint">有効にするとエージェントが Vault のノートを読み書きできます</span>
         </div>
       </div>
+      <div class="row">
+        <div class="field">
+          <label>inbox 監視を有効化</label>
+          <select id="obsidian-inbox-enabled">
+            <option value="false">無効</option>
+            <option value="true">有効</option>
+          </select>
+          <span class="hint">Vault の inbox フォルダを監視して MD ファイルをエージェントが自動処理します</span>
+        </div>
+        <div class="field">
+          <label>ポーリング間隔（秒）</label>
+          <input id="obsidian-inbox-poll-sec" type="number" min="60" max="86400" placeholder="900">
+          <span class="hint">inbox フォルダを確認する間隔（60〜86400秒、デフォルト: 900秒 = 15分）</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1059,8 +1074,10 @@ async function loadConfig() {
 
     // Obsidian 連携
     if (d.obsidian) {
-      document.getElementById('obsidian-vault-path').value    = d.obsidian.vault_path || '';
-      document.getElementById('obsidian-mcp-enabled').value   = d.obsidian.mcp_enabled || 'false';
+      document.getElementById('obsidian-vault-path').value      = d.obsidian.vault_path || '';
+      document.getElementById('obsidian-mcp-enabled').value     = d.obsidian.mcp_enabled || 'false';
+      document.getElementById('obsidian-inbox-enabled').value   = d.obsidian.inbox_enabled || 'false';
+      document.getElementById('obsidian-inbox-poll-sec').value  = d.obsidian.inbox_poll_sec || '900';
     }
 
     // メール通知
@@ -1205,8 +1222,10 @@ async function saveConfig() {
       api_version: document.getElementById('rag-api-version').value,
     },
     obsidian: {
-      vault_path:   document.getElementById('obsidian-vault-path').value,
-      mcp_enabled:  document.getElementById('obsidian-mcp-enabled').value,
+      vault_path:    document.getElementById('obsidian-vault-path').value,
+      mcp_enabled:   document.getElementById('obsidian-mcp-enabled').value,
+      inbox_enabled: document.getElementById('obsidian-inbox-enabled').value,
+      inbox_poll_sec: document.getElementById('obsidian-inbox-poll-sec').value,
     },
     email_notify: {
       address:  document.getElementById('email-address').value,

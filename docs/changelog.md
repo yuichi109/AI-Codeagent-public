@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-05-28（セッション19続き）
+
+### Windows版 Obsidian MCP 動作確認・バグ修正
+
+#### バグ修正
+
+- `tools/mcp_client.py` — Windows で `npx`（`.cmd` ラッパー）を asyncio subprocess で直接起動すると stdout pipe が届かない問題を修正
+  - `os.name == "nt"` かつコマンドが `npx` の場合、自動で `cmd.exe /c npx ...` にラップする
+  - 原因: Python asyncio の ProactorEventLoop が `.cmd` ファイルの pipe stdout を正しく読み取れない Windows 固有の挙動
+
+#### テスト結果（Windows版・全PASS）
+
+| テスト | ツール | 結果 |
+|---|---|---|
+| vault一覧取得 | `obsidian__list-available-vaults` | ✅ ai-agent |
+| ノート読み取り | `obsidian__read-note` | ✅ ようこそ.md |
+| ノート作成 | `obsidian__create-note` | ✅ MCPテスト.md |
+| 検索 | `obsidian__search-vault` | ✅ キーワード「MCP」→ 1件ヒット |
+
+---
+
 ## 2026-05-28（セッション19）
 
 ### for_windows リベース・Windows版テスト全PASS

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH
+from tools.inbox_worker import start_worker, stop_worker, get_status as inbox_get_status, scan_inbox as inbox_scan_now, ensure_inbox_dirs
 from prompts import get_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
@@ -187,6 +188,13 @@ async def lifespan(app: FastAPI):
             if result.returncode != 0:
                 print(f"[WARN] SearXNG 起動失敗: {result.stderr.strip() or result.stdout.strip()}")
 
+    # inbox ワーカー起動（process_fn は後で差し替え）
+    async def _inbox_process_stub(md_path):
+        print(f"[INFO] inbox: {md_path.name} を受信（処理未実装）", flush=True)
+
+    ensure_inbox_dirs()
+    start_worker(_inbox_process_stub)
+
     # MCP クライアント起動・動的ツール登録
     try:
         await mcp_manager.start()
@@ -200,6 +208,9 @@ async def lifespan(app: FastAPI):
         print(f"[WARN] MCP 起動エラー: {e}")
 
     yield
+
+    # inbox ワーカー停止
+    stop_worker()
 
     # MCP クライアント停止（anyio cancel scope との干渉を抑制）
     try:

@@ -74,6 +74,10 @@ if OBSIDIAN_VAULT_PATH:
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
 
+# Obsidian inbox 監視（機能B）
+OBSIDIAN_INBOX_ENABLED: bool = os.getenv("OBSIDIAN_INBOX_ENABLED", "false").lower() == "true"
+OBSIDIAN_INBOX_POLL_SEC: int = int(os.getenv("OBSIDIAN_INBOX_POLL_SEC", "900"))
+
 # Azure AI Foundry (省略可) — 後方互換用（= FOUNDRY_INSTANCES[0]）
 FOUNDRY_ENDPOINT: str    = os.getenv("FOUNDRY_ENDPOINT", "")
 FOUNDRY_API_KEY: str     = os.getenv("FOUNDRY_API_KEY", "")

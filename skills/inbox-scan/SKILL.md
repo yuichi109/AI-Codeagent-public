@@ -8,13 +8,21 @@ trigger: /inbox-scan
 
 ユーザーが `/inbox-scan`、「inbox をスキャン」「inbox を確認」と入力したとき：
 
-`POST /inbox/scan` を HTTP リクエストで呼び出し、結果をユーザーに伝える。
+**必ず POST メソッドで** `http://localhost:8000/inbox/scan` を呼び出し、結果をユーザーに伝える。
+
+```bash
+curl -s -X POST http://localhost:8000/inbox/scan
+```
+
+または Python:
 
 ```python
 import requests
 res = requests.post("http://localhost:8000/inbox/scan")
 print(res.json())
 ```
+
+※ GET では "Method Not Allowed" になるので必ず `-X POST` を指定すること。
 
 - 処理待ちがなければ「inbox に新しいリクエストはありません」と伝える
 - 処理を開始した場合は件数と「results/ に書き出されます」と伝える

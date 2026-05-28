@@ -33,15 +33,37 @@
 
 ユーザーがボルト内の inbox フォルダにノートを書くと AI が検出・実行・結果を書き戻す。
 
+### フォルダ構成
+
+```
+{vault}/AI-Codeagent/
+  inbox/
+    {hostname}_wsl/    ← 各PCのAIが自分のサブフォルダだけ監視
+    {hostname}_win/
+  processing/
+    {hostname}_wsl/    ← 受理後に移動（作業中の証拠・二重実行防止）
+  done/
+    {hostname}_wsl/    ← 完了後に移動（リクエスト保存）
+  results/
+    {hostname}_wsl/    ← 成果物の書き出し先（どのPCが実行したか一目でわかる）
+      {date}/{job-id}/
+```
+
+- ホスト名 + `_wsl` / `_win` サフィックスで同一物理マシンの WSL/Windows 版も区別
+- PC-A の Obsidian から `inbox/pc-b_win/` にファイルを置いて PC-B に指示することも可能
+- `results/` もホストごとに分かれるため、どのPCで実行されたか Obsidian から確認できる
+
 ### フロー
 ```
-{vault}/AI-Codeagent/inbox/request.md  ← ユーザーが書く
-  ↓ AI が検出（ポーリング）
-マルチエージェント or 通常エージェントで処理
-  ↓
-{vault}/AI-Codeagent/{date}/{job-id}/  ← 結果を書き戻す
-inbox/request.md を処理済みフォルダへ移動
+inbox/{hostname}_wsl/request.md     ← ユーザーが置く（他PCからも可）
+  ↓ AI が検出・受理（ポーリング or 手動スキャン）
+processing/{hostname}_wsl/request.md  ← 移動（二重実行防止）
+  ↓ 処理完了
+done/{hostname}_wsl/{timestamp}-request.md  ← 移動
+results/{hostname}_wsl/{date}/{job-id}/     ← 成果物を書き出し
 ```
+
+`processing/{hostname}_wsl/` にファイルがある = そのPCのAIが現在作業中。
 
 ### 技術的な課題
 - WSL から Windows NTFS を `inotify` で監視すると NTFS の仕様でイベントが発火しないケースがある
@@ -60,8 +82,10 @@ Pythonでフィボナッチ数列を返す関数を作って
 
 ### 実装方針
 - `server.py` の lifespan に inbox 監視タスクを追加（`asyncio` ループ）
-- 処理中は `request.md` を `request.processing.md` にリネームして二重実行防止
-- 完了後は `inbox/done/{timestamp}-request.md` へ移動
+- ポーリング間隔は `OBSIDIAN_INBOX_POLL_SEC`（デフォルト 900秒 = 15分）
+- 手動スキャン手段を2つ用意：`/inbox-scan` スキル + `/setup` の「今すぐスキャン」ボタン
+- 受理時に `processing/` へ移動（二重実行防止）
+- 完了後に `done/{timestamp}-request.md` へ移動・成果物を `results/` に書き出し
 - 難易度: ★★★★
 
 ---
@@ -71,5 +95,5 @@ Pythonでフィボナッチ数列を返す関数を作って
 ```env
 OBSIDIAN_VAULT_PATH=C:\Users\yuichi.matsuo\Documents\Obsidian\MyVault
 OBSIDIAN_INBOX_ENABLED=false   # 機能B: inbox 監視
-OBSIDIAN_INBOX_POLL_SEC=5      # ポーリング間隔（秒）
+OBSIDIAN_INBOX_POLL_SEC=900    # ポーリング間隔（秒）デフォルト15分
 ```

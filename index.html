@@ -287,6 +287,8 @@
   #workspace-scope-bar.scoped #scope-label { color: #a6e3a1; text-shadow: 0 0 8px #a6e3a150; }
   #scope-btn { padding: 2px 10px; background: #313244; color: #cdd6f4; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; }
   #scope-btn:hover { background: #45475a; }
+  #app-version { margin-left: auto; color: #6c7086; font-size: 11px; font-family: monospace; user-select: none; text-decoration: none; transition: color 0.2s; }
+  #app-version:hover { color: #cdd6f4; }
   #inbox-scan-btn { display:none; padding: 2px 10px; background: #313244; color: #89b4fa; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; position: relative; }
   #inbox-scan-btn:hover { background: #45475a; }
   #inbox-scan-btn.busy { color: #6c7086; cursor: default; }
@@ -601,6 +603,7 @@
       <div class="draft-hint">drafts/ → inbox/{PC名}/ に移動すると処理されます</div>
     </div>
   </button>
+  <a id="app-version" href="https://gitlab.com/yuichi.matsuo/AI-Codeagent-public" target="_blank" title="AI Code Agent パブリックミラー"></a>
 </div>
 <div id="header">
   ⚛️ AI Code Agent
@@ -4110,6 +4113,10 @@
   loadHistory();
   updateScopeBar();
   initInboxButton();
+  fetch('/version').then(r => r.json()).then(d => {
+    const el = document.getElementById('app-version');
+    if (el) el.textContent = 'v' + d.version;
+  }).catch(() => {});
 
   // ---- 音声入力 (Web Speech API) ----
   (function() {

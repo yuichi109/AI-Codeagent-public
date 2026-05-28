@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 
+APP_VERSION = "1.4.0"
+
 try:
     load_dotenv(override=True, encoding='utf-8')
 except Exception:

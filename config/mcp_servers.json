@@ -25,6 +25,7 @@
         "${OBSIDIAN_VAULT_PATH}"
       ],
       "timeout": 120,
+      "idle_timeout": 60,
       "enabled": true
     }
   ]

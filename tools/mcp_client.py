@@ -58,10 +58,15 @@ def _mcp_tool_to_openai_schema(server_id: str, tool) -> dict:
     }
 
 
+_PROACTIVE_RECONNECT_BUFFER = 15  # アイドルタイムアウトの何秒前に再接続するか
+
+
 class _ServerConnection:
     def __init__(self, config: dict):
         self.config = config
         self.timeout = config.get("timeout", TOOL_CALL_TIMEOUT)
+        self._idle_timeout: float | None = config.get("idle_timeout")
+        self._last_mcp_activity: float = 0.0
         self.session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
         self.tools: list = []
@@ -74,7 +79,8 @@ class _ServerConnection:
         # Windows では npx 等の .cmd ラッパーを直接 subprocess 起動すると
         # asyncio pipe の stdout が届かないため cmd.exe /c 経由で実行する
         if os.name == "nt" and command.lower() in ("npx", "npx.cmd"):
-            args = ["/c", command] + args
+            # --prefer-offline: キャッシュ済みなら npm レジストリを参照せず高速再起動
+            args = ["/c", command, "--prefer-offline"] + args
             command = "cmd.exe"
         params = StdioServerParameters(
             command=command,
@@ -88,6 +94,7 @@ class _ServerConnection:
         await self.session.initialize()
         result = await self.session.list_tools()
         self.tools = result.tools
+        self._last_mcp_activity = time.time()
         logger.info("MCP [%s] 接続完了: %d ツール取得", cfg["id"], len(self.tools))
 
     async def _reconnect(self) -> bool:
@@ -103,6 +110,13 @@ class _ServerConnection:
             return False
 
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
+        # プロアクティブ再接続: idle_timeout が設定されていて期限切れ間近なら事前に再接続
+        if self.session and self._idle_timeout:
+            idle = time.time() - self._last_mcp_activity
+            if idle > self._idle_timeout - _PROACTIVE_RECONNECT_BUFFER:
+                print(f"[MCP] {self.config['id']} アイドル {idle:.0f}秒、プロアクティブ再接続中...", flush=True)
+                await self._reconnect()
+
         if self.session is None:
             logger.warning("MCP [%s] セッションなし。再接続を試みます...", self.config["id"])
             if not await self._reconnect():
@@ -139,8 +153,11 @@ class _ServerConnection:
                     img = image_parts[0]
                     combined = {"text": "\n".join(text_parts), **img}
                     return json.dumps(combined, ensure_ascii=False)
+                self._last_mcp_activity = time.time()
                 return "\n".join(text_parts) if text_parts else "(空のレスポンス)"
             except asyncio.TimeoutError:
+                # プロセスが死んでいる可能性があるためセッションをリセット（次回呼び出しで自動再接続）
+                self.session = None
                 return f"エラー: MCPツール呼び出しがタイムアウト ({self.timeout}秒)"
             except Exception as e:
                 # 接続切断・空エラー・BrokenPipe等の場合は再接続して1回だけリトライ

@@ -61,6 +61,7 @@ def _mcp_tool_to_openai_schema(server_id: str, tool) -> dict:
 class _ServerConnection:
     def __init__(self, config: dict):
         self.config = config
+        self.timeout = config.get("timeout", TOOL_CALL_TIMEOUT)
         self.session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
         self.tools: list = []
@@ -110,7 +111,7 @@ class _ServerConnection:
             try:
                 result = await asyncio.wait_for(
                     self.session.call_tool(tool_name, arguments),
-                    timeout=TOOL_CALL_TIMEOUT,
+                    timeout=self.timeout,
                 )
                 text_parts = []
                 image_parts = []
@@ -140,7 +141,7 @@ class _ServerConnection:
                     return json.dumps(combined, ensure_ascii=False)
                 return "\n".join(text_parts) if text_parts else "(空のレスポンス)"
             except asyncio.TimeoutError:
-                return f"エラー: MCPツール呼び出しがタイムアウト ({TOOL_CALL_TIMEOUT}秒)"
+                return f"エラー: MCPツール呼び出しがタイムアウト ({self.timeout}秒)"
             except Exception as e:
                 # 接続切断・空エラー・BrokenPipe等の場合は再接続して1回だけリトライ
                 err_msg = str(e).lower()
@@ -158,7 +159,7 @@ class _ServerConnection:
                         try:
                             result = await asyncio.wait_for(
                                 self.session.call_tool(tool_name, arguments),
-                                timeout=TOOL_CALL_TIMEOUT,
+                                timeout=self.timeout,
                             )
                             return "\n".join(c.text for c in result.content if hasattr(c, "text")) or "(空のレスポンス)"
                         except Exception as e2:

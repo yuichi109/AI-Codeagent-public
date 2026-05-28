@@ -59,9 +59,16 @@ class _ServerConnection:
 
     async def connect(self):
         cfg = self.config
+        command = cfg["command"]
+        args = cfg.get("args", [])
+        # Windows では npx 等の .cmd ラッパーを直接 subprocess 起動すると
+        # asyncio pipe の stdout が届かないため cmd.exe /c 経由で実行する
+        if os.name == "nt" and command.lower() in ("npx", "npx.cmd"):
+            args = ["/c", command] + args
+            command = "cmd.exe"
         params = StdioServerParameters(
-            command=cfg["command"],
-            args=cfg.get("args", []),
+            command=command,
+            args=args,
             env=None,
         )
         self._exit_stack = AsyncExitStack()

@@ -61,9 +61,28 @@ Azure OpenAI / Azure AI Foundry・Gemini・ローカル LLM に対応した、We
 - 会話履歴の保存・復元・アーカイブ・保護（消えない設定）
 - 長い会話は自動圧縮（コンテキスト節約）
 
+### MCP クライアント
+- `config/mcp_servers.json` で任意の MCP サーバーを接続・管理（`/setup` UI から設定可）
+- **Playwright MCP** — ブラウザ操作ツール群（23ツール）を LLM から直接呼び出し
+- **Obsidian MCP** — Obsidian Vault のノート読み書き・検索
+- MCP クラッシュ時は自動再接続
+
+### Obsidian 連携
+- Obsidian Vault 内のノートを読み書き・検索（MCP 経由）
+- 作業ディレクトリを Vault の `archives/` フォルダにコピー保存（`/archive` スキル）
+  - アーカイブ先: `{OBSIDIAN_VAULT_PATH}/archives/{hostname}_wsl|win/{scope}/`
+  - 設定: `/setup` → 「Obsidian 連携」セクションの `OBSIDIAN_VAULT_PATH`
+
+### 通知
+- Gmail メール通知（エラー時・「メールで通知して」指示時・10分クールダウン）
+- 設定: `/setup` → 「メール通知」セクション
+
+### ダイアグラム
+- draw.io ダイアグラムをチャット内でプレビュー・「📐 Draw.io で開く」ボタンで直接編集
+
 ### スキルシステム
 - `skills/*/SKILL.md` にスラッシュコマンドを定義するだけで即反映（再起動不要）
-- 標準スキル: `/commit` `/get-proj` `/save` `/ansible` `/boost`
+- 標準スキル: `/commit` `/get-proj` `/save` `/ansible` `/boost` `/archive`
 
 ---
 

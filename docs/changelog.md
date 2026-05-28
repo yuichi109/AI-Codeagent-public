@@ -17,6 +17,130 @@
 
 ---
 
+## 2026-05-28（セッション17）
+
+### Obsidian inbox 監視ワーカー実装・README更新・各種UI整備
+
+#### 変更ファイル
+
+- `tools/inbox_worker.py` — 新規作成
+  - `{vault}/AI-Codeagent/inbox/{hostname}_wsl|win/` を定期ポーリング（デフォルト15分）
+  - ファイル検出時: inbox → processing → done の3ステップで移動（二重実行防止）
+  - 成果物を `results/{hostname}_wsl|win/{date}/{job_id}/result.md` に書き出し
+  - `_` 始まりファイルはスキャン除外（テンプレート・README 用）
+  - 起動時に `_TEMPLATE.md` を inbox に、`_README.md` を drafts に自動生成
+  - `get_stale_drafts()` — drafts フォルダで2時間以上放置されたファイルを検出
+  - `drafts/` フォルダも自動作成（ホスト名なし・全PC共通）
+- `config.py` — `OBSIDIAN_INBOX_ENABLED` / `OBSIDIAN_INBOX_POLL_SEC` 追加（範囲: 60〜86400秒でクランプ）
+- `server.py`
+  - lifespan に inbox ワーカー起動・停止を登録
+  - `_inbox_process()` — MD を読み込み frontmatter パース → `_agent_stream_inner` でエージェント処理 → results 書き出し
+  - 空本文・読み込みエラー時も processing/ に残らないよう修正
+  - `GET /inbox/status` エンドポイント追加
+  - `POST /inbox/scan` エンドポイント追加（即時スキャン）
+  - `GET /inbox/draft-alerts` エンドポイント追加（放置下書き検出）
+- `index.html`
+  - スコープバーに 📥 inbox ボタン追加（`OBSIDIAN_INBOX_ENABLED=true` 時のみ表示）
+  - 放置下書きがあると赤バッジ表示・クリックでファイル名と経過時間のポップアップ
+  - 15分ごとに draft-alerts を自動チェック
+- `setup.html` — Obsidian 連携セクションに inbox トグル・ポーリング間隔入力を追加
+- `skills/inbox-scan/SKILL.md` — `/inbox-scan` スキル追加
+- `skills/archive/SKILL.md` — アーカイブ設定（OBSIDIAN_VAULT_PATH の場所）を追記
+- `README.md` — MCP・Obsidian 連携・通知・draw.io・`/archive` スキルのセクションを追加
+- `.env.example` — Obsidian inbox 設定項目を追記
+
+#### フォルダ構成（Vault 内）
+
+```
+{vault}/AI-Codeagent/
+  drafts/                      ← 下書き置き場（全PC共通）
+  inbox/{hostname}_wsl|win/    ← 処理待ち（ここに移動で実行指示）
+  processing/{hostname}_wsl|win/  ← 作業中
+  done/{hostname}_wsl|win/     ← 完了済みリクエスト
+  results/{hostname}_wsl|win/{date}/{job_id}/  ← 成果物
+```
+
+#### 動作確認済み（セッション17）
+
+- inbox ワーカー起動・ポーリング ✅
+- シンプルなリクエスト処理（inbox → results 書き出し）✅
+- frontmatter 付きリクエスト処理 ✅
+- 空本文スキップ（processing/ に残らない）✅
+- 二重スキャン防止 ✅
+- `_TEMPLATE.md` スキャン除外 ✅
+- `/inbox/draft-alerts` API（放置検出）✅
+- 📥 inbox ボタン表示 ✅
+
+#### 未テスト（次セッションで実施）
+
+- 放置バッジの UI 表示・ポップアップ動作
+- `/inbox-scan` スキルのチャットからの呼び出し
+- `/setup` の inbox トグル保存・読み込み
+- ポーリングによる自動処理（手動スキャンのみ確認済み）
+
+---
+
+## 2026-05-27（セッション16）
+
+### draw.io タイトルバーファイル名表示・/archive スキル（Obsidian アーカイブ）
+
+#### 変更ファイル
+
+- `index.html`
+  - draw.io「開く」ボタンからファイルを開いたとき、タイトルバーにファイル名が表示されない問題を修正
+    - `toggleDrawioPanel()` が `value=''` でクリアする前にファイル名を設定していた順序バグを修正
+    - `_drawioLoad()` に `filename` 引数を追加し `<mxfile><diagram name="...">` でラップして送信
+  - `updateScopeBar()` にアーカイブ済みバッジ（📦）表示を追加
+    - `.archived` マーカーファイルが存在する場合にスコープバー横に📦を表示（ホバーで日時確認可）
+  - `archive_workspace` ツール完了時に📦バッジをリアルタイム更新
+- `tools/workspace_tools.py` — `archive_workspace(scope)` 関数を追加
+  - 現在の作業ディレクトリを `{vault}/archives/{hostname}_wsl|win/{scope}/` にコピー（`cp -u` 相当・削除は反映しない）
+  - 完了後に `workspace/{scope}/.archived` マーカーファイルを書き込み
+  - ホスト名＋プラットフォーム（wsl/win）でパス分岐し、同一PC上のWSL版/Windows版衝突を防止
+- `server.py`
+  - `archive_workspace` を TOOL_REGISTRY・TOOLS に登録
+  - `OBSIDIAN_VAULT_PATH` を import に追加
+  - `GET /workspace/archive-info` エンドポイント追加（スキル用・vault パス・コピー先などを返す）
+  - `GET /workspace/archived-status` エンドポイント追加（.archived の有無・日時を返す）
+- `skills/archive/SKILL.md` — `/archive` スキル追加
+  - 「アーカイブして」で `archive_workspace` ツールを呼ぶだけのシンプルな定義
+
+#### 動作確認済み
+
+- draw.io「開く」ボタン → タイトルバーにファイル名表示 ✅
+- 「アーカイブして」→ Obsidian vault の正しいパスにコピー ✅（nano/mini 両モデルで確認）
+- アーカイブ完了後に📦バッジが即時表示 ✅
+- ページ更新後も📦バッジが復元 ✅
+
+---
+
+## 2026-05-27（セッション15）
+
+### MCP サーバー管理 UI・draw.io 「開く」ボタン
+
+#### 変更ファイル
+
+- `setup.html` — MCP サーバー管理セクション追加
+  - 登録済みサーバーの一覧・有効/無効切り替え・削除
+  - テンプレート選択（Playwright / Obsidian / Filesystem / GitHub / Brave Search / Memory / Sequential Thinking / Draw.io）→ 名前・コマンドを自動入力
+  - 新規サーバー追加フォーム（コマンド＋引数をスペース区切りで1行入力）
+  - デフォルトリセットボタン（Playwright + Obsidian に戻す）
+- `server.py` — `GET /mcp/servers`・`POST /mcp/servers` エンドポイント追加（`mcp_servers.json` の読み書き・サービス再起動）
+- `index.html` — `write_file` で `.drawio` ファイル保存時に「📐 Draw.io で開く」ボタンを表示
+  - ストリーミング時：ツールグループの外（常に見える位置）に表示
+  - 履歴復元時（ページ更新後）も同様にボタンを復元
+  - draw.io ロード後に `fit` アクションを送信してビューを自動調整
+
+#### 動作確認済み
+
+- MCP サーバー管理セクション表示・テンプレート自動入力 ✅
+- MCP クラッシュ回復テスト（kill -9 → 自動再接続・ツール呼び出し正常） ✅
+- draw.io 保存後「📐 Draw.io で開く」ボタン表示 ✅
+- ページ更新後もボタン復元 ✅（未確認・次セッションで要確認）
+- draw.io fit アクション ✅（未確認・次セッションで要確認）
+
+---
+
 ## 2026-05-27（セッション14）
 
 ### メール通知・Obsidian MCP・/setup UI 拡張

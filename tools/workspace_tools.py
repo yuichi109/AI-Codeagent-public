@@ -1,9 +1,12 @@
 import json
+import platform
+import shutil
+import socket
 import subprocess
 import tarfile
 from datetime import datetime
 from pathlib import Path
-from config import ALLOWED_WORK_DIR
+from config import ALLOWED_WORK_DIR, OBSIDIAN_VAULT_PATH
 
 BACKUP_DIR = Path.home() / "Backups"
 
@@ -154,6 +157,59 @@ def workspace_backup() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def archive_workspace(scope: str = "") -> dict:
+    """
+    現在の作業ディレクトリ（scope）を Obsidian vault の
+    archives/{hostname}_wsl|win/{scope}/ にコピーする（上書きのみ・削除なし）。
+    完了後に workspace/{scope}/.archived マーカーファイルを書き込む。
+    """
+    if not OBSIDIAN_VAULT_PATH:
+        return {"error": "OBSIDIAN_VAULT_PATH が設定されていません。/setup で設定してください。"}
+    if not scope:
+        return {"error": "作業ディレクトリが選択されていません。スコープを選択してから実行してください。"}
+
+    src = ALLOWED_WORK_DIR / scope
+    if not src.exists():
+        return {"error": f"作業ディレクトリ '{scope}' が存在しません。"}
+
+    # WSL 判定
+    is_wsl = "wsl" in platform.uname().release.lower() or Path("/proc/sys/fs/binfmt_misc/WSLInterop").exists()
+    suffix = "wsl" if is_wsl else "win"
+    hostname = socket.gethostname()
+
+    dst = Path(OBSIDIAN_VAULT_PATH) / "archives" / f"{hostname}_{suffix}" / scope
+    dst.mkdir(parents=True, exist_ok=True)
+
+    # cp -r -u 相当: 新しいファイルのみコピー・削除は反映しない
+    for item in src.rglob("*"):
+        if item.name == ".archived":
+            continue
+        rel = item.relative_to(src)
+        target = dst / rel
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif item.is_file():
+            if not target.exists() or item.stat().st_mtime > target.stat().st_mtime:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(item), str(target))
+
+    # .archived マーカー書き込み
+    archived_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    marker = src / ".archived"
+    marker.write_text(
+        f"archived_at: {archived_at}\ndestination: {dst}\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "ok": True,
+        "scope": scope,
+        "destination": str(dst),
+        "archived_at": archived_at,
+        "message": f"✅ アーカイブ完了: {scope} → {dst}",
+    }
 
 
 def _calc_size(path: Path) -> int:

@@ -13,7 +13,8 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION
+from tools.inbox_worker import start_worker, stop_worker, get_status as inbox_get_status, scan_inbox as inbox_scan_now, ensure_inbox_dirs, get_stale_drafts
 from prompts import get_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
@@ -42,7 +43,7 @@ from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.todo_tools import todo_update, todo_read
-from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup
+from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup, archive_workspace
 from tools.manim_tools import render_manim
 from tools.pdf_tools import read_pdf, write_pdf
 from tools.office_tools import (
@@ -166,6 +167,65 @@ def _make_async_client():
         )
 
 
+async def _inbox_process(md_path):
+    """inbox MD を読み込んでエージェントに処理させ、results/ に書き出す。"""
+    import re
+    from tools.inbox_worker import complete_request
+    try:
+        raw = md_path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"[WARN] inbox 読み込みエラー: {e}", flush=True)
+        complete_request(md_path, "error")
+        return
+
+    # frontmatter パース（--- ... --- ブロック）
+    fm: dict = {}
+    body = raw
+    fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)", raw, re.DOTALL)
+    if fm_match:
+        for line in fm_match.group(1).splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                fm[k.strip()] = v.strip()
+        body = fm_match.group(2).strip()
+
+    if not body:
+        print(f"[WARN] inbox: {md_path.name} の本文が空のためスキップ", flush=True)
+        complete_request(md_path, "skipped")
+        return
+
+    job_id = datetime.now().strftime("%H%M%S")
+    print(f"[INFO] inbox 処理開始: {md_path.name} (job={job_id})", flush=True)
+
+    answer_chunks = []
+    try:
+        async for chunk in _agent_stream_inner(
+            user_message=body,
+            history=[],
+            bypass_approval=True,
+        ):
+            if chunk.startswith("data: "):
+                try:
+                    data = json.loads(chunk[6:])
+                    if data.get("type") == "answer_chunk":
+                        answer_chunks.append(data.get("content", ""))
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[WARN] inbox エージェントエラー: {e}", flush=True)
+        answer_chunks = [f"エラー: {e}"]
+
+    answer = "".join(answer_chunks)
+
+    results_dir = complete_request(md_path, job_id)
+    result_file = results_dir / "result.md"
+    result_file.write_text(
+        f"# 実行結果\n\n**リクエスト:** {md_path.name}\n\n---\n\n{answer}\n",
+        encoding="utf-8",
+    )
+    print(f"[INFO] inbox 完了: {result_file}", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 起動時に一時ディレクトリを自動削除
@@ -187,6 +247,9 @@ async def lifespan(app: FastAPI):
             if result.returncode != 0:
                 print(f"[WARN] SearXNG 起動失敗: {result.stderr.strip() or result.stdout.strip()}")
 
+    ensure_inbox_dirs()
+    start_worker(_inbox_process)
+
     # MCP クライアント起動・動的ツール登録
     try:
         await mcp_manager.start()
@@ -200,6 +263,9 @@ async def lifespan(app: FastAPI):
         print(f"[WARN] MCP 起動エラー: {e}")
 
     yield
+
+    # inbox ワーカー停止
+    stop_worker()
 
     # MCP クライアント停止（anyio cancel scope との干渉を抑制）
     try:
@@ -253,6 +319,7 @@ TOOL_REGISTRY = {
     "todo_read": todo_read,
     "protected_list_read": protected_list_read,
     "workspace_backup": workspace_backup,
+    "archive_workspace": archive_workspace,
     "protected_list_update": protected_list_update,
     "protected_list_replace": protected_list_replace,
     "workspace_cleanup_preview": workspace_cleanup_preview,
@@ -510,6 +577,23 @@ TOOLS = [
             "name": "workspace_backup",
             "description": "ワークスペースの内容を ~/Backups/YYYYMMDD.tar.gz にバックアップします。「バックアップして」と言われたらこのツールを使ってください。",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "archive_workspace",
+            "description": "現在の作業ディレクトリを Obsidian vault の archives フォルダにコピーして蓄積します。「アーカイブして」と言われたらこのツールを使ってください。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "アーカイブする作業ディレクトリ名（例: HOGE）。現在の作業ディレクトリ名を指定する。",
+                    },
+                },
+                "required": ["scope"],
+            },
         },
     },
     {
@@ -2466,6 +2550,11 @@ try {{
             html_path.unlink()
 
 
+@app.get("/version")
+async def get_version():
+    return {"version": APP_VERSION}
+
+
 @app.get("/workspace/download")
 async def workspace_download(path: str):
     """ワークスペースのファイルをダウンロードとして返す"""
@@ -3114,6 +3203,45 @@ async def workspace_copy(body: dict):
         return JSONResponse({"ok": True, "new_path": rel})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/workspace/archive-info")
+async def workspace_archive_info(scope: str = ""):
+    """アーカイブスキル用: vault パス・コピー元/先・ホスト名を返す"""
+    import socket, platform as _platform
+    hostname = socket.gethostname()
+    is_wsl = "wsl" in _platform.uname().release.lower() or Path("/proc/sys/fs/binfmt_misc/WSLInterop").exists()
+    suffix = "wsl" if is_wsl else "win"
+    vault_path = OBSIDIAN_VAULT_PATH
+    archives_base = str(Path(vault_path) / "archives" / f"{hostname}_{suffix}") if vault_path else ""
+    src_path = str(ALLOWED_WORK_DIR / scope) if scope else ""
+    dst_path = str(Path(archives_base) / scope) if (archives_base and scope) else ""
+    return JSONResponse({
+        "vault_path": vault_path,
+        "archives_base": archives_base,
+        "hostname": hostname,
+        "platform": suffix,
+        "scope": scope,
+        "src_path": src_path,
+        "dst_path": dst_path,
+    })
+
+
+@app.get("/workspace/archived-status")
+async def workspace_archived_status(scope: str = ""):
+    """指定スコープの .archived マーカーファイルの有無・内容を返す"""
+    if not scope:
+        return JSONResponse({"archived": False})
+    marker = ALLOWED_WORK_DIR / scope / ".archived"
+    if not marker.exists():
+        return JSONResponse({"archived": False})
+    content = marker.read_text(encoding="utf-8")
+    archived_at = ""
+    for line in content.splitlines():
+        if line.startswith("archived_at:"):
+            archived_at = line.split(":", 1)[1].strip()
+            break
+    return JSONResponse({"archived": True, "archived_at": archived_at})
 
 
 @app.post("/workspace/rename")
@@ -3828,6 +3956,58 @@ def _set_mcp_enabled(server_id: str, enabled: bool):
         print(f"[setup] mcp_servers.json 更新失敗: {e}")
 
 
+@app.get("/mcp/servers")
+async def mcp_servers_get():
+    conf_path = Path(__file__).parent / "config" / "mcp_servers.json"
+    try:
+        return JSONResponse(json.loads(conf_path.read_text(encoding="utf-8")))
+    except Exception:
+        return JSONResponse({"servers": []})
+
+
+@app.post("/mcp/servers")
+async def mcp_servers_save(data: dict):
+    conf_path = Path(__file__).parent / "config" / "mcp_servers.json"
+    try:
+        conf_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
+    if sys.platform == "win32":
+        import os
+        threading.Timer(0.5, lambda: os._exit(0)).start()
+        return JSONResponse({"status": "ok"})
+    else:
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", "ai-codeagent"])
+            return JSONResponse({"status": "ok"})
+        except Exception as e:
+            return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+
+
+@app.get("/inbox/status")
+async def inbox_status():
+    return JSONResponse(inbox_get_status())
+
+
+@app.get("/inbox/draft-alerts")
+async def inbox_draft_alerts():
+    return JSONResponse({"stale": get_stale_drafts()})
+
+
+@app.post("/inbox/scan")
+async def inbox_scan_trigger():
+    """即時スキャンを実行して検出件数を返す。"""
+    from tools.inbox_worker import scan_inbox, accept_request
+    pending = scan_inbox()
+    if not pending:
+        return JSONResponse({"triggered": 0, "message": "inbox に新しいリクエストはありません"})
+    for md_path in pending:
+        processing_path = accept_request(md_path)
+        if processing_path:
+            asyncio.create_task(_inbox_process(processing_path))
+    return JSONResponse({"triggered": len(pending), "message": f"{len(pending)} 件の処理を開始しました"})
+
+
 @app.get("/setup")
 async def setup_page():
     return FileResponse("setup.html")
@@ -3977,8 +4157,10 @@ async def setup_current():
             "enabled":      raw.get("NOTIFY_EMAIL_ENABLED", "false"),
         },
         "obsidian": {
-            "vault_path":  raw.get("OBSIDIAN_VAULT_PATH", ""),
-            "mcp_enabled": _get_mcp_enabled("obsidian"),
+            "vault_path":    raw.get("OBSIDIAN_VAULT_PATH", ""),
+            "mcp_enabled":   _get_mcp_enabled("obsidian"),
+            "inbox_enabled": raw.get("OBSIDIAN_INBOX_ENABLED", "false"),
+            "inbox_poll_sec": raw.get("OBSIDIAN_INBOX_POLL_SEC", "900"),
         },
     })
 
@@ -4327,7 +4509,13 @@ async def setup_save(req: SetupSaveRequest):
     # Obsidian 連携
     ob = req.obsidian
     if ob.get("vault_path"):
-        lines += ["# Obsidian 連携", f"OBSIDIAN_VAULT_PATH={ob['vault_path']}", ""]
+        lines.append("# Obsidian 連携")
+        lines.append(f"OBSIDIAN_VAULT_PATH={ob['vault_path']}")
+        if ob.get("inbox_enabled") in ("true", "false"):
+            lines.append(f"OBSIDIAN_INBOX_ENABLED={ob['inbox_enabled']}")
+        if ob.get("inbox_poll_sec"):
+            lines.append(f"OBSIDIAN_INBOX_POLL_SEC={ob['inbox_poll_sec']}")
+        lines.append("")
     if ob.get("mcp_enabled") in ("true", "false"):
         _set_mcp_enabled("obsidian", ob["mcp_enabled"] == "true")
 

@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-05-28（セッション20）
+
+### Windows版 マルチPC対応・安定化バグ修正
+
+#### バグ修正
+
+- `tray.py` — 起動時にポート8001を占有する既存プロセスを自動終了する `_free_port()` を追加
+  - 原因: tray は自分が起動したプロセスしか管理しておらず、別プロセスがポートを占有すると新サーバーが起動失敗していた
+- `start.bat` — Node.js 自動インストール・Playwright Chromium セットアップを追加（setup.bat には既存、start.bat に抜けていた）
+- `tools/mcp_client.py` — `OBSIDIAN_VAULT_PATH` 等の環境変数が未設定の場合、そのMCPサーバーを自動スキップして起動エラーを防ぐ
+
+#### 確認済み環境
+
+- yuichi.matsuo Windows PC（AI-Codeagent-win）: tray 起動・MCP 34ツール・Obsidian テスト全PASS
+- ymatsuo PC: Node.js インストール後・tray 起動・MCP 34ツール PASS
+
+#### 次回テスト予定
+
+- 新規PC への Windows 版インストールテスト（start.bat からの一発セットアップ確認）
+
+---
+
 ## 2026-05-28（セッション19続き）
 
 ### Windows版 Obsidian MCP 動作確認・バグ修正

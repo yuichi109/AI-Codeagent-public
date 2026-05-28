@@ -30,9 +30,18 @@ def _load_server_configs() -> list[dict]:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         data = json.load(f)
     servers = data.get("servers", [])
+    result = []
     for srv in servers:
+        if not srv.get("enabled", False):
+            continue
         srv["args"] = [os.path.expandvars(a) for a in srv.get("args", [])]
-    return [s for s in servers if s.get("enabled", False)]
+        # 環境変数が未設定で展開されなかった場合はスキップ
+        unexpanded = [a for a in srv["args"] if "${" in a or (a.startswith("%") and a.endswith("%"))]
+        if unexpanded:
+            print(f"[MCP] {srv.get('id', '?')} スキップ: 未設定の環境変数 {unexpanded}", flush=True)
+            continue
+        result.append(srv)
+    return result
 
 
 def _mcp_tool_to_openai_schema(server_id: str, tool) -> dict:

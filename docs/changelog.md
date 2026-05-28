@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-05-28（セッション19）
+
+### for_windows リベース・Windows版テスト全PASS
+
+#### 作業内容
+
+- `for_windows` ブランチを `main`（セッション18）に rebase（force push）
+  - コンフリクト：`docs/changelog.md` → HEAD（main側）を採用してスキップ
+  - draw.io iframe 遅延読み込み修正コミット（e476e73）のみ残存
+- Windows クローン（`C:\Users\yuichi.matsuo\AI-Codeagent-win`）を `origin/for_windows` に reset
+- 依存パッケージ一括インストール（`pip install -r requirements.txt`、`bs4` 等が未インストールだった）
+- uvicorn をポート8001で起動してChrome実機テスト
+
+#### テスト結果（全PASS）
+
+| 項目 | 結果 |
+|---|---|
+| サーバー起動（ポート8001） | ✅ |
+| チャット応答（ストリーミング・OpenAI gpt-5.4-nano） | ✅ |
+| シェルパネル（`echo hello windows` → exit 0） | ✅ |
+| エディタパネル（ファイルツリー・ファイル開く） | ✅ |
+| LLMパネル（プロバイダー設定表示） | ✅ |
+| Draw.io（iframe読み込み完了・シェイプパレット表示） | ✅ |
+| `GET /version` → `{"version":"1.4.0"}` | ✅ |
+| バージョン表記（右上 v1.4.0） | ✅ |
+
+#### 備考
+
+- Obsidian Vault 未設定 warning → `.env` に `OBSIDIAN_VAULT_PATH` 未設定のため想定内
+- MCP obsidian → 接続失敗（Vault未設定のため想定内）
+- MCP playwright → 23ツール登録成功
+
+---
+
 ## ロードマップ整理メモ（2026-05-26確認）
 
 以下の項目がロードマップ上は「未完了」になっていたが、実装済みと確認。

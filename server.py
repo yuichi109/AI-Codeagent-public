@@ -167,6 +167,63 @@ def _make_async_client():
         )
 
 
+async def _inbox_process(md_path):
+    """inbox MD を読み込んでエージェントに処理させ、results/ に書き出す。"""
+    import re
+    from tools.inbox_worker import complete_request
+    try:
+        raw = md_path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"[WARN] inbox 読み込みエラー: {e}", flush=True)
+        return
+
+    # frontmatter パース（--- ... --- ブロック）
+    fm: dict = {}
+    body = raw
+    fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)", raw, re.DOTALL)
+    if fm_match:
+        for line in fm_match.group(1).splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                fm[k.strip()] = v.strip()
+        body = fm_match.group(2).strip()
+
+    if not body:
+        print(f"[WARN] inbox: {md_path.name} の本文が空のためスキップ", flush=True)
+        return
+
+    job_id = datetime.now().strftime("%H%M%S")
+    print(f"[INFO] inbox 処理開始: {md_path.name} (job={job_id})", flush=True)
+
+    answer_chunks = []
+    try:
+        async for chunk in _agent_stream_inner(
+            user_message=body,
+            history=[],
+            bypass_approval=True,
+        ):
+            if chunk.startswith("data: "):
+                try:
+                    data = json.loads(chunk[6:])
+                    if data.get("type") == "answer_chunk":
+                        answer_chunks.append(data.get("content", ""))
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[WARN] inbox エージェントエラー: {e}", flush=True)
+        answer_chunks = [f"エラー: {e}"]
+
+    answer = "".join(answer_chunks)
+
+    results_dir = complete_request(md_path, job_id)
+    result_file = results_dir / "result.md"
+    result_file.write_text(
+        f"# 実行結果\n\n**リクエスト:** {md_path.name}\n\n---\n\n{answer}\n",
+        encoding="utf-8",
+    )
+    print(f"[INFO] inbox 完了: {result_file}", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 起動時に一時ディレクトリを自動削除
@@ -187,65 +244,6 @@ async def lifespan(app: FastAPI):
             )
             if result.returncode != 0:
                 print(f"[WARN] SearXNG 起動失敗: {result.stderr.strip() or result.stdout.strip()}")
-
-    # inbox ワーカー起動
-    async def _inbox_process(md_path):
-        """inbox MD を読み込んでエージェントに処理させ、results/ に書き出す。"""
-        import re
-        from tools.inbox_worker import complete_request
-        try:
-            raw = md_path.read_text(encoding="utf-8")
-        except Exception as e:
-            print(f"[WARN] inbox 読み込みエラー: {e}", flush=True)
-            return
-
-        # frontmatter パース（--- ... --- ブロック）
-        fm: dict = {}
-        body = raw
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)", raw, re.DOTALL)
-        if fm_match:
-            for line in fm_match.group(1).splitlines():
-                if ":" in line:
-                    k, _, v = line.partition(":")
-                    fm[k.strip()] = v.strip()
-            body = fm_match.group(2).strip()
-
-        if not body:
-            print(f"[WARN] inbox: {md_path.name} の本文が空のためスキップ", flush=True)
-            return
-
-        job_id = datetime.now().strftime("%H%M%S")
-        print(f"[INFO] inbox 処理開始: {md_path.name} (job={job_id})", flush=True)
-
-        # エージェント処理（ストリームを全収集）
-        answer_chunks = []
-        try:
-            async for chunk in _agent_stream_inner(
-                user_message=body,
-                history=[],
-                bypass_approval=True,
-            ):
-                if chunk.startswith("data: "):
-                    try:
-                        data = json.loads(chunk[6:])
-                        if data.get("type") == "answer_chunk":
-                            answer_chunks.append(data.get("content", ""))
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"[WARN] inbox エージェントエラー: {e}", flush=True)
-            answer_chunks = [f"エラー: {e}"]
-
-        answer = "".join(answer_chunks)
-
-        # results/ に書き出し
-        results_dir = complete_request(md_path, job_id)
-        result_file = results_dir / "result.md"
-        result_file.write_text(
-            f"# 実行結果\n\n**リクエスト:** {md_path.name}\n\n---\n\n{answer}\n",
-            encoding="utf-8",
-        )
-        print(f"[INFO] inbox 完了: {result_file}", flush=True)
 
     ensure_inbox_dirs()
     start_worker(_inbox_process)
@@ -3977,6 +3975,25 @@ async def mcp_servers_save(data: dict):
             return JSONResponse({"status": "ok"})
         except Exception as e:
             return JSONResponse({"status": "ok", "warning": f"再起動失敗: {e}"})
+
+
+@app.get("/inbox/status")
+async def inbox_status():
+    return JSONResponse(inbox_get_status())
+
+
+@app.post("/inbox/scan")
+async def inbox_scan_trigger():
+    """即時スキャンを実行して検出件数を返す。"""
+    from tools.inbox_worker import scan_inbox, accept_request
+    pending = scan_inbox()
+    if not pending:
+        return JSONResponse({"triggered": 0, "message": "inbox に新しいリクエストはありません"})
+    for md_path in pending:
+        processing_path = accept_request(md_path)
+        if processing_path:
+            asyncio.create_task(_inbox_process(processing_path))
+    return JSONResponse({"triggered": len(pending), "message": f"{len(pending)} 件の処理を開始しました"})
 
 
 @app.get("/setup")

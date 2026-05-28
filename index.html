@@ -287,6 +287,9 @@
   #workspace-scope-bar.scoped #scope-label { color: #a6e3a1; text-shadow: 0 0 8px #a6e3a150; }
   #scope-btn { padding: 2px 10px; background: #313244; color: #cdd6f4; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; }
   #scope-btn:hover { background: #45475a; }
+  #inbox-scan-btn { display:none; padding: 2px 10px; background: #313244; color: #89b4fa; border: none; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background 0.2s; }
+  #inbox-scan-btn:hover { background: #45475a; }
+  #inbox-scan-btn.busy { color: #6c7086; cursor: default; }
   /* ---- ワークスペーススコープ選択モーダル ---- */
   #scope-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; align-items: center; justify-content: center; }
   #scope-overlay.open { display: flex; }
@@ -585,6 +588,7 @@
   <span id="scope-dot"></span>
   <span id="scope-label">📁 workspace/</span>
   <button id="scope-btn" onclick="openWorkspaceScopeModal()">選択</button>
+  <button id="inbox-scan-btn" onclick="triggerInboxScan()" title="inbox をスキャンして処理待ちリクエストを実行">📥 inbox</button>
 </div>
 <div id="header">
   ⚛️ AI Code Agent
@@ -2103,6 +2107,33 @@
       btn.textContent = '選択';
       const badge = document.getElementById('scope-archived-badge');
       if (badge) badge.remove();
+    }
+  }
+
+  async function initInboxButton() {
+    try {
+      const res = await fetch('/inbox/status');
+      const d = await res.json();
+      const btn = document.getElementById('inbox-scan-btn');
+      if (d.enabled) {
+        btn.style.display = '';
+        if (d.pending > 0) btn.title = `inbox をスキャン（${d.pending} 件待機中）`;
+      }
+    } catch {}
+  }
+
+  async function triggerInboxScan() {
+    const btn = document.getElementById('inbox-scan-btn');
+    btn.classList.add('busy');
+    btn.textContent = '⏳ スキャン中…';
+    try {
+      const res = await fetch('/inbox/scan', { method: 'POST' });
+      const d = await res.json();
+      btn.textContent = d.triggered > 0 ? `✅ ${d.triggered}件 処理開始` : '📥 inbox';
+      setTimeout(() => { btn.textContent = '📥 inbox'; btn.classList.remove('busy'); }, 3000);
+    } catch {
+      btn.textContent = '📥 inbox';
+      btn.classList.remove('busy');
     }
   }
 
@@ -4032,6 +4063,7 @@
   // ---- 起動時復元 ----
   loadHistory();
   updateScopeBar();
+  initInboxButton();
 
   // ---- 音声入力 (Web Speech API) ----
   (function() {

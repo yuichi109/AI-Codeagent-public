@@ -5,6 +5,50 @@
 
 ---
 
+## 2026-05-30（セッション21）
+
+### Windows版 start.bat 新規PCセットアップ安定化 + Playwright MCP スクショ問題の根本解決（v1.4.3）
+
+#### 背景（一日中ループした問題）
+
+新規Windows PCで `start.bat` 実行後、チャットUIで「google.comのスクショ撮って」が
+`Browser "chrome-for-testing" is not installed` で失敗し続けた。
+エージェントが自力で `npx @playwright/mcp install-browser` を実行すると
+**ダウンロード100%完了後にフリーズ**（npx経由のみ発生する既知のWindowsバグ）。
+
+#### 根本原因（npmレジストリで実物確認）
+
+`@playwright/mcp` は**全バージョンが playwright の alpha 版に依存**しており、
+chromium リビジョンが playwright のマイナー版ごとに変わる。`@latest` だと pip 安定版とズレる。
+
+| パッケージ | 依存 playwright | chromium revision |
+|---|---|---|
+| `@playwright/mcp@0.0.74` | 1.60.0-alpha | **1223** |
+| `@playwright/mcp@0.0.75`（当時のlatest） | 1.61.0-alpha | 1224 |
+| pip 安定版 playwright 1.60.0 | — | **1223** |
+
+#### 確定した解決策（両方固定して chromium-1223 に一致させる）
+
+- `start.bat`: ブラウザは npx ではなく `venv\Scripts\python.exe -m playwright install chromium` で入れる（固まらない）
+- `start.bat`: `pip install playwright==1.60.0`（版数明示・chromium-1223）
+- `config/mcp_servers.json`: `@playwright/mcp@latest` → `@playwright/mcp@0.0.74`（chromium-1223）
+- **片方だけ更新するとズレて再発する**。更新時は両者の chromium revision を必ず一致させること。
+- 詳細・確認コマンドは `CLAUDE.md` の「壊してはいけない設計」に記載。
+
+#### start.bat のその他の修正
+
+- Playwright インストールチェックを `chromium-*` フォルダ存在で判定（既存ならスキップ）
+- Node.js 新規インストール直後に PATH を即時反映
+- `pause` で結果確認できるよう維持（成功/失敗が見えないまま閉じる問題の対策）
+
+#### 確認済み環境
+
+- 新規Windows PC（Administrator・OSリフレッシュ後まっさら）: `git clone` → `start.bat` →
+  Python/Node.js 自動インストール → chromium-1223 インストール → トレイ起動 →
+  チャットUIで google.com スクショ撮影 **成功（実機確認）**
+
+---
+
 ## 2026-05-28（セッション20 後半）
 
 ### MCP obsidian アイドルタイムアウト対策

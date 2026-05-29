@@ -9,31 +9,8 @@ set "HAVE_WINGET=0"
 winget --version >nul 2>&1
 if not errorlevel 1 set "HAVE_WINGET=1"
 
-:: --- Node.js チェック（venv 有無に関わらず毎回）---
-call :find_nodejs
-if defined NODE_FOUND goto :nodejs_ok
-call :install_nodejs
-call :find_nodejs
-if defined NODE_FOUND goto :nodejs_ok
-echo [WARN] Node.js が見つかりません。MCP機能は無効になります。
-:nodejs_ok
-
-:: --- Playwright Chromium チェック（venv 有無に関わらず毎回）---
-if not defined NODE_FOUND goto :playwright_skip
-set "MCP_CHROME_FOUND=0"
-for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
-if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
-echo [setup] Playwright Chromium をインストール中...
-npx -y playwright@1.60.0 install chromium
-if errorlevel 1 (
-    echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: npx -y playwright@1.60.0 install chromium
-) else (
-    echo [OK] Playwright Chromium 準備完了。
-)
-:playwright_skip
-
-:: --- venv が既にあれば即トレイ起動 ---
-if exist "venv\Scripts\python.exe" goto launch_tray
+:: --- venv が既にあれば Node.js/Playwright チェックしてトレイ起動 ---
+if exist "venv\Scripts\python.exe" goto check_nodejs
 
 :: =============================================================
 :: 初回セットアップ（venv がない場合のみ）
@@ -101,6 +78,31 @@ if not exist ".env" (
 echo.
 echo [4/4] セットアップ完了。タスクトレイにアイコンが表示されます。
 echo ============================================================
+
+:: =============================================================
+:: Node.js / Playwright チェック（初回・毎回共通）
+:: =============================================================
+:check_nodejs
+call :find_nodejs
+if defined NODE_FOUND goto :nodejs_ok2
+call :install_nodejs
+call :find_nodejs
+if defined NODE_FOUND goto :nodejs_ok2
+echo [WARN] Node.js が見つかりません。MCP機能は無効になります。
+:nodejs_ok2
+
+if not defined NODE_FOUND goto :playwright_skip
+set "MCP_CHROME_FOUND=0"
+for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
+if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
+echo [setup] Playwright Chromium をインストール中...
+npx -y playwright@1.60.0 install chromium
+if errorlevel 1 (
+    echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: npx -y playwright@1.60.0 install chromium
+) else (
+    echo [OK] Playwright Chromium 準備完了。
+)
+:playwright_skip
 pause
 
 :: =============================================================

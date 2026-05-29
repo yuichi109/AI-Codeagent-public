@@ -7,28 +7,26 @@ git config core.autocrlf false >nul 2>&1
 
 :: --- Node.js チェック（venv 有無に関わらず毎回）---
 call :find_nodejs
-if not defined NODE_FOUND (
-    call :install_nodejs
-    call :find_nodejs
-    if not defined NODE_FOUND (
-        echo [WARN] Node.js が見つかりません。MCP機能は無効になります。
-    )
-)
+if defined NODE_FOUND goto :nodejs_ok
+call :install_nodejs
+call :find_nodejs
+if defined NODE_FOUND goto :nodejs_ok
+echo [WARN] Node.js が見つかりません。MCP機能は無効になります。
+:nodejs_ok
 
 :: --- Playwright Chromium チェック（venv 有無に関わらず毎回）---
-if defined NODE_FOUND (
-    set "MCP_CHROME_FOUND=0"
-    for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
-    if "!MCP_CHROME_FOUND!"=="0" (
-        echo [setup] Playwright Chromium をインストール中...
-        npx @playwright/mcp@latest install-browser chromium
-        if errorlevel 1 (
-            echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: npx @playwright/mcp@latest install-browser chromium
-        ) else (
-            echo [OK] Playwright Chromium 準備完了。
-        )
-    )
+if not defined NODE_FOUND goto :playwright_skip
+set "MCP_CHROME_FOUND=0"
+for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
+if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
+echo [setup] Playwright Chromium をインストール中...
+npx @playwright/mcp@latest install-browser chromium
+if errorlevel 1 (
+    echo [WARN] Playwright Chromium のインストールに失敗しました。手動実行: npx @playwright/mcp@latest install-browser chromium
+) else (
+    echo [OK] Playwright Chromium 準備完了。
 )
+:playwright_skip
 
 :: --- venv が既にあれば即トレイ起動 ---
 if exist "venv\Scripts\pythonw.exe" goto launch_tray

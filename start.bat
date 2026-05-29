@@ -33,7 +33,7 @@ if errorlevel 1 (
 :playwright_skip
 
 :: --- venv が既にあれば即トレイ起動 ---
-if exist "venv\Scripts\pythonw.exe" goto launch_tray
+if exist "venv\Scripts\python.exe" goto launch_tray
 
 :: =============================================================
 :: 初回セットアップ（venv がない場合のみ）
@@ -107,7 +107,11 @@ timeout /t 2 /nobreak >nul
 :: トレイ起動
 :: =============================================================
 :launch_tray
-start "" "venv\Scripts\pythonw.exe" "%~dp0tray.py"
+if exist "venv\Scripts\pythonw.exe" (
+    start "" "venv\Scripts\pythonw.exe" "%~dp0tray.py"
+) else (
+    start "" "venv\Scripts\python.exe" "%~dp0tray.py"
+)
 exit /b 0
 
 :: =============================================================

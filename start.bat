@@ -82,12 +82,17 @@ echo ============================================================
 :: Node.js / Playwright チェック（初回・毎回共通）
 :: =============================================================
 :check_nodejs
+:: システムPATHをレジストリから取得して現在のセッションに反映
+for /f "usebackq tokens=*" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine')"`) do set "SYS_PATH=%%p"
+if defined SYS_PATH set "PATH=%PATH%;%SYS_PATH%"
 call :find_nodejs
 if defined NODE_FOUND goto :nodejs_ok2
 call :install_nodejs
+for /f "usebackq tokens=*" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine')"`) do set "SYS_PATH=%%p"
+if defined SYS_PATH set "PATH=%PATH%;%SYS_PATH%"
 call :find_nodejs
 if defined NODE_FOUND goto :nodejs_ok2
-echo [WARN] Node.js が見つかりません。MCP機能は無効になります。
+echo [WARN] Node.js not found. MCP features disabled.
 :nodejs_ok2
 
 if not defined NODE_FOUND goto :playwright_skip

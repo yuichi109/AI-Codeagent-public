@@ -87,7 +87,16 @@ workspace/          ← エージェントの作業ディレクトリ (Git管理
 - **Windows版 Playwright MCP は版数を両方固定する（chromium revision を一致させる）**: `@playwright/mcp` は全バージョンが playwright の alpha 版に依存しており、chromium リビジョンが少しでもズレると `Browser "chrome-for-testing" is not installed` で動かない。npx 経由のブラウザDLは100%完了後にフリーズする既知バグがあるため使わず、`start.bat` の `venv python -m playwright install chromium`（固まらない）で入れる。
   - `start.bat`: `pip install playwright==1.60.0`（chromium-1223）
   - `config/mcp_servers.json`: `@playwright/mcp@0.0.74`（chromium-1223）
-  - **どちらか片方だけ更新するとズレて壊れる**。更新時は npm registry の `playwright-core/<ver>/browsers.json` で両者の chromium revision を確認し、必ず一致させること。
+  - **どちらか片方だけ更新するとズレて壊れる**。更新時は必ず以下の手順で chromium revision を一致させること。
+  - **バージョンアップ手順（将来の更新時）**:
+    1. `npm show @playwright/mcp version` で最新版を確認
+    2. `npm show @playwright/mcp@<新Ver> dependencies` で依存する `playwright-core` バージョンを確認
+    3. `curl -s https://registry.npmjs.org/playwright-core/-/playwright-core-<VER>.tgz -o pc.tgz && tar xzf pc.tgz package/browsers.json && python3 -c 'import json; d=json.load(open("package/browsers.json")); print([x for x in d["browsers"] if x["name"]=="chromium"][0]["revision"])'` で chromium revision を確認
+    4. `pip index versions playwright` で pip 安定版の最新を確認し、同じ revision になる版を選ぶ
+    5. `config/mcp_servers.json` の `@playwright/mcp@<旧Ver>` → `@playwright/mcp@<新Ver>` に更新
+    6. `start.bat` の `pip install playwright==<旧Ver>` → `pip install playwright==<新Ver>` に更新
+    7. `for_windows` と `main` の両方に適用（main は mcp_servers.json のみ。start.bat は Linux版なので不要）
+    - **急いで上げる必要はない。動いているうちは触らない**。セキュリティ問題や新機能が必要なときだけ更新する。
 
 ---
 

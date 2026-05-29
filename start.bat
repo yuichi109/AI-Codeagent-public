@@ -78,14 +78,15 @@ python.exe -m pip install --upgrade pip --quiet
 python.exe -m pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] パッケージのインストールに失敗しました。 & pause & exit /b 1 )
 
-:: --- Playwright Chromium インストール ---
+:: --- Playwright ブラウザインストール ---
 if defined NODE_FOUND (
-    echo [2b] Playwright Chromium をインストール中（数分かかる場合があります）...
+    echo [2b] Playwright ブラウザをインストール中（数分かかる場合があります）...
     python.exe -m playwright install chromium
+    echo y | npx @playwright/mcp install-browser chrome-for-testing
     if errorlevel 1 (
-        echo [WARN] Playwright Chromium のインストールに失敗しました。手動実行: python -m playwright install chromium
+        echo [WARN] Playwright ブラウザのインストールに失敗しました。
     ) else (
-        echo [OK] Playwright Chromium 準備完了。
+        echo [OK] Playwright ブラウザ準備完了。
     )
 )
 

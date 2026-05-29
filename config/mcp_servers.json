@@ -9,7 +9,7 @@
         "@playwright/mcp@latest",
         "--headless",
         "--browser",
-        "chromium",
+        "msedge",
         "--output-dir",
         "./workspace/playwright-screenshots"
       ],

@@ -95,17 +95,6 @@ if defined NODE_FOUND goto :nodejs_ok2
 echo [WARN] Node.js not found. MCP features disabled.
 :nodejs_ok2
 
-if not defined NODE_FOUND goto :playwright_skip
-set "MCP_CHROME_FOUND=0"
-for /d %%D in ("%LOCALAPPDATA%\ms-playwright\mcp-chrome-for-testing-*") do set "MCP_CHROME_FOUND=1"
-if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
-echo [setup] @playwright/mcp 用ブラウザをインストール中（最大5分）...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process 'cmd' -ArgumentList '/c npx @playwright/mcp install-browser chrome-for-testing' -NoNewWindow -PassThru; if (-not $p.WaitForExit(300000)) { $p.Kill(); Write-Host '[WARN] タイムアウト(5分)'; exit 1 }; exit $p.ExitCode"
-if errorlevel 1 (
-    echo [WARN] ブラウザのインストールに失敗しました。後で手動実行: npx @playwright/mcp install-browser chrome-for-testing
-) else (
-    echo [OK] chrome-for-testing 準備完了。
-)
 :playwright_skip
 pause
 

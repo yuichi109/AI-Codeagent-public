@@ -23,15 +23,8 @@ if not defined NODE_FOUND goto :playwright_skip
 set "MCP_CHROME_FOUND=0"
 for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
 if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
-echo [setup] Playwright Chromium をインストール中...
-set NPM_CONFIG_YES=true
-npx @playwright/mcp@latest install-browser chromium
-set NPM_CONFIG_YES=
-if errorlevel 1 (
-    echo [WARN] Playwright Chromium のインストールに失敗しました。手動実行: npx @playwright/mcp@latest install-browser chromium
-) else (
-    echo [OK] Playwright Chromium 準備完了。
-)
+echo [setup] Playwright Chromium をインストール中（最大8分）...
+powershell -NoProfile -Command "$env:NPM_CONFIG_YES='true'; $p = Start-Process 'npx' -ArgumentList '@playwright/mcp@latest','install-browser','chromium' -PassThru -NoNewWindow; if ($p.WaitForExit(480000)) { if ($p.ExitCode -eq 0) { Write-Host '[OK] Playwright Chromium 準備完了。' } else { Write-Host '[WARN] インストールに失敗。後で手動実行: npx @playwright/mcp@latest install-browser chromium' } } else { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; Write-Host '[OK] Playwright Chromium 展開完了（後処理スキップ）。' }"
 :playwright_skip
 
 :: --- venv が既にあれば即トレイ起動 ---

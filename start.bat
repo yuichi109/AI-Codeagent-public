@@ -24,7 +24,9 @@ set "MCP_CHROME_FOUND=0"
 for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
 if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
 echo [setup] Playwright Chromium をインストール中...
+set NPM_CONFIG_YES=true
 npx @playwright/mcp@latest install-browser chromium
+set NPM_CONFIG_YES=
 if errorlevel 1 (
     echo [WARN] Playwright Chromium のインストールに失敗しました。手動実行: npx @playwright/mcp@latest install-browser chromium
 ) else (

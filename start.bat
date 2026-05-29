@@ -95,6 +95,17 @@ if defined NODE_FOUND goto :nodejs_ok2
 echo [WARN] Node.js not found. MCP features disabled.
 :nodejs_ok2
 
+:: --- Playwright chromium インストール（venv の python を使う・固まらない）---
+set "CHROMIUM_FOUND=0"
+for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "CHROMIUM_FOUND=1"
+if "!CHROMIUM_FOUND!"=="1" goto :playwright_skip
+echo [setup] Playwright chromium をインストール中...
+venv\Scripts\python.exe -m playwright install chromium
+if errorlevel 1 (
+    echo [WARN] Playwright chromium のインストールに失敗しました。
+) else (
+    echo [OK] Playwright chromium 準備完了。
+)
 :playwright_skip
 pause
 

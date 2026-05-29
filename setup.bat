@@ -7,9 +7,11 @@ cd /d "%~dp0"
 git config core.autocrlf false >nul 2>&1
 
 echo ============================================================
-echo  AI Code Agent - デバッグ起動（ログ確認用）
-echo  通常起動は start.bat をダブルクリックしてください
+echo  [WARNING] これはデバッグ用です。通常インストール・起動には
+echo  start.bat をダブルクリックしてください。
 echo ============================================================
+echo.
+pause
 echo.
 
 set "PY_EXE="

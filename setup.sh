@@ -171,6 +171,14 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         warn "Playwright Chromium のインストールに失敗しました（後で手動で実行してください）"
         warn "  npx @playwright/mcp install-browser chromium"
     fi
+    # Playwright システム依存パッケージ（chrome-for-testing の実行に必要）
+    info "Playwright システム依存パッケージをインストール中..."
+    if sudo npx --yes playwright install-deps chrome-for-testing 2>&1 | tail -3; then
+        ok "Playwright システム依存パッケージをインストールしました"
+    else
+        warn "Playwright システム依存パッケージのインストールに失敗しました（後で手動で実行してください）"
+        warn "  sudo npx playwright install-deps chrome-for-testing"
+    fi
 
     # Ansible + community.vmware コレクション
     section "Ansible"

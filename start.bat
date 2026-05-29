@@ -43,8 +43,7 @@ if not defined GIT_FOUND (
     call :install_git
     call :find_git
     if not defined GIT_FOUND (
-        echo [INFO] Git をインストールしました。このウィンドウを閉じて start.bat を再実行してください。
-        pause & exit /b 0
+        echo [WARN] Git が見つかりません。後でインストールしてください: https://git-scm.com/download/win
     )
 )
 for /f "tokens=*" %%v in ('git --version 2^>^&1') do echo [OK] %%v

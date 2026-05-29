@@ -100,6 +100,7 @@ set "CHROMIUM_FOUND=0"
 for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "CHROMIUM_FOUND=1"
 if "!CHROMIUM_FOUND!"=="1" goto :playwright_skip
 echo [setup] Playwright chromium をインストール中...
+venv\Scripts\python.exe -m pip install playwright --quiet
 venv\Scripts\python.exe -m playwright install chromium
 if errorlevel 1 (
     echo [WARN] Playwright chromium のインストールに失敗しました。

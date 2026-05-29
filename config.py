@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 
 try:
     load_dotenv(override=True, encoding='utf-8')

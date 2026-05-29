@@ -33,7 +33,8 @@ chromium リビジョンが playwright のマイナー版ごとに変わる。`@
 - `start.bat`: `pip install playwright==1.60.0`（版数明示・chromium-1223）
 - `config/mcp_servers.json`: `@playwright/mcp@latest` → `@playwright/mcp@0.0.74`（chromium-1223）
 - **片方だけ更新するとズレて再発する**。更新時は両者の chromium revision を必ず一致させること。
-- 詳細・確認コマンドは `CLAUDE.md` の「壊してはいけない設計」に記載。
+- 詳細・確認コマンド・将来の更新手順は `CLAUDE.md` の「壊してはいけない設計」に記載。
+- chromium revision が数か月に1回変わる程度。**動いている間は触らない**が基本方針。
 
 #### start.bat のその他の修正
 

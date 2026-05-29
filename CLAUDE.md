@@ -84,6 +84,10 @@ workspace/          ← エージェントの作業ディレクトリ (Git管理
 - **`_recent_head_unsafe()` の境界ロジック**: `SUMMARY_KEEP_RECENT` を変更する際は孤立メッセージ問題が再発しないよう注意。
 - **`/get-proj` スキルで `work_dir` 使用禁止**: `workspace/workspace/` の入れ子になるバグが発生する。
 - **git push で 407 が出る場合**: `git -c http.proxy='' push origin main` で回避。
+- **Windows版 Playwright MCP は版数を両方固定する（chromium revision を一致させる）**: `@playwright/mcp` は全バージョンが playwright の alpha 版に依存しており、chromium リビジョンが少しでもズレると `Browser "chrome-for-testing" is not installed` で動かない。npx 経由のブラウザDLは100%完了後にフリーズする既知バグがあるため使わず、`start.bat` の `venv python -m playwright install chromium`（固まらない）で入れる。
+  - `start.bat`: `pip install playwright==1.60.0`（chromium-1223）
+  - `config/mcp_servers.json`: `@playwright/mcp@0.0.74`（chromium-1223）
+  - **どちらか片方だけ更新するとズレて壊れる**。更新時は npm registry の `playwright-core/<ver>/browsers.json` で両者の chromium revision を確認し、必ず一致させること。
 
 ---
 

@@ -5,6 +5,10 @@ cd /d "%~dp0"
 
 git config core.autocrlf false >nul 2>&1
 
+set "HAVE_WINGET=0"
+winget --version >nul 2>&1
+if not errorlevel 1 set "HAVE_WINGET=1"
+
 :: --- Node.js チェック（venv 有無に関わらず毎回）---
 call :find_nodejs
 if defined NODE_FOUND goto :nodejs_ok
@@ -41,10 +45,6 @@ echo ============================================================
 echo.
 
 set "PY_EXE="
-set "HAVE_WINGET=0"
-
-winget --version >nul 2>&1
-if not errorlevel 1 set "HAVE_WINGET=1"
 
 :: --- Python の検索・インストール ---
 call :find_python

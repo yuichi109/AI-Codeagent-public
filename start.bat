@@ -97,14 +97,14 @@ echo [WARN] Node.js not found. MCP features disabled.
 
 if not defined NODE_FOUND goto :playwright_skip
 set "MCP_CHROME_FOUND=0"
-for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
+for /d %%D in ("%LOCALAPPDATA%\ms-playwright\mcp-chrome-for-testing-*") do set "MCP_CHROME_FOUND=1"
 if "!MCP_CHROME_FOUND!"=="1" goto :playwright_skip
-echo [setup] Playwright Chromium をインストール中...
-npx -y playwright@1.60.0 install chromium
+echo [setup] @playwright/mcp 用ブラウザをインストール中（最大5分）...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process 'cmd' -ArgumentList '/c npx @playwright/mcp install-browser chrome-for-testing' -NoNewWindow -PassThru; if (-not $p.WaitForExit(300000)) { $p.Kill(); Write-Host '[WARN] タイムアウト(5分)'; exit 1 }; exit $p.ExitCode"
 if errorlevel 1 (
-    echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: npx -y playwright@1.60.0 install chromium
+    echo [WARN] ブラウザのインストールに失敗しました。後で手動実行: npx @playwright/mcp install-browser chrome-for-testing
 ) else (
-    echo [OK] Playwright Chromium 準備完了。
+    echo [OK] chrome-for-testing 準備完了。
 )
 :playwright_skip
 pause
@@ -190,4 +190,5 @@ if %HAVE_WINGET%==0 (
 )
 echo [--] Node.js が見つかりません。Node.js LTS をインストール中...
 winget install -e --id OpenJS.NodeJS.LTS --source winget --silent --accept-package-agreements --accept-source-agreements
+set "PATH=%PATH%;%ProgramFiles%\nodejs;%LOCALAPPDATA%\Programs\nodejs"
 goto :eof

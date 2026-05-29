@@ -79,14 +79,14 @@ python.exe -m pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] パッケージのインストールに失敗しました。 & pause & exit /b 1 )
 
 
-:: --- Playwright chrome-for-testing インストール ---
+:: --- Playwright Chromium インストール（@playwright/mcp 共用）---
 if defined NODE_FOUND (
-    echo [2b] Playwright chrome-for-testing をインストール中（数分かかる場合があります）...
-    powershell -NoProfile -Command "$env:NPM_CONFIG_YES='true'; npx '@playwright/mcp' install-browser chrome-for-testing 2>&1 | Tee-Object -FilePath 'playwright-install.log'"
+    echo [2b] Playwright Chromium をインストール中...
+    python -m playwright install chromium
     if errorlevel 1 (
-        echo [WARN] インストールに失敗しました。ログ: playwright-install.log
+        echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: python -m playwright install chromium
     ) else (
-        echo [OK] Playwright chrome-for-testing 準備完了。
+        echo [OK] Playwright Chromium 準備完了。
     )
 )
 

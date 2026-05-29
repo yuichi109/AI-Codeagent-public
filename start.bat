@@ -5,6 +5,31 @@ cd /d "%~dp0"
 
 git config core.autocrlf false >nul 2>&1
 
+:: --- Node.js チェック（venv 有無に関わらず毎回）---
+call :find_nodejs
+if not defined NODE_FOUND (
+    call :install_nodejs
+    call :find_nodejs
+    if not defined NODE_FOUND (
+        echo [WARN] Node.js が見つかりません。MCP機能は無効になります。
+    )
+)
+
+:: --- Playwright Chromium チェック（venv 有無に関わらず毎回）---
+if defined NODE_FOUND (
+    set "MCP_CHROME_FOUND=0"
+    for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "MCP_CHROME_FOUND=1"
+    if "!MCP_CHROME_FOUND!"=="0" (
+        echo [setup] Playwright Chromium をインストール中...
+        npx @playwright/mcp@latest install-browser chromium
+        if errorlevel 1 (
+            echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: npx @playwright/mcp@latest install-browser chromium
+        ) else (
+            echo [OK] Playwright Chromium 準備完了。
+        )
+    )
+)
+
 :: --- venv が既にあれば即トレイ起動 ---
 if exist "venv\Scripts\pythonw.exe" goto launch_tray
 
@@ -51,20 +76,6 @@ for /f "tokens=*" %%v in ('git --version 2^>^&1') do echo [OK] %%v
 
 echo.
 
-:: --- Node.js の検索・インストール ---
-call :find_nodejs
-if not defined NODE_FOUND (
-    call :install_nodejs
-    call :find_nodejs
-    if not defined NODE_FOUND (
-        echo [WARN] Node.js が見つかりません。MCP機能（Playwright等）は無効になります。
-        echo        手動インストール: https://nodejs.org/
-    )
-)
-if defined NODE_FOUND (
-    for /f "tokens=*" %%v in ('node --version 2^>^&1') do echo [OK] Node.js %%v
-)
-
 :: --- venv 作成 ---
 echo [1/4] 仮想環境を作成中...
 "%PY_EXE%" -m venv venv
@@ -79,16 +90,6 @@ python.exe -m pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] パッケージのインストールに失敗しました。 & pause & exit /b 1 )
 
 
-:: --- Playwright Chromium インストール（@playwright/mcp 用）---
-if defined NODE_FOUND (
-    echo [2b] Playwright Chromium をインストール中...
-    npx @playwright/mcp@latest install-browser chromium
-    if errorlevel 1 (
-        echo [WARN] Playwright Chromium のインストールに失敗しました。後で手動実行: npx @playwright/mcp@latest install-browser chromium
-    ) else (
-        echo [OK] Playwright Chromium 準備完了。
-    )
-)
 
 :: --- .env 作成 ---
 if not exist ".env" (

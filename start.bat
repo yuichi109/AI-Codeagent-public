@@ -78,16 +78,6 @@ python.exe -m pip install --upgrade pip --quiet
 python.exe -m pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] パッケージのインストールに失敗しました。 & pause & exit /b 1 )
 
-:: --- Playwright ブラウザインストール ---
-if defined NODE_FOUND (
-    echo [2b] Playwright chrome-for-testing をインストール中（数分かかる場合があります）...
-    echo y | npx @playwright/mcp install-browser chrome-for-testing
-    if errorlevel 1 (
-        echo [WARN] Playwright chrome-for-testing のインストールに失敗しました。手動実行: npx @playwright/mcp install-browser chrome-for-testing
-    ) else (
-        echo [OK] Playwright chrome-for-testing 準備完了。
-    )
-)
 
 :: --- .env 作成 ---
 if not exist ".env" (

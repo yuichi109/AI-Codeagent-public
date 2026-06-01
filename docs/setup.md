@@ -26,12 +26,20 @@ WSL・Docker・管理者権限なしで動作します。
 
 **Step 1: リポジトリをクローン**
 
+Git が未インストールの場合は先にインストールしてください（PowerShell を管理者で実行）：
+
+```powershell
+winget install -e --id Git.Git --source winget --accept-package-agreements --accept-source-agreements
+```
+
+インストール後は PowerShell を閉じて開き直してから以下を実行してください。
+
 ```powershell
 git clone -b for_windows https://gitlab.com/yuichi.matsuo/AI-Codeagent.git
 cd AI-Codeagent
 ```
 
-Git が未インストールの場合は ZIP でダウンロードしても可（GitLab → Code → Download ZIP）。
+> プライベートリポジトリの場合、ユーザー名に `oauth2`、パスワードに GitLab PAT を入力してください。
 
 **Step 2: setup.bat をダブルクリック**
 

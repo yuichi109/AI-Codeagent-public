@@ -5,8 +5,12 @@ cd /d "%~dp0"
 
 git config core.autocrlf false >nul 2>&1
 
-:: --- venv が既にあれば即トレイ起動 ---
-if exist "venv\Scripts\pythonw.exe" goto launch_tray
+set "HAVE_WINGET=0"
+winget --version >nul 2>&1
+if not errorlevel 1 set "HAVE_WINGET=1"
+
+:: --- venv が既にあれば Node.js/Playwright チェックしてトレイ起動 ---
+if exist "venv\Scripts\python.exe" goto check_nodejs
 
 :: =============================================================
 :: 初回セットアップ（venv がない場合のみ）
@@ -18,10 +22,6 @@ echo ============================================================
 echo.
 
 set "PY_EXE="
-set "HAVE_WINGET=0"
-
-winget --version >nul 2>&1
-if not errorlevel 1 set "HAVE_WINGET=1"
 
 :: --- Python の検索・インストール ---
 call :find_python
@@ -43,8 +43,7 @@ if not defined GIT_FOUND (
     call :install_git
     call :find_git
     if not defined GIT_FOUND (
-        echo [INFO] Git をインストールしました。このウィンドウを閉じて start.bat を再実行してください。
-        pause & exit /b 0
+        echo [WARN] Git が見つかりません。後でインストールしてください: https://git-scm.com/download/win
     )
 )
 for /f "tokens=*" %%v in ('git --version 2^>^&1') do echo [OK] %%v
@@ -52,37 +51,74 @@ for /f "tokens=*" %%v in ('git --version 2^>^&1') do echo [OK] %%v
 echo.
 
 :: --- venv 作成 ---
-echo [1/3] 仮想環境を作成中...
+echo [1/4] 仮想環境を作成中...
 "%PY_EXE%" -m venv venv
 if errorlevel 1 ( echo [ERROR] venv の作成に失敗しました。 & pause & exit /b 1 )
 
 :: --- パッケージインストール ---
-echo [2/3] パッケージをインストール中（しばらくお待ちください）...
+echo [2/4] パッケージをインストール中（しばらくお待ちください）...
 call venv\Scripts\activate.bat
 set PIP_DISABLE_PIP_VERSION_CHECK=1
 python.exe -m pip install --upgrade pip --quiet
 python.exe -m pip install -r requirements.txt --quiet
 if errorlevel 1 ( echo [ERROR] パッケージのインストールに失敗しました。 & pause & exit /b 1 )
 
+
+
 :: --- .env 作成 ---
 if not exist ".env" (
-    echo [3/3] 設定ファイルを作成中...
+    echo [3/4] 設定ファイルを作成中...
     copy ".env.example" ".env" >nul
     echo       .env を作成しました。ブラウザの設定画面で API キーを入力してください。
 ) else (
-    echo [3/3] 設定ファイルは既に存在します。
+    echo [3/4] 設定ファイルは既に存在します。
 )
 
 echo.
-echo セットアップ完了。タスクトレイにアイコンが表示されます。
+echo [4/4] セットアップ完了。タスクトレイにアイコンが表示されます。
 echo ============================================================
-timeout /t 2 /nobreak >nul
+
+:: =============================================================
+:: Node.js / Playwright チェック（初回・毎回共通）
+:: =============================================================
+:check_nodejs
+:: システムPATHをレジストリから取得して現在のセッションに反映
+for /f "usebackq tokens=*" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine')"`) do set "SYS_PATH=%%p"
+if defined SYS_PATH set "PATH=%PATH%;%SYS_PATH%"
+call :find_nodejs
+if defined NODE_FOUND goto :nodejs_ok2
+call :install_nodejs
+for /f "usebackq tokens=*" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine')"`) do set "SYS_PATH=%%p"
+if defined SYS_PATH set "PATH=%PATH%;%SYS_PATH%"
+call :find_nodejs
+if defined NODE_FOUND goto :nodejs_ok2
+echo [WARN] Node.js not found. MCP features disabled.
+:nodejs_ok2
+
+:: --- Playwright chromium インストール（venv の python を使う・固まらない）---
+set "CHROMIUM_FOUND=0"
+for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "CHROMIUM_FOUND=1"
+if "!CHROMIUM_FOUND!"=="1" goto :playwright_skip
+echo [setup] Playwright chromium をインストール中...
+venv\Scripts\python.exe -m pip install playwright==1.60.0 --quiet
+venv\Scripts\python.exe -m playwright install chromium
+if errorlevel 1 (
+    echo [WARN] Playwright chromium のインストールに失敗しました。
+) else (
+    echo [OK] Playwright chromium 準備完了。
+)
+:playwright_skip
+pause
 
 :: =============================================================
 :: トレイ起動
 :: =============================================================
 :launch_tray
-start "" "venv\Scripts\pythonw.exe" "%~dp0tray.py"
+if exist "venv\Scripts\pythonw.exe" (
+    start "" "venv\Scripts\pythonw.exe" "%~dp0tray.py"
+) else (
+    start "" "venv\Scripts\python.exe" "%~dp0tray.py"
+)
 exit /b 0
 
 :: =============================================================
@@ -132,4 +168,28 @@ if %HAVE_WINGET%==0 (
 )
 echo [--] Git が見つかりません。Git をインストール中...
 winget install -e --id Git.Git --source winget --silent --accept-package-agreements --accept-source-agreements
+goto :eof
+
+:find_nodejs
+set "NODE_FOUND="
+node --version >nul 2>&1
+if not errorlevel 1 ( set "NODE_FOUND=1" & goto :eof )
+if exist "%ProgramFiles%\nodejs\node.exe" (
+    set "PATH=%PATH%;%ProgramFiles%\nodejs"
+    set "NODE_FOUND=1"
+)
+if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
+    set "PATH=%PATH%;%LOCALAPPDATA%\Programs\nodejs"
+    set "NODE_FOUND=1"
+)
+goto :eof
+
+:install_nodejs
+if %HAVE_WINGET%==0 (
+    echo [WARN] winget が見つかりません。Node.js を手動でインストールしてください: https://nodejs.org/
+    goto :eof
+)
+echo [--] Node.js が見つかりません。Node.js LTS をインストール中...
+winget install -e --id OpenJS.NodeJS.LTS --source winget --silent --accept-package-agreements --accept-source-agreements
+set "PATH=%PATH%;%ProgramFiles%\nodejs;%LOCALAPPDATA%\Programs\nodejs"
 goto :eof

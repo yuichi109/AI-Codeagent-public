@@ -203,11 +203,40 @@ def _sync_requirements():
         )
 
 
+def _free_port(port: int):
+    """ポートを使用している既存プロセスを終了する。"""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", port)) != 0:
+                return  # 空きポート、何もしない
+    except Exception:
+        return
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True,
+            creationflags=_no_window_flag(),
+        )
+        for line in result.stdout.splitlines():
+            if f":{port} " in line and "LISTENING" in line:
+                pid = int(line.strip().split()[-1])
+                if pid > 0:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/F"],
+                        capture_output=True, creationflags=_no_window_flag(),
+                    )
+                    time.sleep(1)
+                break
+    except Exception:
+        pass
+
+
 def _start_server():
     global _server_proc
     with _lock:
         if _server_proc and _server_proc.poll() is None:
             return
+        _free_port(PORT)
         _ensure_vcredist()
         _sync_requirements()
         _rotate_log()

@@ -108,7 +108,6 @@ if errorlevel 1 (
     echo [OK] Playwright chromium 準備完了。
 )
 :playwright_skip
-pause
 
 :: =============================================================
 :: トレイ起動

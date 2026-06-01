@@ -929,11 +929,43 @@ def _gather_auto_context(workspace_scope: str = "") -> str:
 
 
 # -----------------------------------------------------------------------
+# MCP proxy registration (called by async_worker at startup)
+# -----------------------------------------------------------------------
+_MCP_PROXY_URL: str = ""
+
+
+def register_mcp_proxy(proxy_url: str, extra_tools: list) -> None:
+    """Register MCP tools so the BG agent can call them via HTTP proxy."""
+    global _MCP_PROXY_URL
+    _MCP_PROXY_URL = proxy_url.rstrip("/")
+    for schema in extra_tools:
+        tool_name = schema.get("function", {}).get("name", "")
+        if tool_name and tool_name not in TOOL_REGISTRY:
+            TOOL_REGISTRY[tool_name] = None  # placeholder; executed via proxy
+            TOOLS.append(schema)
+
+
+# -----------------------------------------------------------------------
 # Tool executor
 # -----------------------------------------------------------------------
 def _execute_tool(name: str, arguments: dict) -> str:
     if name not in TOOL_REGISTRY:
         return json.dumps({"error": f"未知のツール: {name}"}, ensure_ascii=False)
+    if TOOL_REGISTRY[name] is None and "__" in name and _MCP_PROXY_URL:
+        # MCP tool: call via server proxy (synchronous httpx)
+        try:
+            resp = httpx.post(
+                f"{_MCP_PROXY_URL}/async-agent/call-mcp-tool",
+                json={"name": name, "arguments": arguments},
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" in data:
+                return json.dumps({"error": data["error"]}, ensure_ascii=False)
+            return json.dumps(data["result"], ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": f"MCPプロキシエラー: {e}"}, ensure_ascii=False)
     try:
         result = TOOL_REGISTRY[name](**arguments)
         if name in ("web_search", "web_research") and isinstance(result, dict):

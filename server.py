@@ -2446,6 +2446,31 @@ async def async_worker_status():
     return JSONResponse({"alive": alive, "pid": _async_worker_proc.pid})
 
 
+@app.get("/async-agent/mcp-tools")
+async def get_mcp_tools_for_bg():
+    """Return MCP tool schemas for the background worker."""
+    mcp_tools = [t for t in TOOLS if "__" in t.get("function", {}).get("name", "")]
+    return JSONResponse({"tools": mcp_tools})
+
+
+@app.post("/async-agent/call-mcp-tool")
+async def call_mcp_tool_proxy(request: Request):
+    """Proxy MCP tool calls from the background worker."""
+    body = await request.json()
+    name = body.get("name", "")
+    arguments = body.get("arguments", {})
+    if name not in TOOL_REGISTRY:
+        return JSONResponse({"error": f"未知のMCPツール: {name}"})
+    try:
+        if asyncio.iscoroutinefunction(TOOL_REGISTRY[name]):
+            result = await asyncio.wait_for(TOOL_REGISTRY[name](**arguments), timeout=60)
+        else:
+            result = await asyncio.to_thread(TOOL_REGISTRY[name], **arguments)
+        return JSONResponse({"result": result})
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+
 @app.post("/mermaid-check")
 async def mermaid_check(req: MermaidCheckRequest):
     """Mermaid図のレイアウトをAIビジョンでチェックし、修正コードがあれば返す"""

@@ -30,10 +30,31 @@ from tools.async_job_db import (
     append_chunk,
     purge_old_completed,
 )
-from agent_core import run_agent
+import httpx
+from agent_core import run_agent, register_mcp_proxy
 
 # job_id -> asyncio.Task
 _running: dict[str, "asyncio.Task[None]"] = {}
+
+_SERVER_BASE_URL = "http://127.0.0.1:8000"
+
+
+async def _register_mcp_tools_from_server() -> None:
+    """Fetch MCP tool schemas from server and register them in agent_core."""
+    for attempt in range(10):
+        await asyncio.sleep(2)
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(f"{_SERVER_BASE_URL}/async-agent/mcp-tools")
+                resp.raise_for_status()
+                tools = resp.json().get("tools", [])
+                if tools:
+                    register_mcp_proxy(_SERVER_BASE_URL, tools)
+                    print(f"[worker] MCP tools registered: {[t['function']['name'] for t in tools]}", flush=True)
+                    return
+        except Exception as e:
+            print(f"[worker] MCP tools fetch attempt {attempt+1} failed: {e}", flush=True)
+    print("[worker] MCP tools fetch gave up after 10 attempts", flush=True)
 
 _POLL_INTERVAL = 2.0  # seconds between queue polls
 
@@ -113,6 +134,7 @@ async def _run_job(job: dict) -> None:
 
 async def _poll_loop(max_concurrent: int) -> None:
     print(f"[worker] started — max_concurrent={max_concurrent}", flush=True)
+    await _register_mcp_tools_from_server()
 
     while True:
         try:

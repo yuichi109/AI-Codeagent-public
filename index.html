@@ -208,6 +208,17 @@
 
   /* ---- shared card styles ---- */
   .bg-job-card { background:#313244; border-radius:7px; padding:9px 11px; margin-bottom:6px; border-left:3px solid #45475a; }
+  /* BG チャットカード */
+  .bg-chat-card { width:100%; max-width:860px; margin-bottom:16px; }
+  .bg-chat-prompt { color:#89b4fa; font-size:13px; padding:5px 10px; background:#1e1e2e; border-radius:6px 6px 0 0; border:1px solid #313244; border-bottom:none; word-break:break-word; }
+  .bg-chat-details { background:#181825; border:1px solid #313244; border-radius:0 0 6px 6px; }
+  .bg-chat-details > summary { padding:5px 10px; cursor:pointer; font-size:12px; color:#a6e3a1; list-style:none; user-select:none; display:flex; align-items:center; gap:6px; }
+  .bg-chat-details > summary::before { content:'▸'; font-size:10px; }
+  .bg-chat-details[open] > summary::before { content:'▾'; }
+  .bg-chat-details > summary:hover { color:#cdd6f4; }
+  .bg-chat-details.failed > summary { color:#f38ba8; }
+  .bg-chat-details.cancelled > summary { color:#6c7086; }
+  .bg-chat-result { padding:10px; font-size:12px; color:#cdd6f4; white-space:pre-wrap; word-break:break-word; border-top:1px solid #313244; max-height:400px; overflow-y:auto; }
   .bg-job-card.status-pending  { border-left-color:#fab387; }
   .bg-job-card.status-running  { border-left-color:#89b4fa; }
   .bg-job-card.status-done     { border-left-color:#a6e3a1; }
@@ -2128,11 +2139,23 @@
       let turnIdx = 0;
       while (i < history.length) {
         const u = history[i];
+        // BG結果カードとして復元（BGスクリプトが後のタグで定義されるため、_pendingBgCards に積んで後処理）
+        if (u?.role === 'bg_user') {
+          const next = history[i + 1];
+          if (next?.role === 'bg_result') {
+            window._pendingBgCards = window._pendingBgCards || [];
+            window._pendingBgCards.push({ prompt: u.content, content: next.content, status: next.status, timestamp: next.timestamp });
+            i += 2;
+          } else {
+            i++;
+          }
+          continue;
+        }
         if (u?.role !== 'user') { i++; continue; }
         // 次の user が来るまでスキャンして最後の assistant content を取得
         let aiText = '';
         let j = i + 1;
-        while (j < history.length && history[j]?.role !== 'user') {
+        while (j < history.length && history[j]?.role !== 'user' && history[j]?.role !== 'bg_user') {
           if (history[j]?.role === 'assistant' && history[j]?.content) {
             aiText = history[j].content;
           }
@@ -2450,6 +2473,10 @@
       if (after) frag.appendChild(document.createTextNode(after));
       node.parentNode.replaceChild(frag, node);
     });
+    // キーワードが含まれる BG カードの <details> を自動展開
+    chat.querySelectorAll('.bg-chat-details').forEach(det => {
+      if (det.querySelector('mark.chat-hl')) det.open = true;
+    });
     // 最初のマッチに first クラスをつけてスクロール
     const first = chat.querySelector('mark.chat-hl');
     if (first) {
@@ -2522,10 +2549,20 @@
     let i = 0, turnIdx = 0;
     while (i < history.length) {
       const u = history[i];
+      if (u?.role === 'bg_user') {
+        const next = history[i + 1];
+        if (next?.role === 'bg_result') {
+          _bgRenderChatCard(u.content, next.content, next.status, next.timestamp);
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
       if (u?.role !== 'user') { i++; continue; }
       let aiText = '';
       let j = i + 1;
-      while (j < history.length && history[j]?.role !== 'user') {
+      while (j < history.length && history[j]?.role !== 'user' && history[j]?.role !== 'bg_user') {
         if (history[j]?.role === 'assistant' && history[j]?.content) aiText = history[j].content;
         j++;
       }
@@ -3882,8 +3919,8 @@
     let currentModelName = null;
     let pendingAnsibleChooser = null;
 
-    // API履歴は最新 MAX_API_MESSAGES 件のみ送信
-    const trimmedHistory = history.slice(-MAX_API_MESSAGES);
+    // API履歴は最新 MAX_API_MESSAGES 件のみ送信（BG結果エントリは除外）
+    const trimmedHistory = history.filter(m => m.role !== 'bg_user' && m.role !== 'bg_result').slice(-MAX_API_MESSAGES);
     // 計画確認ペンディング中の場合は job_id を取り出してバーを消す
     const resumeJobId = _maConsumePending();
 
@@ -6625,6 +6662,7 @@ async function bgSubmitJob(msg) {
     _applyMode(_bgMode);
     await _bgRestoreFromServer();
     _bgAddCard(data.job_id, msg);
+    if (_bgJobs[data.job_id]) _bgJobs[data.job_id].prompt = msg;
     _bgStartStream(data.job_id);
     _bgUpdateBadge();
   } catch (e) { alert('投入エラー: ' + e); }
@@ -6700,6 +6738,47 @@ function _bgAddCard(jobId, msgPreview) {
   body.prepend(card);
 }
 
+// ---- BG → チャット履歴へ書き込み ----
+function _bgSaveToChat(jobId, status) {
+  const outEl = document.getElementById(`bg-out-${jobId}`);
+  const resultText = outEl ? outEl.textContent : '（出力なし）';
+  const prompt = (_bgJobs[jobId] && _bgJobs[jobId].prompt) || '';
+  const timestamp = new Date().toISOString();
+  history.push({ role: 'bg_user', content: prompt });
+  history.push({ role: 'bg_result', content: resultText, job_id: jobId, status, timestamp });
+  _bgRenderChatCard(prompt, resultText, status, timestamp);
+  foldOldTurns();
+  updateTurnCount();
+  saveHistory();
+}
+
+function _bgRenderChatCard(prompt, resultText, status, timestamp) {
+  const statusIcon  = { done:'✅', failed:'❌', cancelled:'🚫', cancelling:'🚫' }[status] || '⚡';
+  const statusLabel = { done:'完了', failed:'失敗', cancelled:'キャンセル', cancelling:'キャンセル中' }[status] || status;
+  const timeStr = timestamp
+    ? new Date(timestamp).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
+    : '';
+  const card = document.createElement('div');
+  card.className = 'bg-chat-card';
+  const promptDiv = document.createElement('div');
+  promptDiv.className = 'bg-chat-prompt';
+  promptDiv.textContent = '⚡ ' + prompt;
+  const det = document.createElement('details');
+  det.className = 'bg-chat-details' + (status === 'failed' ? ' failed' : status === 'cancelled' ? ' cancelled' : '');
+  const sum = document.createElement('summary');
+  sum.textContent = `${statusIcon} BG${statusLabel}　${timeStr}`;
+  const resultDiv = document.createElement('div');
+  resultDiv.className = 'bg-chat-result';
+  resultDiv.textContent = resultText;
+  _bgLinkifyImages(resultDiv);
+  det.appendChild(sum);
+  det.appendChild(resultDiv);
+  card.appendChild(promptDiv);
+  card.appendChild(det);
+  const chatEl = document.getElementById('chat');
+  if (chatEl) { chatEl.appendChild(card); chatEl.scrollTop = chatEl.scrollHeight; }
+}
+
 // ---- Image link detection ----
 function _bgLinkifyImages(el) {
   const text = el.textContent;
@@ -6758,13 +6837,15 @@ function _bgStartStream(jobId) {
           outEl.scrollTop = outEl.scrollHeight;
         }
       } else if (d.type === 'job_end') {
-        _bgSetStatus(jobId, d.status || 'done');
+        const finalStatus = d.status || 'done';
+        _bgSetStatus(jobId, finalStatus);
         const toolEl = document.getElementById(`bg-tool-${jobId}`);
         if (toolEl) toolEl.style.display = 'none';
         if (outEl) _bgLinkifyImages(outEl);
         es.close();
         if (_bgJobs[jobId]) _bgJobs[jobId].es = null;
         _bgUpdateBadge();
+        _bgSaveToChat(jobId, finalStatus);
       } else if (d.type === 'error') {
         if (outEl) outEl.textContent += `\n[エラー] ${d.content}`;
         _bgSetStatus(jobId, 'failed');
@@ -6824,7 +6905,7 @@ async function _bgRestoreFromServer() {
     const data = await res.json();
     for (const j of (data.jobs || []).slice().reverse()) {
       if (document.getElementById(`bg-card-${j.job_id}`)) continue;
-      _bgJobs[j.job_id] = { status: j.status, es: null };
+      _bgJobs[j.job_id] = { status: j.status, es: null, prompt: j.message_preview || '' };
       _bgAddCard(j.job_id, j.message_preview || '');
       _bgSetStatus(j.job_id, j.status);
       if (['pending','running'].includes(j.status)) {
@@ -6940,6 +7021,10 @@ document.addEventListener('mousemove', e => {
     p.style.width = newW + 'px';
   }
 });
+
+// loadHistory() で積まれた BG カードをここで描画（スクリプトタグをまたぐため）
+(window._pendingBgCards || []).forEach(c => _bgRenderChatCard(c.prompt, c.content, c.status, c.timestamp));
+window._pendingBgCards = null;
 
 // Shared mouseup → save to localStorage
 document.addEventListener('mouseup', () => {

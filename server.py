@@ -1569,6 +1569,10 @@ def _summarize_history(messages: list) -> str | None:
         elif role == "tool":
             # ツール結果は先頭100文字だけ含める
             lines.append(f"ツール結果: {str(content)[:100]}...")
+        elif role == "bg_user":
+            lines.append(f"BGタスク: {content}")
+        elif role == "bg_result":
+            lines.append(f"BG結果: {str(content)[:300]}…")
     conversation_text = "\n".join(lines)
     try:
         client = _make_client()
@@ -1902,6 +1906,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     _notify_on_done = any(kw in user_message for kw in _NOTIFY_KEYWORDS)
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
+    # bg_user / bg_result は LLM API に送らない（チャット表示専用ロール）
+    trimmed = [m for m in trimmed if m.get("role") not in ("bg_user", "bg_result")]
 
     # ローリングサマリー: 古い部分を圧縮して文脈を維持
     compressed_history = None
@@ -3908,9 +3914,9 @@ def _extract_snippet(history: list, keyword: str, context: int = 60) -> dict:
     turn = 0
     for msg in history:
         role = msg.get("role", "")
-        if role == "user":
+        if role in ("user", "bg_user"):
             turn += 1
-        if role not in ("user", "assistant"):
+        if role not in ("user", "assistant", "bg_user", "bg_result"):
             continue
         content = msg.get("content", "")
         if isinstance(content, list):
@@ -3929,7 +3935,12 @@ def _extract_snippet(history: list, keyword: str, context: int = 60) -> dict:
             snippet = "…" + snippet
         if end < len(content):
             snippet = snippet + "…"
-        role_label = "あなた" if role == "user" else "AI"
+        if role == "bg_user":
+            role_label = "⚡BG投入"
+        elif role == "bg_result":
+            role_label = "⚡BG結果"
+        else:
+            role_label = "あなた" if role == "user" else "AI"
         return {"text": snippet, "turn": turn, "role": role_label}
     return {}
 

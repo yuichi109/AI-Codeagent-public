@@ -47,6 +47,63 @@
 
 ---
 
+## 2026-06-01（セッション24）v1.6.0 — BGエージェント総合テスト・バグ修正
+
+### テスト結果
+
+| # | テスト | 結果 |
+|---|---|---|
+| 1 | 通常チャット（短い質問）でBGカードが出ない | ✅ PASS |
+| 2 | 長いタスクでBGカードが出る | ✅ PASS |
+| 3 | マルチAI ONでBGカードが出ない | ✅ PASS |
+| 4 | ⚡BG強制投入→サイドペインにリアルタイム表示 | ✅ PASS |
+| 5 | ページリロード後の復元 | ✅ PASS |
+| 6 | Obsidian inbox の通常動作 | **未テスト** |
+| 7 | MCP（Playwright・Obsidian）の通常動作 | **未テスト** |
+| 8 | 画像生成の通常動作 | ✅ PASS |
+| 9 | 停止ボタンで cancelling → cancelled | ⚠️ 短命ジョブは競合状態あり（2秒ポーリング間隔の限界） |
+
+### 修正したバグ
+
+#### `server.py` — classify-bg プロンプト改善
+- 画像生成・画像編集を必ず `bg=true` にする文言を追記（LLMが「単発依頼」と誤判定するため）
+
+#### `index.html` — classify-bg 文字数閾値
+- `text.length > 40` → `text.length > 15` に変更
+- 理由：「夕焼けの富士山の画像を生成してください」（18文字）が40文字未満でスキップされていた
+
+#### `agent_core.py` — base64トークン肥大化防止（**重要**）
+- `generate_image` ツールは結果に `image_base64`（数MBのbase64文字列）を含む
+- BGモードでこれがメッセージ履歴に蓄積 → 1,541,862トークンでAPIエラー
+- ツール結果から `image_base64` キーを除去してから messages に追加するよう修正
+
+#### `agent_core.py` — LLMエラー時のジョブステータス
+- LLM API エラー（context_length_exceeded 等）発生時、`return` で正常終了していたため `done` になっていた
+- `raise` に変更 → `async_worker.py` が `except Exception` でキャッチして `failed` に設定
+
+#### `index.html` — BGパネル表示順バグ
+- **原因**: `_bgRestoreFromServer` が `ORDER BY created_at DESC`（新→旧）の配列を `prepend`（先頭追加）でループ → 最終的に古いものが先頭に
+- **修正**: `.slice().reverse()` で旧→新の順にしてから `prepend` → 最新が先頭に
+
+#### `index.html` — 新規投入ジョブが先頭に来ない問題
+- **原因**: `bgSubmitJob` が `bgOpenPanel()` → 非同期 `_bgRestoreFromServer()` → `_bgAddCard(new)` の順で呼ぶと、restoreが後から完了して旧ジョブを新ジョブの上に積む
+- **修正**: `bgOpenPanel` を分解して `await _bgRestoreFromServer()` 後に `_bgAddCard` を呼ぶ
+
+#### `index.html` — BGパネル画像リンク
+- `job_end` 時（リアルタイム）・チャンク復元時（リロード後）に `_bgLinkifyImages` を呼ぶ
+- `🖼 AI_Output_Images/generated_*.png` のクリッカブルリンクをパネルに追加
+- `/workspace/image?path=` 経由でブラウザから直接開ける
+
+### 残課題（次回セッション）
+
+- テスト6（Obsidian inbox）・テスト7（MCP）は未実施
+- classify-bg が5秒タイムアウトを超えた場合に通常実行になるケースがある（原因調査中）
+- cancelling → cancelled の競合状態（2秒ポーリング内に完了すると done になる）の対処
+- 精密なトークンテスト（image_base64除去が確実に効いているか・他ツールで同様の問題がないか）
+- 全修正のコミット（未実施・次回確認後に実施）
+
+---
+
 ## 2026-06-01（セッション22）
 
 ### Obsidian プロアクティブ再接続テスト（動作確認済み）

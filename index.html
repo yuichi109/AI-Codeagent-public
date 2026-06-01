@@ -3788,7 +3788,7 @@
     }
 
     // ---- BG 分類チェック（画像なし・一定以上の長さ・フラグなし時のみ） ----
-    if (!_skipClassify && text.length > 40 && pendingImages.length === 0 && !isMultiAgentActive()) {
+    if (!_skipClassify && text.length > 15 && pendingImages.length === 0 && !isMultiAgentActive()) {
       _skipClassify = false;
       try {
         const cr = await fetch('/classify-bg', {
@@ -6620,7 +6620,10 @@ async function bgSubmitJob(msg) {
     if (!data.job_id) { alert('投入失敗: ' + JSON.stringify(data)); return; }
     const input = document.getElementById('input');
     if (input) input.value = '';
-    bgOpenPanel();
+    // パネルを開き、restoreが完了してから新カードを先頭に追加
+    _bgOpen = true;
+    _applyMode(_bgMode);
+    await _bgRestoreFromServer();
     _bgAddCard(data.job_id, msg);
     _bgStartStream(data.job_id);
     _bgUpdateBadge();
@@ -6687,6 +6690,7 @@ function _bgAddCard(jobId, msgPreview) {
     <div class="bg-job-meta">
       <span class="bg-status-badge bsb-pending" id="bg-badge-${jobId}">pending</span>
       <span style="color:#6c7086;font-size:10px;margin-left:6px;">${jobId}</span>
+      <span id="bg-tool-${jobId}" style="display:none;color:#89b4fa;font-size:10px;margin-left:8px;"></span>
     </div>
     <div class="bg-job-msg" title="${_bgEsc(msgPreview)}">${_bgEsc(msgPreview)}</div>
     <div class="bg-job-output" id="bg-out-${jobId}"><span style="color:#6c7086">実行待ち…</span></div>
@@ -6694,6 +6698,20 @@ function _bgAddCard(jobId, msgPreview) {
       <button class="bg-job-btn bg-job-btn-cancel" onclick="bgCancelJob('${jobId}')">停止</button>
     </div>`;
   body.prepend(card);
+}
+
+// ---- Image link detection ----
+function _bgLinkifyImages(el) {
+  const text = el.textContent;
+  const matches = [...new Set(text.match(/[\w\/\-\.]+\.(?:png|jpg|jpeg|gif|webp)/gi) || [])];
+  matches.forEach(path => {
+    const url = '/workspace/image?path=' + encodeURIComponent(path);
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank';
+    a.style.cssText = 'display:block;color:#89b4fa;font-size:11px;margin-top:6px;word-break:break-all;';
+    a.textContent = '🖼 ' + path;
+    el.appendChild(a);
+  });
 }
 
 // ---- Update card status ----
@@ -6729,6 +6747,9 @@ function _bgStartStream(jobId) {
         _bgSetStatus(jobId, 'running');
       } else if (d.type === 'tool_start') {
         const info = JSON.parse(d.content || '{}');
+        _bgSetStatus(jobId, 'running');
+        const toolEl = document.getElementById(`bg-tool-${jobId}`);
+        if (toolEl) { toolEl.textContent = `🔧 ${info.name}`; toolEl.style.display = 'inline'; }
         if (outEl) {
           const line = document.createElement('div');
           line.style.cssText = 'color:#89b4fa;font-size:10px;opacity:0.7;';
@@ -6738,6 +6759,9 @@ function _bgStartStream(jobId) {
         }
       } else if (d.type === 'job_end') {
         _bgSetStatus(jobId, d.status || 'done');
+        const toolEl = document.getElementById(`bg-tool-${jobId}`);
+        if (toolEl) toolEl.style.display = 'none';
+        if (outEl) _bgLinkifyImages(outEl);
         es.close();
         if (_bgJobs[jobId]) _bgJobs[jobId].es = null;
         _bgUpdateBadge();
@@ -6761,7 +6785,11 @@ function _bgStartStream(jobId) {
 
 // ---- Cancel / Delete ----
 async function bgCancelJob(jobId) {
-  if (!confirm(`ジョブ ${jobId} を停止しますか？`)) return;
+  const isRunning = _bgJobs[jobId] && _bgJobs[jobId].status === 'running';
+  const msg = isRunning
+    ? `ジョブ ${jobId} を停止しますか？\n⚠️ 実行中のAPI呼び出しは即座には止まらないため、課金分は無駄になる場合があります。`
+    : `ジョブ ${jobId} を停止しますか？`;
+  if (!confirm(msg)) return;
   try {
     await fetch(`/async-agent/jobs/${jobId}`, { method: 'DELETE' });
     _bgSetStatus(jobId, 'cancelling');
@@ -6794,7 +6822,7 @@ async function _bgRestoreFromServer() {
   try {
     const res = await fetch('/async-agent/jobs');
     const data = await res.json();
-    for (const j of (data.jobs || [])) {
+    for (const j of (data.jobs || []).slice().reverse()) {
       if (document.getElementById(`bg-card-${j.job_id}`)) continue;
       _bgJobs[j.job_id] = { status: j.status, es: null };
       _bgAddCard(j.job_id, j.message_preview || '');
@@ -6809,6 +6837,7 @@ async function _bgRestoreFromServer() {
             .then(d => {
               const text = (d.chunks || []).filter(c => c.type === 'text').map(c => c.content).join('');
               outEl.textContent = text || '（出力なし）';
+              _bgLinkifyImages(outEl);
             }).catch(() => {});
         }
       }
@@ -6822,8 +6851,14 @@ setInterval(async () => {
   try {
     const res = await fetch('/async-agent/jobs');
     const data = await res.json();
-    for (const j of (data.jobs || []).filter(j => ['pending','running'].includes(j.status))) {
-      if (!_bgJobs[j.job_id]) _bgJobs[j.job_id] = { status: j.status, es: null };
+    for (const j of (data.jobs || [])) {
+      if (!_bgJobs[j.job_id]) {
+        if (['pending','running'].includes(j.status)) {
+          _bgJobs[j.job_id] = { status: j.status, es: null };
+        }
+      } else if (_bgJobs[j.job_id].status !== j.status) {
+        _bgSetStatus(j.job_id, j.status);
+      }
     }
     _bgUpdateBadge();
   } catch (_) {}

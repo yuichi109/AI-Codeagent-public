@@ -23,6 +23,7 @@ if str(_project_root) not in sys.path:
 from config import ASYNC_MAX_JOBS
 from tools.async_job_db import (
     init_db,
+    reset_running_jobs,
     get_pending_jobs,
     get_job,
     update_job,
@@ -150,6 +151,9 @@ def main() -> None:
     args = parser.parse_args()
 
     init_db()
+    n = reset_running_jobs()
+    if n:
+        print(f"[worker] {n} 件の中断ジョブ (running/cancelling) を failed にリセット", flush=True)
     asyncio.run(_poll_loop(max_concurrent=args.jobs))
 
 

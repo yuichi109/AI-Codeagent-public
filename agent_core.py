@@ -958,13 +958,22 @@ async def _execute_tool_async(name: str, arguments: dict) -> str:
     elif name == "web_research" and WEB_RESEARCH_PROVIDER.startswith("deep-research"):
         timeout = 3600
     elif name == "web_research":
-        timeout = 60
-    elif name == "run_powershell" and "timeout_seconds" in arguments:
-        timeout = int(arguments["timeout_seconds"]) + 10
-    elif name == "run_command" and "timeout_minutes" in arguments:
-        timeout = int(arguments["timeout_minutes"] * 60) + 10
+        timeout = 120
+    elif name == "render_manim":
+        timeout = 130  # 内部タイムアウト120秒 + バッファ
+    elif name == "run_ansible_playbook":
+        timeout = 310  # 内部タイムアウト300秒 + バッファ
+    elif name in ("run_powershell", "winrm_command"):
+        timeout = int(arguments.get("timeout_seconds", 30)) + 10
+    elif name == "gather_host_info":
+        timeout = int(arguments.get("timeout_seconds", 60)) + 10
+    elif name == "run_command":
+        if "timeout_minutes" in arguments:
+            timeout = int(arguments["timeout_minutes"] * 60) + 10
+        else:
+            timeout = 120
     else:
-        timeout = 20
+        timeout = 120  # ハング検出用デフォルト（BGモードは長めに）
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(_execute_tool, name, arguments),
@@ -1037,7 +1046,7 @@ async def run_agent(
             stream = await client.chat.completions.create(**create_kwargs)
         except Exception as e:
             await emit("error", f"LLM API エラー: {e}")
-            return
+            raise
 
         content_parts: list[str] = []
         tool_calls_map: dict[int, dict] = {}
@@ -1111,6 +1120,14 @@ async def run_agent(
         for (name, args, tc_id), result in zip(parsed_calls, results):
             if isinstance(result, Exception):
                 result = json.dumps({"error": str(result)}, ensure_ascii=False)
+            # base64画像データはトークン肥大化を防ぐため除去
+            try:
+                r = json.loads(result)
+                if isinstance(r, dict) and "image_base64" in r:
+                    r.pop("image_base64")
+                    result = json.dumps(r, ensure_ascii=False)
+            except Exception:
+                pass
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc_id,

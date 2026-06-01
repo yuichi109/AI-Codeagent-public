@@ -138,6 +138,22 @@ def delete_job(job_id: str):
         conn.execute("DELETE FROM async_jobs WHERE job_id=?", (job_id,))
 
 
+def reset_running_jobs() -> int:
+    """ワーカー再起動時：running/cancelling 状態のジョブを failed に遷移させる。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT job_id FROM async_jobs WHERE status IN ('running', 'cancelling')"
+        ).fetchall()
+        count = len(rows)
+        if count:
+            conn.execute(
+                "UPDATE async_jobs SET status='failed', finished_at=?, error=? "
+                "WHERE status IN ('running', 'cancelling')",
+                (datetime.utcnow().isoformat(), "ワーカー再起動により中断"),
+            )
+    return count
+
+
 def purge_old_completed(keep: int = 20):
     """Keep only the newest `keep` completed/failed/cancelled jobs; delete the rest."""
     terminal = ("done", "failed", "cancelled")

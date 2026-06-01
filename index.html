@@ -37,7 +37,8 @@
   .gl-project-meta { font-size: 10px; color: #45475a; margin-top: 4px; display: flex; gap: 8px; align-items: center; }
   .gl-badge { padding: 1px 5px; border-radius: 3px; background: #313244; color: #6c7086; }
   #gitlab-status { padding: 24px 16px; text-align: center; color: #6c7086; font-size: 13px; }
-  #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; }
+  #chat-wrapper { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
+  #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; }
   .turn { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; width: 100%; max-width: 860px; }
   /* メッセージラッパー（ロールラベル + バブル）*/
   .msg-wrapper { display: flex; flex-direction: column; gap: 4px; }
@@ -173,6 +174,60 @@
   #send { padding: 6px 16px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
   #stop { padding: 6px 16px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; display: none; }
+  /* BG classify prompt card (shown in chat when AI suggests BG) */
+  .bg-classify-card { display:flex; align-items:flex-start; gap:12px; background:#313244; border:1px solid #a6e3a1; border-radius:10px; padding:12px 16px; margin:8px auto; max-width:680px; width:100%; box-sizing:border-box; }
+  .bg-classify-icon { font-size:22px; flex-shrink:0; line-height:1; }
+  .bg-classify-text { flex:1; font-size:13px; color:#cdd6f4; line-height:1.5; }
+  .bg-classify-reason { font-size:11px; color:#6c7086; }
+  .bg-classify-actions { display:flex; gap:8px; align-items:center; flex-shrink:0; }
+  .bg-classify-btn-bg { padding:5px 14px; background:#a6e3a1; color:#1e1e2e; border:none; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; }
+  .bg-classify-btn-normal { padding:5px 14px; background:#45475a; color:#cdd6f4; border:none; border-radius:6px; cursor:pointer; font-size:12px; }
+  #bg-btn { padding: 6px 12px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; position: relative; }
+  #bg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #bg-badge { position:absolute; top:-6px; right:-6px; background:#f38ba8; color:#1e1e2e; border-radius:10px; font-size:10px; font-weight:bold; padding:1px 5px; display:none; }
+
+  /* ---- BG Side Pane ---- */
+  #bg-side-pane { display:none; width:340px; min-width:240px; max-width:480px; flex-shrink:0; background:#181825; border-left:1px solid #313244; flex-direction:column; overflow:hidden; }
+  #bg-side-pane.open { display:flex; }
+  #bg-pane-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#313244; border-bottom:1px solid #45475a; flex-shrink:0; }
+  #bg-pane-title { font-size:13px; font-weight:bold; color:#a6e3a1; }
+  #bg-pane-actions { display:flex; gap:6px; align-items:center; }
+  #bg-pane-body { overflow-y:auto; flex:1; padding:6px; }
+
+  /* ---- BG Floating Panel ---- */
+  #bg-float-pane { display:none; position:fixed; top:80px; right:16px; width:360px; height:500px; background:#1e1e2e; border:1px solid #45475a; border-radius:10px; box-shadow:0 6px 30px rgba(0,0,0,0.6); z-index:9000; flex-direction:column; overflow:hidden; }
+  #bg-float-pane.open { display:flex; }
+  #bg-float-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#313244; border-bottom:1px solid #45475a; border-radius:10px 10px 0 0; flex-shrink:0; cursor:move; user-select:none; }
+  #bg-float-body { overflow-y:auto; flex:1; padding:6px; }
+  #bg-float-resize { position:absolute; bottom:0; right:0; width:22px; height:22px; cursor:se-resize; border-radius:0 0 10px 0; background:rgba(89,90,112,0.4); }
+  #bg-float-resize::after { content:''; display:block; width:100%; height:100%; background: radial-gradient(circle,#89b4fa 1.5px,transparent 1.5px) 5px 14px/20px 20px no-repeat, radial-gradient(circle,#89b4fa 1.5px,transparent 1.5px) 10px 9px/20px 20px no-repeat, radial-gradient(circle,#89b4fa 1.5px,transparent 1.5px) 15px 4px/20px 20px no-repeat; }
+  #bg-float-resize:hover { background:rgba(203,166,247,0.25); }
+  /* ---- BG Side resize handle ---- */
+  #bg-side-resize-handle { width:5px; cursor:col-resize; background:transparent; flex-shrink:0; transition:background 0.15s; }
+  #bg-side-resize-handle:hover, #bg-side-resize-handle.active { background:#a6e3a1; }
+
+  /* ---- shared card styles ---- */
+  .bg-job-card { background:#313244; border-radius:7px; padding:9px 11px; margin-bottom:6px; border-left:3px solid #45475a; }
+  .bg-job-card.status-pending  { border-left-color:#fab387; }
+  .bg-job-card.status-running  { border-left-color:#89b4fa; }
+  .bg-job-card.status-done     { border-left-color:#a6e3a1; }
+  .bg-job-card.status-failed   { border-left-color:#f38ba8; }
+  .bg-job-card.status-cancelled,.bg-job-card.status-cancelling { border-left-color:#6c7086; }
+  .bg-job-meta  { font-size:11px; color:#6c7086; margin-bottom:3px; }
+  .bg-job-msg   { font-size:12px; color:#cdd6f4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:5px; }
+  .bg-job-output{ font-size:11px; color:#a6adc8; max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-word; background:#181825; border:1px solid #313244; border-radius:4px; padding:6px; margin-top:5px; }
+  .bg-job-actions { display:flex; gap:5px; flex-wrap:wrap; margin-top:4px; }
+  .bg-job-btn   { padding:2px 9px; border:none; border-radius:5px; cursor:pointer; font-size:11px; font-weight:bold; }
+  .bg-job-btn-cancel { background:#f38ba8; color:#1e1e2e; }
+  .bg-job-btn-delete { background:#45475a; color:#cdd6f4; }
+  .bg-status-badge { display:inline-block; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:bold; color:#1e1e2e; }
+  .bsb-pending  { background:#fab387; }
+  .bsb-running  { background:#89b4fa; }
+  .bsb-done     { background:#a6e3a1; }
+  .bsb-failed   { background:#f38ba8; }
+  .bsb-cancelled,.bsb-cancelling { background:#6c7086; color:#cdd6f4; }
+  .bg-icon-btn  { background:none; border:none; color:#6c7086; cursor:pointer; font-size:14px; padding:2px 5px; border-radius:4px; }
+  .bg-icon-btn:hover { color:#cdd6f4; background:#45475a; }
   #gen-status { display: none; font-size: 13px; color: #cdd6f4; font-family: monospace; }
   .img-preview { position: relative; }
   .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
@@ -889,7 +944,33 @@
   <button id="session-banner-restore" onclick="restoreArchivedSession()">↩ この会話を再開</button>
   <button id="session-banner-back" onclick="newSession()">＋ 新しい会話</button>
 </div>
-<div id="chat"></div>
+<div id="chat-wrapper">
+  <div id="chat"></div>
+  <!-- BG Side Pane (right column, flex) -->
+  <div id="bg-side-pane">
+    <div id="bg-side-resize-handle" title="ドラッグで幅を変更"></div>
+    <div id="bg-pane-header">
+      <span id="bg-pane-title">⚡ バックグラウンド</span>
+      <div id="bg-pane-actions">
+        <button class="bg-icon-btn" onclick="bgSwitchToFloat()" title="フローティングに切り替え">⧉</button>
+        <button class="bg-icon-btn" onclick="bgClosePanel()" title="閉じる">✕</button>
+      </div>
+    </div>
+    <div id="bg-pane-body" class="bg-body"></div>
+  </div>
+</div>
+<!-- BG Floating Panel (fixed position) -->
+<div id="bg-float-pane">
+  <div id="bg-float-header">
+    <span style="font-size:13px;font-weight:bold;color:#a6e3a1;">⚡ バックグラウンド</span>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <button class="bg-icon-btn" onclick="bgSwitchToSide()" title="サイドペインに切り替え">⬛</button>
+      <button class="bg-icon-btn" onclick="bgClosePanel()" title="閉じる">✕</button>
+    </div>
+  </div>
+  <div id="bg-float-body" class="bg-body"></div>
+  <div id="bg-float-resize" title="ドラッグでリサイズ"></div>
+</div>
 <div id="skill-popup" style="display:none"></div>
 <div id="input-area">
   <div id="input-box">
@@ -913,12 +994,14 @@
       <div id="input-right">
         <span id="gen-status"></span>
         <button id="mic-btn" onclick="toggleMic()" title="音声入力（日本語）"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
+        <button id="bg-btn" onclick="bgBtnClick()" title="テキストあり→BGジョブ投入 / テキストなし→BG結果エリア開閉">⚡ BG<span id="bg-badge"></span></button>
         <button id="send" onclick="sendMessage()">送信</button>
         <button id="stop" onclick="stopGeneration()">■ 停止</button>
       </div>
     </div>
   </div>
 </div>
+
 
 <script>
   // ---- marked + highlight.js 設定 ----
@@ -3704,6 +3787,27 @@
       if (!confirmed) return;
     }
 
+    // ---- BG 分類チェック（画像なし・一定以上の長さ・フラグなし時のみ） ----
+    if (!_skipClassify && text.length > 40 && pendingImages.length === 0 && !isMultiAgentActive()) {
+      _skipClassify = false;
+      try {
+        const cr = await fetch('/classify-bg', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: text}),
+          signal: AbortSignal.timeout(5000),
+        });
+        const cd = await cr.json();
+        if (cd.bg) {
+          _bgShowClassifyCard(text, cd.reason);
+          input.value = '';
+          input.style.height = 'auto';
+          return;
+        }
+      } catch(_) { /* 分類失敗時は通常実行 */ }
+    }
+    _skipClassify = false;
+
     input.value = '';
     input.style.height = 'auto';
     abortController = new AbortController();
@@ -6437,6 +6541,387 @@
       btn.textContent = '📄 Wordファイル（DOCX）に変換';
     }
   }
+</script>
+
+<script>
+// -----------------------------------------------------------------------
+// BG Classify prompt (shown in chat when AI suggests BG execution)
+// -----------------------------------------------------------------------
+let _classifyPending = null;  // pending message text
+let _skipClassify = false;    // true = skip classify on next sendMessage() call
+
+function _bgShowClassifyCard(msg, reason) {
+  // Remove any existing card first
+  document.getElementById('bg-classify-card')?.remove();
+  _classifyPending = msg;
+
+  const card = document.createElement('div');
+  card.id = 'bg-classify-card';
+  card.className = 'bg-classify-card';
+  card.innerHTML = `
+    <div class="bg-classify-icon">⚡</div>
+    <div class="bg-classify-text">
+      <b>このタスクは長時間かかる可能性があります</b>
+      ${reason ? `<br><span class="bg-classify-reason">${_bgEsc(reason)}</span>` : ''}
+    </div>
+    <div class="bg-classify-actions">
+      <button class="bg-classify-btn-bg"  onclick="bgAcceptClassify()">⚡ BGで実行</button>
+      <button class="bg-classify-btn-normal" onclick="bgRejectClassify()">→ 通常実行</button>
+    </div>`;
+
+  const chat = document.getElementById('chat');
+  chat.appendChild(card);
+  card.scrollIntoView({behavior: 'smooth', block: 'end'});
+}
+
+async function bgAcceptClassify() {
+  const msg = _classifyPending;
+  _classifyPending = null;
+  document.getElementById('bg-classify-card')?.remove();
+  if (msg) await bgSubmitJob(msg);
+}
+
+function bgRejectClassify() {
+  const msg = _classifyPending;
+  _classifyPending = null;
+  document.getElementById('bg-classify-card')?.remove();
+  if (!msg) return;
+  // Restore message to input and send normally (bypass classify)
+  const inputEl = document.getElementById('input');
+  if (inputEl) inputEl.value = msg;
+  _skipClassify = true;
+  sendMessage();
+}
+
+// -----------------------------------------------------------------------
+// Background Jobs — side pane + floating panel
+// -----------------------------------------------------------------------
+const _bgJobs = {};   // job_id → { status, es }
+let _bgMode = localStorage.getItem('bgMode') || 'side';  // 'side' | 'float'
+let _bgOpen = false;
+
+// ---- BG button click ----
+async function bgBtnClick() {
+  const input = document.getElementById('input');
+  const msg = (input ? input.value : '').trim();
+  if (msg) await bgSubmitJob(msg);
+  else _bgOpen ? bgClosePanel() : bgOpenPanel();
+}
+
+// ---- Submit a job ----
+async function bgSubmitJob(msg) {
+  try {
+    const res = await fetch('/async-agent/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, max_turns: 30 }),
+    });
+    const data = await res.json();
+    if (!data.job_id) { alert('投入失敗: ' + JSON.stringify(data)); return; }
+    const input = document.getElementById('input');
+    if (input) input.value = '';
+    bgOpenPanel();
+    _bgAddCard(data.job_id, msg);
+    _bgStartStream(data.job_id);
+    _bgUpdateBadge();
+  } catch (e) { alert('投入エラー: ' + e); }
+}
+
+// ---- Panel open / close / switch ----
+function bgOpenPanel() {
+  _bgOpen = true;
+  _applyMode(_bgMode);
+  _bgRestoreFromServer();
+}
+function bgClosePanel() {
+  _bgOpen = false;
+  document.getElementById('bg-side-pane').classList.remove('open');
+  document.getElementById('bg-float-pane').classList.remove('open');
+}
+function bgSwitchToFloat() {
+  _bgMode = 'float';
+  localStorage.setItem('bgMode', 'float');
+  if (_bgOpen) _applyMode('float');
+  _syncBodies();
+}
+function bgSwitchToSide() {
+  _bgMode = 'side';
+  localStorage.setItem('bgMode', 'side');
+  if (_bgOpen) _applyMode('side');
+  _syncBodies();
+}
+function _applyMode(mode) {
+  const side  = document.getElementById('bg-side-pane');
+  const float = document.getElementById('bg-float-pane');
+  if (mode === 'side') {
+    side.classList.add('open');
+    float.classList.remove('open');
+  } else {
+    float.classList.add('open');
+    side.classList.remove('open');
+  }
+}
+
+// ---- Keep both bodies in sync (cards are in pane-body; float-body mirrors it) ----
+function _bgActiveBody() {
+  return document.getElementById(_bgMode === 'side' ? 'bg-pane-body' : 'bg-float-body');
+}
+function _syncBodies() {
+  // Move all cards to the currently active body
+  const sideBody  = document.getElementById('bg-pane-body');
+  const floatBody = document.getElementById('bg-float-body');
+  const src  = _bgMode === 'side'  ? floatBody : sideBody;
+  const dest = _bgMode === 'side'  ? sideBody  : floatBody;
+  [...src.querySelectorAll('.bg-job-card')].forEach(c => dest.prepend(c));
+}
+
+// ---- Add a job card ----
+function _bgAddCard(jobId, msgPreview) {
+  if (document.getElementById(`bg-card-${jobId}`)) return;
+  if (!_bgJobs[jobId]) _bgJobs[jobId] = { status: 'pending', es: null };
+  const body = _bgActiveBody() || document.getElementById('bg-pane-body');
+  const card = document.createElement('div');
+  card.className = 'bg-job-card status-pending';
+  card.id = `bg-card-${jobId}`;
+  card.innerHTML = `
+    <div class="bg-job-meta">
+      <span class="bg-status-badge bsb-pending" id="bg-badge-${jobId}">pending</span>
+      <span style="color:#6c7086;font-size:10px;margin-left:6px;">${jobId}</span>
+    </div>
+    <div class="bg-job-msg" title="${_bgEsc(msgPreview)}">${_bgEsc(msgPreview)}</div>
+    <div class="bg-job-output" id="bg-out-${jobId}"><span style="color:#6c7086">実行待ち…</span></div>
+    <div class="bg-job-actions" id="bg-act-${jobId}">
+      <button class="bg-job-btn bg-job-btn-cancel" onclick="bgCancelJob('${jobId}')">停止</button>
+    </div>`;
+  body.prepend(card);
+}
+
+// ---- Update card status ----
+function _bgSetStatus(jobId, status) {
+  if (_bgJobs[jobId]) _bgJobs[jobId].status = status;
+  const card  = document.getElementById(`bg-card-${jobId}`);
+  const badge = document.getElementById(`bg-badge-${jobId}`);
+  const acts  = document.getElementById(`bg-act-${jobId}`);
+  if (!card) return;
+  card.className = `bg-job-card status-${status}`;
+  if (badge) { badge.className = `bg-status-badge bsb-${status}`; badge.textContent = status; }
+  if (acts && !['pending','running','cancelling'].includes(status)) {
+    acts.innerHTML = `<button class="bg-job-btn bg-job-btn-delete" onclick="bgDeleteJob('${jobId}')">削除</button>`;
+  }
+}
+
+// ---- SSE streaming ----
+function _bgStartStream(jobId) {
+  if (_bgJobs[jobId] && _bgJobs[jobId].es) return;
+  const outEl = document.getElementById(`bg-out-${jobId}`);
+  if (outEl) outEl.innerHTML = '';
+  const es = new EventSource(`/async-agent/jobs/${jobId}/stream`);
+  if (_bgJobs[jobId]) _bgJobs[jobId].es = es;
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'text') {
+        if (outEl) {
+          if (outEl.querySelector('span[style]')) outEl.innerHTML = '';
+          outEl.textContent += d.content;
+          outEl.scrollTop = outEl.scrollHeight;
+        }
+        _bgSetStatus(jobId, 'running');
+      } else if (d.type === 'tool_start') {
+        const info = JSON.parse(d.content || '{}');
+        if (outEl) {
+          const line = document.createElement('div');
+          line.style.cssText = 'color:#89b4fa;font-size:10px;opacity:0.7;';
+          line.textContent = `🔧 ${info.name}`;
+          outEl.appendChild(line);
+          outEl.scrollTop = outEl.scrollHeight;
+        }
+      } else if (d.type === 'job_end') {
+        _bgSetStatus(jobId, d.status || 'done');
+        es.close();
+        if (_bgJobs[jobId]) _bgJobs[jobId].es = null;
+        _bgUpdateBadge();
+      } else if (d.type === 'error') {
+        if (outEl) outEl.textContent += `\n[エラー] ${d.content}`;
+        _bgSetStatus(jobId, 'failed');
+        es.close();
+        if (_bgJobs[jobId]) _bgJobs[jobId].es = null;
+        _bgUpdateBadge();
+      }
+    } catch (_) {}
+  };
+  es.onerror = () => {
+    es.close();
+    if (_bgJobs[jobId]) _bgJobs[jobId].es = null;
+    if (_bgJobs[jobId] && ['pending','running'].includes(_bgJobs[jobId].status)) {
+      setTimeout(() => _bgStartStream(jobId), 3000);
+    }
+  };
+}
+
+// ---- Cancel / Delete ----
+async function bgCancelJob(jobId) {
+  if (!confirm(`ジョブ ${jobId} を停止しますか？`)) return;
+  try {
+    await fetch(`/async-agent/jobs/${jobId}`, { method: 'DELETE' });
+    _bgSetStatus(jobId, 'cancelling');
+    _bgUpdateBadge();
+  } catch (e) { alert('停止失敗: ' + e); }
+}
+async function bgDeleteJob(jobId) {
+  if (!confirm(`ジョブ ${jobId} を削除しますか？`)) return;
+  try {
+    await fetch(`/async-agent/jobs/${jobId}/delete`, { method: 'DELETE' });
+    const card = document.getElementById(`bg-card-${jobId}`);
+    if (card) card.remove();
+    if (_bgJobs[jobId] && _bgJobs[jobId].es) _bgJobs[jobId].es.close();
+    delete _bgJobs[jobId];
+    _bgUpdateBadge();
+  } catch (e) { alert('削除失敗: ' + e); }
+}
+
+// ---- Badge ----
+function _bgUpdateBadge() {
+  const n = Object.values(_bgJobs).filter(j => ['pending','running','cancelling'].includes(j.status)).length;
+  const b = document.getElementById('bg-badge');
+  if (!b) return;
+  if (n > 0) { b.textContent = n; b.style.display = 'inline'; }
+  else { b.style.display = 'none'; }
+}
+
+// ---- Restore from server ----
+async function _bgRestoreFromServer() {
+  try {
+    const res = await fetch('/async-agent/jobs');
+    const data = await res.json();
+    for (const j of (data.jobs || [])) {
+      if (document.getElementById(`bg-card-${j.job_id}`)) continue;
+      _bgJobs[j.job_id] = { status: j.status, es: null };
+      _bgAddCard(j.job_id, j.message_preview || '');
+      _bgSetStatus(j.job_id, j.status);
+      if (['pending','running'].includes(j.status)) {
+        _bgStartStream(j.job_id);
+      } else {
+        const outEl = document.getElementById(`bg-out-${j.job_id}`);
+        if (outEl) {
+          fetch(`/async-agent/jobs/${j.job_id}`)
+            .then(r => r.json())
+            .then(d => {
+              const text = (d.chunks || []).filter(c => c.type === 'text').map(c => c.content).join('');
+              outEl.textContent = text || '（出力なし）';
+            }).catch(() => {});
+        }
+      }
+    }
+    _bgUpdateBadge();
+  } catch (e) { console.error('[bg] restore error', e); }
+}
+
+// ---- 5s badge polling ----
+setInterval(async () => {
+  try {
+    const res = await fetch('/async-agent/jobs');
+    const data = await res.json();
+    for (const j of (data.jobs || []).filter(j => ['pending','running'].includes(j.status))) {
+      if (!_bgJobs[j.job_id]) _bgJobs[j.job_id] = { status: j.status, es: null };
+    }
+    _bgUpdateBadge();
+  } catch (_) {}
+}, 5000);
+
+function _bgEsc(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// -----------------------------------------------------------------------
+// BG panel drag / resize (same pattern as inline chat pane)
+// -----------------------------------------------------------------------
+let _bgFloatDrag   = null;
+let _bgFloatResize = null;
+let _bgSideResize  = null;
+
+// Restore saved float position/size
+(function() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('bgFloatPos') || 'null');
+    if (saved) {
+      const p = document.getElementById('bg-float-pane');
+      if (saved.left  != null) p.style.left   = saved.left   + 'px';
+      if (saved.top   != null) p.style.top    = saved.top    + 'px';
+      if (saved.width != null) p.style.width  = saved.width  + 'px';
+      if (saved.height!= null) p.style.height = saved.height + 'px';
+      p.style.right = 'auto';
+    }
+  } catch(_) {}
+  try {
+    const w = parseInt(localStorage.getItem('bgSideWidth'));
+    if (w) document.getElementById('bg-side-pane').style.width = w + 'px';
+  } catch(_) {}
+})();
+
+// Float header → drag
+document.getElementById('bg-float-header').addEventListener('mousedown', e => {
+  if (e.target.closest('button')) return;
+  const p = document.getElementById('bg-float-pane');
+  const r = p.getBoundingClientRect();
+  // Switch from right-anchored to left-anchored on first drag
+  if (!p.style.left) { p.style.left = r.left + 'px'; p.style.right = 'auto'; }
+  _bgFloatDrag = { startX: e.clientX, startY: e.clientY,
+                   startLeft: r.left, startTop: r.top };
+  e.preventDefault();
+});
+
+// Float corner → resize
+document.getElementById('bg-float-resize').addEventListener('mousedown', e => {
+  const p = document.getElementById('bg-float-pane');
+  _bgFloatResize = { startX: e.clientX, startY: e.clientY,
+                     startW: p.offsetWidth, startH: p.offsetHeight };
+  e.preventDefault(); e.stopPropagation();
+});
+
+// Side handle → width resize
+document.getElementById('bg-side-resize-handle').addEventListener('mousedown', e => {
+  const p = document.getElementById('bg-side-pane');
+  _bgSideResize = { startX: e.clientX, startW: p.offsetWidth };
+  document.getElementById('bg-side-resize-handle').classList.add('active');
+  e.preventDefault();
+});
+
+// Shared mousemove
+document.addEventListener('mousemove', e => {
+  if (_bgFloatDrag) {
+    const p = document.getElementById('bg-float-pane');
+    p.style.left = Math.max(0, _bgFloatDrag.startLeft + e.clientX - _bgFloatDrag.startX) + 'px';
+    p.style.top  = Math.max(0, _bgFloatDrag.startTop  + e.clientY - _bgFloatDrag.startY) + 'px';
+  }
+  if (_bgFloatResize) {
+    const p = document.getElementById('bg-float-pane');
+    p.style.width  = Math.max(260, _bgFloatResize.startW + e.clientX - _bgFloatResize.startX) + 'px';
+    p.style.height = Math.max(200, _bgFloatResize.startH + e.clientY - _bgFloatResize.startY) + 'px';
+  }
+  if (_bgSideResize) {
+    const p = document.getElementById('bg-side-pane');
+    const newW = Math.max(220, Math.min(700, _bgSideResize.startW - (e.clientX - _bgSideResize.startX)));
+    p.style.width = newW + 'px';
+  }
+});
+
+// Shared mouseup → save to localStorage
+document.addEventListener('mouseup', () => {
+  if (_bgFloatDrag || _bgFloatResize) {
+    const p = document.getElementById('bg-float-pane');
+    localStorage.setItem('bgFloatPos', JSON.stringify({
+      left: parseInt(p.style.left), top: parseInt(p.style.top),
+      width: p.offsetWidth, height: p.offsetHeight,
+    }));
+    _bgFloatDrag = _bgFloatResize = null;
+  }
+  if (_bgSideResize) {
+    localStorage.setItem('bgSideWidth', document.getElementById('bg-side-pane').offsetWidth);
+    document.getElementById('bg-side-resize-handle').classList.remove('active');
+    _bgSideResize = null;
+  }
+});
 </script>
 </body>
 </html>

@@ -5,6 +5,48 @@
 
 ---
 
+## 2026-06-01（セッション23）v1.6.0
+
+### 非同期バックグラウンドエージェント実装（feature/async-agent）
+
+#### アーキテクチャ
+
+- **`tools/async_job_db.py`**: SQLite（WAL モード）によるジョブ永続化
+  - `async_jobs` / `async_chunks` テーブル
+  - `purge_old_completed(keep=20)`: 完了ジョブを20件保持して古いものを自動削除
+- **`agent_core.py`**: スタンドアロンエージェントループ（server.py に非依存）
+  - TOOL_REGISTRY・TOOLS・LLMクライアント・auto_context を独自実装
+  - `run_agent(job_id, message, provider_config, on_chunk, max_turns)` で呼び出し
+- **`async_worker.py`**: 別プロセスのワーカー
+  - SQLite から pending ジョブをポーリング（2秒間隔）
+  - `asyncio.create_task()` で最大 `ASYNC_MAX_JOBS` 件並走
+  - server.py の lifespan で自動起動・停止
+- **`config.py`**: `ASYNC_MAX_JOBS`（デフォルト5）追加
+- **`server.py`**: 6つのエンドポイント追加
+  - `POST /async-agent/jobs` / `GET /async-agent/jobs` / `GET /async-agent/jobs/{id}`
+  - `GET /async-agent/jobs/{id}/stream`（SSE、再接続対応）
+  - `DELETE /async-agent/jobs/{id}`（キャンセル）/ `DELETE /async-agent/jobs/{id}/delete`（削除）
+  - `GET /async-agent/worker/status` / `POST /classify-bg`（LLM タスク分類）
+
+#### UI
+
+- **⚡ BG ボタン**: テキストあり→BG投入、テキストなし→パネル開閉
+- **右サイドペイン + フローティングパネル** 切り替え可能（localStorage 保存）
+  - フローティング: ヘッダードラッグで自由移動・右下コーナーでリサイズ
+  - サイドペイン: 左端ハンドルで幅リサイズ
+- **BG 分類カード**: 送信時に LLM が「長時間タスク」と判断したらチャットにカードを表示
+  - [⚡ BGで実行] / [→ 通常実行] をユーザーが選択
+  - マルチAI モード ON 時はスキップ（multi-agent と競合しないよう配慮）
+- **バッジ**: 実行中ジョブ数を⚡BGボタンに表示（5秒ポーリング）
+- **復元**: ページリロード後に⚡BGクリックで過去のジョブを復元表示
+
+#### 未解決・次回テスト事項
+
+- 既存機能（通常チャット・マルチAI・Obsidian inbox・MCP等）との干渉確認が未完了
+- `feature/async-agent` ブランチのみ。**main / for_windows へのマージは総合テスト後**
+
+---
+
 ## 2026-06-01（セッション22）
 
 ### Obsidian プロアクティブ再接続テスト（動作確認済み）

@@ -5,6 +5,58 @@
 
 ---
 
+## 2026-06-01（セッション27）v1.6.3
+
+### BG完了時チャット履歴書き込み機能
+
+#### 機能概要
+
+BG（バックグラウンド）エージェントが完了したとき、結果をチャット履歴（localStorage）に書き込み、チャット画面に折りたたみカードとして即時表示する。
+
+#### 設計思想
+
+BG は HTTP SSE 接続の寿命制約を回避するための技術的手段であり、ユーザー体験としては「同じチャットの流れ」として扱う。BG 結果は `bg_user`（投げたプロンプト）+ `bg_result`（実行結果）として `history` 配列に追加し、通常の会話ターンと並列に管理する。
+
+#### 実装詳細（index.html）
+
+- **`_bgSaveToChat(jobId, status)`**: BG 完了時に `history` へ `bg_user`/`bg_result` エントリ追加 → チャットにカード描画 → `saveHistory()` 呼び出し
+- **`_bgRenderChatCard(prompt, resultText, status, timestamp)`**: 折りたたみカード（`<details>`）を `#chat` に追加。`_bgLinkifyImages` で画像リンクも付与
+- **`loadHistory()` 修正**:
+  - `bg_user` + `bg_result` ペアを `_pendingBgCards` に積む（スクリプトタグ越えの timing 問題を回避）
+  - 内側 while ループに `&& history[j]?.role !== 'bg_user'` を追加（素通りバグ修正）
+- **`_renderSessionContent()` 修正**: セッション参照時も BG カードを描画。内側ループも同様に修正
+- **`_applyChatHighlight()` 修正**: キーワードを含む BG カード `<details>` を自動展開
+- **API 送信フィルタ**: `trimmedHistory` から `bg_user`/`bg_result` を除外（LLM に送らない）
+- **BG スクリプトブロック末尾**: `window._pendingBgCards` を処理して BG カードを描画
+- **`bgSubmitJob()`**: `_bgJobs[id].prompt = msg` でプロンプトを保存
+- **`_bgRestoreFromServer()`**: `prompt: j.message_preview` を `_bgJobs` に保持
+
+#### 実装詳細（server.py）
+
+- **`_extract_snippet()`**: `bg_user`（⚡BG投入）/ `bg_result`（⚡BG結果）をスニペット対象に追加 → セッション検索で BG 内容がヒット・ラベル付きスニペット表示
+- **`_summarize_history()`**: `bg_user` → `BGタスク: ...`、`bg_result` → `BG結果: ...[:300]` として要約に含める（圧縮時に消失するバグを修正）
+- **`_agent_stream_inner()`**: `trimmed` から `bg_user`/`bg_result` を除外（LLM API 送信前フィルタ）
+
+#### 実装詳細（docs/design.md）
+
+- `workspace/` はテンポラリ領域であること、チャット履歴圧縮後の挙動、「ファイルが消えた？」への対処を追記
+
+#### 動作確認済み
+
+- BG 完了 → チャットへ即時カード表示 ✅
+- ページリロード後の BG カード復元 ✅
+- セッション検索でヒット・ハイライト ✅
+- セッション参照時の BG カード描画・自動展開 ✅
+- 画像生成 BG ジョブの結果カード・画像リンク ✅
+- 圧縮時の BG 内容保全（要約に含まれる）✅
+
+#### 既知の制限
+
+- 圧縮後は BG カード（画像リンク含む）が消える。ファイル自体は `workspace/` に残る
+- localStorage 5MB 制限：長い BG 結果が多数蓄積すると圧迫の可能性
+
+---
+
 ## 2026-06-01（セッション23）v1.6.0
 
 ### 非同期バックグラウンドエージェント実装（feature/async-agent）

@@ -58,7 +58,8 @@ from tools.host_info_tools import gather_host_info
 from tools.background_tools import run_background, check_background, kill_background
 from tools.responses_tools import call_responses_api
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
-from tools.codebase_rag_tools import codebase_index, codebase_search, codebase_clear
+# codebase_rag_tools は肥大化問題が未解決のため TOOL_REGISTRY から除外中（機能は無効）
+# 詳細: docs/changelog.md「コードベースRAG 一時無効化」参照
 from tools.image_tools import generate_image, edit_image, watermark_image, apply_auto_watermark, IMAGE_MODELS_BY_PROVIDER
 from tools.mcp_client import MCPClientManager
 from tools.notify_tools import send_email_notification
@@ -348,9 +349,7 @@ TOOL_REGISTRY = {
     "rag_search": rag_search,
     "rag_update_status": rag_update_status,
     "rag_list": rag_list,
-    "codebase_index": codebase_index,
-    "codebase_search": codebase_search,
-    "codebase_clear": codebase_clear,
+    # codebase_index / codebase_search / codebase_clear は肥大化問題が未解決のため無効
     "generate_image": generate_image,
     "edit_image": edit_image,
     "watermark_image": watermark_image,
@@ -1083,60 +1082,7 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "codebase_index",
-            "description": (
-                "workspaceのコードファイルをベクトルインデックスに登録します。"
-                "「このプロジェクトを読み込んで」「コードを把握して」と言われたときに使います。"
-                "変更があったファイルだけ更新する増分インデックスです。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "対象ディレクトリ（workspace相対パス、省略時はworkspace全体）"},
-                    "extensions": {"type": "array", "items": {"type": "string"}, "description": "対象拡張子リスト（省略時はデフォルト）。例: [\".py\", \".js\"]"},
-                    "force": {"type": "boolean", "description": "True にすると変更なしのファイルも再インデックス（デフォルト: False）"},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "codebase_search",
-            "description": (
-                "インデックス済みのコードベースから関連するコードを意味検索します。"
-                "「〇〇の処理はどこに書いてある？」「〇〇を実装している関数を探して」などに使います。"
-                "codebase_index でインデックスしてから使ってください。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "検索クエリ（自然言語またはコードスニペット）"},
-                    "n_results": {"type": "integer", "description": "取得件数（デフォルト5）", "default": 5},
-                    "language": {"type": "string", "description": "言語フィルタ（省略時は全言語）。例: \"py\", \"js\""},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "codebase_clear",
-            "description": "コードベースインデックスを削除します。path を指定すると該当パス配下のみ削除。省略時は全削除。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "削除対象パス（省略時は全削除）"},
-                },
-                "required": [],
-            },
-        },
-    },
+    # codebase_index / codebase_search / codebase_clear のスキーマは肥大化問題が未解決のため除外
     {
         "type": "function",
         "function": {
@@ -1370,8 +1316,6 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
         timeout = int(arguments["timeout_seconds"]) + 10
     elif name == "run_command" and "timeout_minutes" in arguments:
         timeout = int(arguments["timeout_minutes"] * 60) + 10
-    elif name == "codebase_index":
-        timeout = 300  # 埋め込みモデル初回ロード + 大規模インデックスを考慮
     else:
         timeout = 20
     try:

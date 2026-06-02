@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-02（セッション28）v1.6.4
+
+### cancelling→cancelled 競合バグ修正
+
+#### 問題
+
+BGジョブが2秒ポーリング間隔内に自然完了した場合、キャンセルリクエストが間に合わずステータスが `done` になってしまう競合状態があった。
+
+#### 修正（async_worker.py）
+
+`run_agent` 正常完了直後にDBのステータスを確認し、`cancelling` であれば `done` ではなく `cancelled` を書き込むよう変更。
+
+```python
+row = await asyncio.to_thread(get_job, job_id)
+final_status = "cancelled" if row and row.get("status") == "cancelling" else "done"
+```
+
+#### 動作確認済み
+
+- running中に停止 → `cancelled` バッジ表示 ✅
+- DELETE API 正常呼び出し確認 ✅
+- DB直接確認で `status: cancelled` 確認 ✅
+
+---
+
 ## 2026-06-01（セッション27）v1.6.3
 
 ### BG完了時チャット履歴書き込み機能

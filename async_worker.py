@@ -105,12 +105,15 @@ async def _run_job(job: dict) -> None:
             max_turns=job.get("max_turns") or 30,
         )
 
+        row = await asyncio.to_thread(get_job, job_id)
+        final_status = "cancelled" if row and row.get("status") == "cancelling" else "done"
         await asyncio.to_thread(
             update_job, job_id,
-            status="done",
+            status=final_status,
             finished_at=datetime.utcnow().isoformat(),
         )
-        await asyncio.to_thread(purge_old_completed, 20)
+        if final_status == "done":
+            await asyncio.to_thread(purge_old_completed, 20)
 
     except asyncio.CancelledError:
         await asyncio.to_thread(

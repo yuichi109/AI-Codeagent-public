@@ -339,11 +339,23 @@ def main():
         menu=menu,
     )
 
+    def _wait_for_server(timeout: int = 30, interval: float = 0.5) -> bool:
+        import urllib.request
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(URL, timeout=2)
+                return True
+            except Exception:
+                time.sleep(interval)
+        return False
+
     def _startup():
         _start_server()
         if _is_running():
             icon.icon = _make_icon("running")
             icon.title = f"AI Code Agent — {URL}"
+            _wait_for_server()
             webbrowser.open(URL)
 
     threading.Thread(target=_startup, daemon=True).start()

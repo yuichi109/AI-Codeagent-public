@@ -11,9 +11,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from config import ALLOWED_WORK_DIR
+_DATA_DIR = Path(__file__).parent.parent / "data"
+_DATA_DIR.mkdir(exist_ok=True)
 
-DB_PATH = ALLOWED_WORK_DIR / "jobs.db"
+DB_PATH = _DATA_DIR / "jobs.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS async_jobs (

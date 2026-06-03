@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.4"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -202,6 +202,9 @@ WATERMARK_POSITION: str   = os.getenv("WATERMARK_POSITION", "bottomright")
 WATERMARK_COLOR: str      = os.getenv("WATERMARK_COLOR", "#ffffff")
 WATERMARK_OPACITY: float  = float(os.getenv("WATERMARK_OPACITY", "0.6"))
 WATERMARK_FONT_SIZE: int  = int(os.getenv("WATERMARK_FONT_SIZE", "0"))  # 0 = auto (短辺の4%)
+
+# ---- 非同期エージェントジョブ設定 ----
+ASYNC_MAX_JOBS: int = int(os.getenv("ASYNC_MAX_JOBS", "5"))
 
 # ---- マルチエージェント設定 ----
 # モデル名は現在アクティブなプロバイダーで利用できるものを指定

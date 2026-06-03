@@ -5,6 +5,239 @@
 
 ---
 
+## 2026-06-02（セッション28）v1.6.4
+
+### cancelling→cancelled 競合バグ修正
+
+#### 問題
+
+BGジョブが2秒ポーリング間隔内に自然完了した場合、キャンセルリクエストが間に合わずステータスが `done` になってしまう競合状態があった。
+
+#### 修正（async_worker.py）
+
+`run_agent` 正常完了直後にDBのステータスを確認し、`cancelling` であれば `done` ではなく `cancelled` を書き込むよう変更。
+
+```python
+row = await asyncio.to_thread(get_job, job_id)
+final_status = "cancelled" if row and row.get("status") == "cancelling" else "done"
+```
+
+#### 動作確認済み
+
+- running中に停止 → `cancelled` バッジ表示 ✅
+- DELETE API 正常呼び出し確認 ✅
+- DB直接確認で `status: cancelled` 確認 ✅
+
+---
+
+## 2026-06-01（セッション27）v1.6.3
+
+### BG完了時チャット履歴書き込み機能
+
+#### 機能概要
+
+BG（バックグラウンド）エージェントが完了したとき、結果をチャット履歴（localStorage）に書き込み、チャット画面に折りたたみカードとして即時表示する。
+
+#### 設計思想
+
+BG は HTTP SSE 接続の寿命制約を回避するための技術的手段であり、ユーザー体験としては「同じチャットの流れ」として扱う。BG 結果は `bg_user`（投げたプロンプト）+ `bg_result`（実行結果）として `history` 配列に追加し、通常の会話ターンと並列に管理する。
+
+#### 実装詳細（index.html）
+
+- **`_bgSaveToChat(jobId, status)`**: BG 完了時に `history` へ `bg_user`/`bg_result` エントリ追加 → チャットにカード描画 → `saveHistory()` 呼び出し
+- **`_bgRenderChatCard(prompt, resultText, status, timestamp)`**: 折りたたみカード（`<details>`）を `#chat` に追加。`_bgLinkifyImages` で画像リンクも付与
+- **`loadHistory()` 修正**:
+  - `bg_user` + `bg_result` ペアを `_pendingBgCards` に積む（スクリプトタグ越えの timing 問題を回避）
+  - 内側 while ループに `&& history[j]?.role !== 'bg_user'` を追加（素通りバグ修正）
+- **`_renderSessionContent()` 修正**: セッション参照時も BG カードを描画。内側ループも同様に修正
+- **`_applyChatHighlight()` 修正**: キーワードを含む BG カード `<details>` を自動展開
+- **API 送信フィルタ**: `trimmedHistory` から `bg_user`/`bg_result` を除外（LLM に送らない）
+- **BG スクリプトブロック末尾**: `window._pendingBgCards` を処理して BG カードを描画
+- **`bgSubmitJob()`**: `_bgJobs[id].prompt = msg` でプロンプトを保存
+- **`_bgRestoreFromServer()`**: `prompt: j.message_preview` を `_bgJobs` に保持
+
+#### 実装詳細（server.py）
+
+- **`_extract_snippet()`**: `bg_user`（⚡BG投入）/ `bg_result`（⚡BG結果）をスニペット対象に追加 → セッション検索で BG 内容がヒット・ラベル付きスニペット表示
+- **`_summarize_history()`**: `bg_user` → `BGタスク: ...`、`bg_result` → `BG結果: ...[:300]` として要約に含める（圧縮時に消失するバグを修正）
+- **`_agent_stream_inner()`**: `trimmed` から `bg_user`/`bg_result` を除外（LLM API 送信前フィルタ）
+
+#### 実装詳細（docs/design.md）
+
+- `workspace/` はテンポラリ領域であること、チャット履歴圧縮後の挙動、「ファイルが消えた？」への対処を追記
+
+#### 動作確認済み
+
+- BG 完了 → チャットへ即時カード表示 ✅
+- ページリロード後の BG カード復元 ✅
+- セッション検索でヒット・ハイライト ✅
+- セッション参照時の BG カード描画・自動展開 ✅
+- 画像生成 BG ジョブの結果カード・画像リンク ✅
+- 圧縮時の BG 内容保全（要約に含まれる）✅
+
+#### 既知の制限
+
+- 圧縮後は BG カード（画像リンク含む）が消える。ファイル自体は `workspace/` に残る
+- localStorage 5MB 制限：長い BG 結果が多数蓄積すると圧迫の可能性
+
+---
+
+## 2026-06-01（セッション23）v1.6.0
+
+### 非同期バックグラウンドエージェント実装（feature/async-agent）
+
+#### アーキテクチャ
+
+- **`tools/async_job_db.py`**: SQLite（WAL モード）によるジョブ永続化
+  - `async_jobs` / `async_chunks` テーブル
+  - `purge_old_completed(keep=20)`: 完了ジョブを20件保持して古いものを自動削除
+- **`agent_core.py`**: スタンドアロンエージェントループ（server.py に非依存）
+  - TOOL_REGISTRY・TOOLS・LLMクライアント・auto_context を独自実装
+  - `run_agent(job_id, message, provider_config, on_chunk, max_turns)` で呼び出し
+- **`async_worker.py`**: 別プロセスのワーカー
+  - SQLite から pending ジョブをポーリング（2秒間隔）
+  - `asyncio.create_task()` で最大 `ASYNC_MAX_JOBS` 件並走
+  - server.py の lifespan で自動起動・停止
+- **`config.py`**: `ASYNC_MAX_JOBS`（デフォルト5）追加
+- **`server.py`**: 6つのエンドポイント追加
+  - `POST /async-agent/jobs` / `GET /async-agent/jobs` / `GET /async-agent/jobs/{id}`
+  - `GET /async-agent/jobs/{id}/stream`（SSE、再接続対応）
+  - `DELETE /async-agent/jobs/{id}`（キャンセル）/ `DELETE /async-agent/jobs/{id}/delete`（削除）
+  - `GET /async-agent/worker/status` / `POST /classify-bg`（LLM タスク分類）
+
+#### UI
+
+- **⚡ BG ボタン**: テキストあり→BG投入、テキストなし→パネル開閉
+- **右サイドペイン + フローティングパネル** 切り替え可能（localStorage 保存）
+  - フローティング: ヘッダードラッグで自由移動・右下コーナーでリサイズ
+  - サイドペイン: 左端ハンドルで幅リサイズ
+- **BG 分類カード**: 送信時に LLM が「長時間タスク」と判断したらチャットにカードを表示
+  - [⚡ BGで実行] / [→ 通常実行] をユーザーが選択
+  - マルチAI モード ON 時はスキップ（multi-agent と競合しないよう配慮）
+- **バッジ**: 実行中ジョブ数を⚡BGボタンに表示（5秒ポーリング）
+- **復元**: ページリロード後に⚡BGクリックで過去のジョブを復元表示
+
+#### 未解決・次回テスト事項
+
+- 既存機能（通常チャット・マルチAI・Obsidian inbox・MCP等）との干渉確認が未完了
+- `feature/async-agent` ブランチのみ。**main / for_windows へのマージは総合テスト後**
+
+---
+
+## 2026-06-01（セッション24）v1.6.0 — BGエージェント総合テスト・バグ修正
+
+### テスト結果
+
+| # | テスト | 結果 |
+|---|---|---|
+| 1 | 通常チャット（短い質問）でBGカードが出ない | ✅ PASS |
+| 2 | 長いタスクでBGカードが出る | ✅ PASS |
+| 3 | マルチAI ONでBGカードが出ない | ✅ PASS |
+| 4 | ⚡BG強制投入→サイドペインにリアルタイム表示 | ✅ PASS |
+| 5 | ページリロード後の復元 | ✅ PASS |
+| 6 | Obsidian inbox の通常動作 | **未テスト** |
+| 7 | MCP（Playwright・Obsidian）の通常動作 | **未テスト** |
+| 8 | 画像生成の通常動作 | ✅ PASS |
+| 9 | 停止ボタンで cancelling → cancelled | ⚠️ 短命ジョブは競合状態あり（2秒ポーリング間隔の限界） |
+
+### 修正したバグ
+
+#### `server.py` — classify-bg プロンプト改善
+- 画像生成・画像編集を必ず `bg=true` にする文言を追記（LLMが「単発依頼」と誤判定するため）
+
+#### `index.html` — classify-bg 文字数閾値
+- `text.length > 40` → `text.length > 15` に変更
+- 理由：「夕焼けの富士山の画像を生成してください」（18文字）が40文字未満でスキップされていた
+
+#### `agent_core.py` — base64トークン肥大化防止（**重要**）
+- `generate_image` ツールは結果に `image_base64`（数MBのbase64文字列）を含む
+- BGモードでこれがメッセージ履歴に蓄積 → 1,541,862トークンでAPIエラー
+- ツール結果から `image_base64` キーを除去してから messages に追加するよう修正
+
+#### `agent_core.py` — LLMエラー時のジョブステータス
+- LLM API エラー（context_length_exceeded 等）発生時、`return` で正常終了していたため `done` になっていた
+- `raise` に変更 → `async_worker.py` が `except Exception` でキャッチして `failed` に設定
+
+#### `index.html` — BGパネル表示順バグ
+- **原因**: `_bgRestoreFromServer` が `ORDER BY created_at DESC`（新→旧）の配列を `prepend`（先頭追加）でループ → 最終的に古いものが先頭に
+- **修正**: `.slice().reverse()` で旧→新の順にしてから `prepend` → 最新が先頭に
+
+#### `index.html` — 新規投入ジョブが先頭に来ない問題
+- **原因**: `bgSubmitJob` が `bgOpenPanel()` → 非同期 `_bgRestoreFromServer()` → `_bgAddCard(new)` の順で呼ぶと、restoreが後から完了して旧ジョブを新ジョブの上に積む
+- **修正**: `bgOpenPanel` を分解して `await _bgRestoreFromServer()` 後に `_bgAddCard` を呼ぶ
+
+#### `index.html` — BGパネル画像リンク
+- `job_end` 時（リアルタイム）・チャンク復元時（リロード後）に `_bgLinkifyImages` を呼ぶ
+- `🖼 AI_Output_Images/generated_*.png` のクリッカブルリンクをパネルに追加
+- `/workspace/image?path=` 経由でブラウザから直接開ける
+
+### 残課題（次回セッション）
+
+- テスト6（Obsidian inbox）・テスト7（MCP）は未実施
+
+---
+
+## 2026-06-01（セッション25）v1.6.1 — 精密テスト・バグ修正・UI改善
+
+### 精密テストで発見・修正したバグ
+
+#### `agent_core.py` — `_execute_tool_async` タイムアウト不足（致命的）
+
+BGモード専用コードに以下のバグがあった（通常チャットは影響なし）：
+
+| ツール | 内部タイムアウト | 修正前（外側） | 修正後（外側） |
+|---|---|---|---|
+| `render_manim` | 120秒 | 20秒 → 必ず失敗 | 130秒 |
+| `run_ansible_playbook` | 300秒 | 20秒 → 必ず失敗 | 310秒 |
+| `winrm_command` | 30秒 | 20秒 | `timeout_seconds + 10` |
+| `gather_host_info` | 60秒 | 20秒 | `timeout_seconds + 10` |
+| `web_research`（通常） | 〜60秒 | 60秒 | 120秒（余裕を持たせる） |
+| デフォルト | — | 20秒 | 120秒 |
+
+**理由**: `_execute_tool_async` の timeout はハング検出用（ユーザー待ちではないのでBGは長くていい）
+
+#### `tools/async_job_db.py` + `async_worker.py` — ワーカー再起動後の stuck ジョブ
+
+- `running`/`cancelling` 状態でサーバーが再起動すると、ジョブが永久に `running` のまま stuck
+- `reset_running_jobs()` 関数を追加：起動時に `running`/`cancelling` → `failed`（error: ワーカー再起動により中断）
+- **テスト PASS**: ダミー挿入 → サービス再起動 → `failed` に変わることを確認
+
+### UI改善（`index.html`）
+
+#### ステータスバッジが `pending` のまま変わらないバグ修正
+
+- **原因**: `_bgSetStatus('running')` が `text` チャンク到着時のみ呼ばれていた
+  → ディープリサーチのように長時間ツールが走るケースではずっと `pending` 表示
+- **修正1**: `tool_start` 受信時にも `_bgSetStatus(jobId, 'running')` を呼ぶ
+- **修正2**: 5秒ポーリングで既存ジョブのステータスも同期（以前は新規ジョブ追加のみ）
+
+#### カードヘッダーにアクティブツール名表示
+
+- `tool_start` 受信時：カードヘッダーに `🔧 web_research` のように表示
+- `job_end` / `error` 受信時：非表示に戻す
+
+#### 停止ボタン警告強化
+
+- 実行中（`running`）ジョブの停止確認ダイアログに「API呼び出しは即座に止まらないため課金分は無駄になる場合がある」旨を追記
+
+### その他確認事項
+
+- ディープリサーチは BG モードが最適（接続断に強い・3600秒タイムアウト設定済み）
+- BGジョブ結果は自動でファイル保存されないケースあり → プロンプトに「〇〇に保存して」を含めるのが確実
+- `config.py` の `APP_VERSION` をコミット前に必ず更新する（忘れると UI 表示とズレる）
+
+### 残課題（次回セッション）
+
+- テスト6（Obsidian inbox）・テスト7（MCP）は未実施
+- `cancelling→cancelled` 競合状態の対処（2秒ポーリング間隔の限界）
+- 全テスト合格後に `main` / `for_windows` へマージ（ユーザー許可必要）
+- classify-bg が5秒タイムアウトを超えた場合に通常実行になるケースがある（原因調査中）
+- cancelling → cancelled の競合状態（2秒ポーリング内に完了すると done になる）の対処
+- 精密なトークンテスト（image_base64除去が確実に効いているか・他ツールで同様の問題がないか）
+- 全修正のコミット（未実施・次回確認後に実施）
+
+---
+
 ## 2026-06-01（セッション22）
 
 ### Obsidian プロアクティブ再接続テスト（動作確認済み）

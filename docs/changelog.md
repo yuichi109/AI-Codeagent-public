@@ -28,6 +28,62 @@
 
 ---
 
+### jobs.db をワークスペース外の data/ に移動
+
+#### 問題
+
+`workspace/jobs.db` がワークスペース掃除の削除対象に含まれてしまう。
+
+#### 修正（tools/async_job_db.py）
+
+`ALLOWED_WORK_DIR/jobs.db` → プロジェクトルート `/data/jobs.db` に変更。既存DBへの自動マイグレーション付き。`data/` は `.gitignore` に追加。
+
+---
+
+### tray.py 停止時に worker プロセスも終了（Windows バグ修正）
+
+#### 問題
+
+Windows では `terminate()` が uvicorn を強制終了するため lifespan cleanup が走らず、`async_worker` プロセスが孤立して残る。stop/start を繰り返すたびに worker が蓄積し、`jobs.db` をロックし続ける。
+
+#### 修正（tray.py）
+
+Windows 環境では `taskkill /T /F /PID` でプロセスツリーごと終了するよう変更。Linux は従来通り。
+
+---
+
+### バージョン表示にプラットフォーム名を追加
+
+`/version` API に `platform` フィールドを追加（WSL / Windows / Linux を自動判別）。  
+右上に `v1.6.4 · WSL` のように表示。
+
+---
+
+### BG画像生成の保存先・リンクをワークスペーススコープに合わせる
+
+#### 問題
+
+通常チャットでは `作業ディレクトリ/AI_Output_Images/` に保存されるが、BG実行では `workspace/AI_Output_Images/` に保存されていた。
+
+#### 修正（5ファイル）
+
+| ファイル | 変更内容 |
+|---|---|
+| `tools/async_job_db.py` | `workspace_scope` カラム追加・既存DB自動マイグレーション |
+| `server.py` | `AsyncJobRequest` に `workspace_scope` フィールド追加 |
+| `async_worker.py` | `run_agent` に `workspace_scope` を渡す |
+| `agent_core.py` | 画像ツール呼び出し時に `_workspace_scope` を注入 |
+| `index.html` | `bgSubmitJob()` に `workspace_scope: currentWorkspaceScope` を追加 |
+
+---
+
+### BG画像生成完了時にプロバイダー/モデル名を表示
+
+BG の `tool_end` チャンクを受信した際、画像ツールの場合は `🖼️ openai / gpt-image-2` のように表示。  
+`result_preview` が200文字で切り詰められるため、`JSON.parse` ではなく正規表現で取得。
+
+---
+
 ## 2026-06-03（セッション29）v1.6.4
 
 ### smoke test → main / for_windows マージ & Windows版テスト

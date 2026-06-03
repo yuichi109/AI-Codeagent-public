@@ -1131,7 +1131,13 @@
         svgArea.innerHTML = svg;
         block.dataset.lastCode = code;
       } catch (_e) {
-        // ストリーミング途中の不完全なコードは無視
+        // Mermaid が body に残したエラー要素を削除
+        const leftover = document.getElementById(id) || document.getElementById('d' + id);
+        if (leftover) leftover.remove();
+        // ストリーミング完了後もエラーなら表示
+        if (block.dataset.lastCode !== undefined) {
+          svgArea.innerHTML = '<span style="color:#888;font-size:12px">⚠ 構文エラー（図を生成できませんでした）</span>';
+        }
       }
     }
     _restoreMermaidRefine(el);
@@ -2139,12 +2145,15 @@
       let turnIdx = 0;
       while (i < history.length) {
         const u = history[i];
-        // BG結果カードとして復元（BGスクリプトが後のタグで定義されるため、_pendingBgCards に積んで後処理）
+        // BG結果カードとして復元（BGスクリプトが後のタグで定義されるため、プレースホルダーをその場に挿入して後処理）
         if (u?.role === 'bg_user') {
           const next = history[i + 1];
           if (next?.role === 'bg_result') {
+            const placeholder = document.createElement('div');
+            const chatEl = document.getElementById('chat');
+            if (chatEl) chatEl.appendChild(placeholder);
             window._pendingBgCards = window._pendingBgCards || [];
-            window._pendingBgCards.push({ prompt: u.content, content: next.content, status: next.status, timestamp: next.timestamp });
+            window._pendingBgCards.push({ prompt: u.content, content: next.content, status: next.status, timestamp: next.timestamp, placeholder });
             i += 2;
           } else {
             i++;
@@ -6752,7 +6761,7 @@ function _bgSaveToChat(jobId, status) {
   saveHistory();
 }
 
-function _bgRenderChatCard(prompt, resultText, status, timestamp) {
+function _bgRenderChatCard(prompt, resultText, status, timestamp, placeholder = null) {
   const statusIcon  = { done:'✅', failed:'❌', cancelled:'🚫', cancelling:'🚫' }[status] || '⚡';
   const statusLabel = { done:'完了', failed:'失敗', cancelled:'キャンセル', cancelling:'キャンセル中' }[status] || status;
   const timeStr = timestamp
@@ -6776,7 +6785,14 @@ function _bgRenderChatCard(prompt, resultText, status, timestamp) {
   card.appendChild(promptDiv);
   card.appendChild(det);
   const chatEl = document.getElementById('chat');
-  if (chatEl) { chatEl.appendChild(card); chatEl.scrollTop = chatEl.scrollHeight; }
+  if (chatEl) {
+    if (placeholder && placeholder.parentNode === chatEl) {
+      chatEl.replaceChild(card, placeholder);
+    } else {
+      chatEl.appendChild(card);
+    }
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
 }
 
 // ---- Image link detection ----
@@ -7039,7 +7055,7 @@ document.addEventListener('mousemove', e => {
 });
 
 // loadHistory() で積まれた BG カードをここで描画（スクリプトタグをまたぐため）
-(window._pendingBgCards || []).forEach(c => _bgRenderChatCard(c.prompt, c.content, c.status, c.timestamp));
+(window._pendingBgCards || []).forEach(c => _bgRenderChatCard(c.prompt, c.content, c.status, c.timestamp, c.placeholder));
 window._pendingBgCards = null;
 
 // Shared mouseup → save to localStorage

@@ -10,16 +10,10 @@
 1. **WinRT GraphicsCapture API**（★★）
    - ウィンドウ指定スクショツール（`tools/windows_tools.py` に追加）
 
-2. **#20 インタラクティブプロセス管理（残り: `send_input`）**（★★）
-   - `run_background` / `check_background` / `kill_background` は実装済み。
-   - 未実装: stdin 送信（`send_input` ツール）— 対話型プロセスへのキー入力送信。
-
 ---
 
 ## 中優先度
 
-- **#22 スラッシュコマンド拡充**: `/clear` `/compact` `/help` 以外のショートカット追加
-- **#23 CLAUDE.md 自動読み込み**: workspace 内の `CLAUDE.md` を自動検出してシステムプロンプトに注入
 - **LINE Bot連携**（★）: スマホの LINE からエージェントを遠隔操作
   - LINE Messaging API（webhook）→ `server.py` に転送 → 返答をLINEに送信
   - `/setup` 画面にLINE Bot設定セクション追加
@@ -35,24 +29,13 @@
 
 ---
 
-## 進行中の大型機能
-
-- **MCP クライアント実装**（★★★★）　**作業ブランチ: `feature/mcp-client`**
-  - 公式 `mcp` Python ライブラリを使用
-  - Phase 1: Playwright MCP（ブラウザ操作）
-  - Phase 2: Obsidian MCP
-  - 動的ツール登録・プロセス管理・OpenAI スキーマ変換が主な実装対象
-  - 完了後は main にマージしてこの項目を changelog に移動する
-
----
 
 ## 次期大型機能（現行改良完了後に着手）
 
-- **ドキュメント駆動型マルチエージェント**（★★★★）
-  - ディスパッチャーがタスクを分解し、設計・コーディング・ドキュメント・デバッグ等の役割エージェントに割り当て
-  - エージェント同士はファイルで通信（チャットではなく文章・コードを残す）
-  - 役割ごとに異なるモデルを割り当て可能（GPT-4.1 / gpt-4.1-mini / Foundry複数インスタンス等）
-  - 品質閾値・ループ上限・納期を設定し、未完了でも中間報告を生成
+- **マルチエージェント Phase 2・3**（★★★★）
+  - Phase 1（逐次実行・計画確認フロー・クロスプロバイダー）は実装済み
+  - Phase 2: 並列実行（asyncio.gather・UI複数ストリーム表示）
+  - Phase 3: ループ・品質制御（閾値・ループ上限・納期・中間報告）
   - 詳細: [docs/multi-agent-dispatch-design.md](multi-agent-dispatch-design.md)
 
 ---

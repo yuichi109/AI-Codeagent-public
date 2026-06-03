@@ -6836,6 +6836,21 @@ function _bgStartStream(jobId) {
           outEl.appendChild(line);
           outEl.scrollTop = outEl.scrollHeight;
         }
+      } else if (d.type === 'tool_end') {
+        try {
+          const info = JSON.parse(d.content || '{}');
+          const _IMAGE_TOOLS = ['generate_image', 'edit_image', 'watermark_image'];
+          if (_IMAGE_TOOLS.includes(info.name) && info.result_preview && outEl) {
+            const res = JSON.parse(info.result_preview);
+            if (res.provider && res.model) {
+              const meta = document.createElement('div');
+              meta.style.cssText = 'color:#a6adc8;font-size:10px;opacity:0.8;margin-top:2px;';
+              meta.textContent = `🖼️ ${res.provider} / ${res.model}`;
+              outEl.appendChild(meta);
+              outEl.scrollTop = outEl.scrollHeight;
+            }
+          }
+        } catch (_) {}
       } else if (d.type === 'job_end') {
         const finalStatus = d.status || 'done';
         _bgSetStatus(jobId, finalStatus);

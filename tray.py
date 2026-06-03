@@ -256,11 +256,19 @@ def _stop_server():
     global _server_proc
     with _lock:
         if _server_proc and _server_proc.poll() is None:
-            _server_proc.terminate()
-            try:
-                _server_proc.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                _server_proc.kill()
+            pid = _server_proc.pid
+            if sys.platform == "win32":
+                # プロセスツリーごと終了（worker 子プロセスも含む）
+                subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(pid)],
+                    capture_output=True,
+                )
+            else:
+                _server_proc.terminate()
+                try:
+                    _server_proc.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    _server_proc.kill()
         _server_proc = None
 
 

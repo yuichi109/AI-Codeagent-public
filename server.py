@@ -13,7 +13,8 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION, ASYNC_MAX_JOBS
+from tools.async_job_db import init_db as _init_async_db, create_job as _create_async_job, get_job as _get_async_job, get_chunks as _get_async_chunks, list_jobs as _list_async_jobs, update_job as _update_async_job, delete_job as _delete_async_job
 from tools.inbox_worker import start_worker, stop_worker, get_status as inbox_get_status, scan_inbox as inbox_scan_now, ensure_inbox_dirs, get_stale_drafts
 from prompts import get_system_prompt
 
@@ -252,6 +253,17 @@ async def lifespan(app: FastAPI):
     ensure_inbox_dirs()
     start_worker(_inbox_process)
 
+    # 非同期ジョブ DB 初期化 + ワーカープロセス起動
+    global _async_worker_proc
+    _init_async_db()
+    _async_worker_proc = subprocess.Popen(
+        [sys.executable, str(Path(__file__).parent / "async_worker.py"),
+         "--jobs", str(ASYNC_MAX_JOBS)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8",
+    )
+    print(f"[INFO] async_worker 起動 PID={_async_worker_proc.pid}", flush=True)
+
     # MCP クライアント起動・動的ツール登録
     try:
         await mcp_manager.start()
@@ -269,12 +281,21 @@ async def lifespan(app: FastAPI):
     # inbox ワーカー停止
     stop_worker()
 
+    # 非同期ジョブワーカー停止
+    try:
+        _async_worker_proc.terminate()
+        _async_worker_proc.wait(timeout=5)
+    except Exception:
+        pass
+
     # MCP クライアント停止（anyio cancel scope との干渉を抑制）
     try:
         await mcp_manager.stop()
     except BaseException:
         pass
 
+
+_async_worker_proc: subprocess.Popen | None = None  # set in lifespan
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -1548,6 +1569,10 @@ def _summarize_history(messages: list) -> str | None:
         elif role == "tool":
             # ツール結果は先頭100文字だけ含める
             lines.append(f"ツール結果: {str(content)[:100]}...")
+        elif role == "bg_user":
+            lines.append(f"BGタスク: {content}")
+        elif role == "bg_result":
+            lines.append(f"BG結果: {str(content)[:300]}…")
     conversation_text = "\n".join(lines)
     try:
         client = _make_client()
@@ -1881,6 +1906,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     _notify_on_done = any(kw in user_message for kw in _NOTIFY_KEYWORDS)
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
+    # bg_user / bg_result は LLM API に送らない（チャット表示専用ロール）
+    trimmed = [m for m in trimmed if m.get("role") not in ("bg_user", "bg_result")]
 
     # ローリングサマリー: 古い部分を圧縮して文脈を維持
     compressed_history = None
@@ -2293,6 +2320,161 @@ async def chat(req: ChatRequest):
     else:
         stream = agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope)
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+# -----------------------------------------------------------------------
+# BG Task Classifier
+# -----------------------------------------------------------------------
+
+class ClassifyBgRequest(BaseModel):
+    message: str
+
+@app.post("/classify-bg")
+async def classify_bg(req: ClassifyBgRequest):
+    """Quick LLM call: judge whether this task needs background execution."""
+    system = (
+        "あなたはAIエージェントのタスク分類器です。"
+        "ユーザーの依頼が「長時間の自律タスク"
+        "（Web調査・複数ファイル生成・大規模コード作成・長い実行処理・レポート作成など）」か"
+        "「短時間で終わる質問・確認・簡単な1ステップ操作」かを判定してください。"
+        "※画像生成・画像編集は必ずbg=trueにしてください（APIの処理に数分かかるため）。"
+        "JSONのみ返してください: {\"bg\": true | false, \"reason\": \"判断理由15字以内\"}"
+    )
+    try:
+        client = _make_async_client()
+        resp = await client.chat.completions.create(
+            model=_provider_config["model"],
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": req.message[:500]},
+            ],
+            response_format={"type": "json_object"},
+            max_completion_tokens=60,
+            temperature=0,
+        )
+        data = json.loads(resp.choices[0].message.content or '{"bg":false,"reason":""}')
+        return JSONResponse({"bg": bool(data.get("bg")), "reason": data.get("reason", "")})
+    except Exception:
+        return JSONResponse({"bg": False, "reason": ""})
+
+
+# -----------------------------------------------------------------------
+# Async Agent Job API
+# -----------------------------------------------------------------------
+
+class AsyncJobRequest(BaseModel):
+    message: str
+    max_turns: int = 30
+
+
+@app.post("/async-agent/jobs")
+async def async_job_create(req: AsyncJobRequest):
+    """Register a background agent job. Returns job_id immediately."""
+    job_id = _create_async_job(
+        message=req.message,
+        provider_config=dict(_provider_config),
+        max_turns=req.max_turns,
+    )
+    return JSONResponse({"job_id": job_id, "status": "pending"})
+
+
+@app.get("/async-agent/jobs")
+async def async_job_list():
+    """List all jobs (newest first)."""
+    return JSONResponse({"jobs": _list_async_jobs()})
+
+
+@app.get("/async-agent/jobs/{job_id}")
+async def async_job_get(job_id: str, after_seq: int = -1):
+    """Get job status + chunks since after_seq (for polling)."""
+    job = _get_async_job(job_id)
+    if job is None:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    chunks = _get_async_chunks(job_id, after_seq)
+    return JSONResponse({**job, "chunks": chunks})
+
+
+@app.get("/async-agent/jobs/{job_id}/stream")
+async def async_job_stream(job_id: str, after_seq: int = -1):
+    """SSE stream of job output. Supports reconnection via after_seq."""
+    async def _gen():
+        job = _get_async_job(job_id)
+        if job is None:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Job not found'})}\n\n"
+            return
+
+        seq = after_seq
+        while True:
+            chunks = await asyncio.to_thread(_get_async_chunks, job_id, seq)
+            for c in chunks:
+                yield f"data: {json.dumps({'type': c['type'], 'content': c['content'], 'seq': c['seq']})}\n\n"
+                seq = c["seq"]
+
+            job = await asyncio.to_thread(_get_async_job, job_id)
+            if job and job["status"] in ("done", "failed", "cancelled"):
+                yield f"data: {json.dumps({'type': 'job_end', 'status': job['status']})}\n\n"
+                break
+
+            yield ": keepalive\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
+
+
+@app.delete("/async-agent/jobs/{job_id}")
+async def async_job_cancel(job_id: str):
+    """Cancel a pending or running job."""
+    job = _get_async_job(job_id)
+    if job is None:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    if job["status"] not in ("pending", "running"):
+        return JSONResponse({"error": f"Cannot cancel job with status: {job['status']}"}, status_code=400)
+    _update_async_job(job_id, status="cancelling")
+    return JSONResponse({"job_id": job_id, "status": "cancelling"})
+
+
+@app.delete("/async-agent/jobs/{job_id}/delete")
+async def async_job_delete(job_id: str):
+    """Permanently delete a completed/failed/cancelled job."""
+    job = _get_async_job(job_id)
+    if job is None:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    if job["status"] in ("pending", "running"):
+        return JSONResponse({"error": "Cannot delete an active job. Cancel it first."}, status_code=400)
+    _delete_async_job(job_id)
+    return JSONResponse({"job_id": job_id, "deleted": True})
+
+
+@app.get("/async-agent/worker/status")
+async def async_worker_status():
+    """Check if the worker process is alive."""
+    alive = _async_worker_proc.poll() is None
+    return JSONResponse({"alive": alive, "pid": _async_worker_proc.pid})
+
+
+@app.get("/async-agent/mcp-tools")
+async def get_mcp_tools_for_bg():
+    """Return MCP tool schemas for the background worker."""
+    mcp_tools = [t for t in TOOLS if "__" in t.get("function", {}).get("name", "")]
+    return JSONResponse({"tools": mcp_tools})
+
+
+@app.post("/async-agent/call-mcp-tool")
+async def call_mcp_tool_proxy(request: Request):
+    """Proxy MCP tool calls from the background worker."""
+    body = await request.json()
+    name = body.get("name", "")
+    arguments = body.get("arguments", {})
+    if name not in TOOL_REGISTRY:
+        return JSONResponse({"error": f"未知のMCPツール: {name}"})
+    try:
+        if asyncio.iscoroutinefunction(TOOL_REGISTRY[name]):
+            result = await asyncio.wait_for(TOOL_REGISTRY[name](**arguments), timeout=60)
+        else:
+            result = await asyncio.to_thread(TOOL_REGISTRY[name], **arguments)
+        return JSONResponse({"result": result})
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
 
 
 @app.post("/mermaid-check")
@@ -3732,9 +3914,9 @@ def _extract_snippet(history: list, keyword: str, context: int = 60) -> dict:
     turn = 0
     for msg in history:
         role = msg.get("role", "")
-        if role == "user":
+        if role in ("user", "bg_user"):
             turn += 1
-        if role not in ("user", "assistant"):
+        if role not in ("user", "assistant", "bg_user", "bg_result"):
             continue
         content = msg.get("content", "")
         if isinstance(content, list):
@@ -3753,7 +3935,12 @@ def _extract_snippet(history: list, keyword: str, context: int = 60) -> dict:
             snippet = "…" + snippet
         if end < len(content):
             snippet = snippet + "…"
-        role_label = "あなた" if role == "user" else "AI"
+        if role == "bg_user":
+            role_label = "⚡BG投入"
+        elif role == "bg_result":
+            role_label = "⚡BG結果"
+        else:
+            role_label = "あなた" if role == "user" else "AI"
         return {"text": snippet, "turn": turn, "role": role_label}
     return {}
 

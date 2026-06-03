@@ -6841,11 +6841,12 @@ function _bgStartStream(jobId) {
           const info = JSON.parse(d.content || '{}');
           const _IMAGE_TOOLS = ['generate_image', 'edit_image', 'watermark_image'];
           if (_IMAGE_TOOLS.includes(info.name) && info.result_preview && outEl) {
-            const res = JSON.parse(info.result_preview);
-            if (res.provider && res.model) {
+            const prov = (info.result_preview.match(/"provider"\s*:\s*"([^"]+)"/) || [])[1];
+            const mdl  = (info.result_preview.match(/"model"\s*:\s*"([^"]+)"/) || [])[1];
+            if (prov && mdl) {
               const meta = document.createElement('div');
               meta.style.cssText = 'color:#a6adc8;font-size:10px;opacity:0.8;margin-top:2px;';
-              meta.textContent = `🖼️ ${res.provider} / ${res.model}`;
+              meta.textContent = `🖼️ ${prov} / ${mdl}`;
               outEl.appendChild(meta);
               outEl.scrollTop = outEl.scrollHeight;
             }

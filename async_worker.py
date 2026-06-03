@@ -103,6 +103,7 @@ async def _run_job(job: dict) -> None:
             provider_config=provider_config,
             on_chunk=_on_chunk,
             max_turns=job.get("max_turns") or 30,
+            workspace_scope=job.get("workspace_scope") or "",
         )
 
         row = await asyncio.to_thread(get_job, job_id)

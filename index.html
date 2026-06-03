@@ -6651,7 +6651,7 @@ async function bgSubmitJob(msg) {
     const res = await fetch('/async-agent/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, max_turns: 30 }),
+      body: JSON.stringify({ message: msg, max_turns: 30, workspace_scope: currentWorkspaceScope }),
     });
     const data = await res.json();
     if (!data.job_id) { alert('投入失敗: ' + JSON.stringify(data)); return; }

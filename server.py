@@ -2365,6 +2365,7 @@ async def classify_bg(req: ClassifyBgRequest):
 class AsyncJobRequest(BaseModel):
     message: str
     max_turns: int = 30
+    workspace_scope: str = ""
 
 
 @app.post("/async-agent/jobs")
@@ -2374,6 +2375,7 @@ async def async_job_create(req: AsyncJobRequest):
         message=req.message,
         provider_config=dict(_provider_config),
         max_turns=req.max_turns,
+        workspace_scope=req.workspace_scope,
     )
     return JSONResponse({"job_id": job_id, "status": "pending"})
 

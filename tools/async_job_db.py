@@ -18,16 +18,17 @@ DB_PATH = _DATA_DIR / "jobs.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS async_jobs (
-    job_id       TEXT PRIMARY KEY,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    message      TEXT NOT NULL,
-    provider_json TEXT,
-    max_turns    INTEGER DEFAULT 30,
-    turn_count   INTEGER DEFAULT 0,
-    created_at   TEXT NOT NULL,
-    started_at   TEXT,
-    finished_at  TEXT,
-    error        TEXT
+    job_id          TEXT PRIMARY KEY,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    message         TEXT NOT NULL,
+    provider_json   TEXT,
+    max_turns       INTEGER DEFAULT 30,
+    turn_count      INTEGER DEFAULT 0,
+    workspace_scope TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    started_at      TEXT,
+    finished_at     TEXT,
+    error           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS async_chunks (
@@ -55,16 +56,20 @@ def _connect() -> sqlite3.Connection:
 def init_db():
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        # 既存DBへのカラム追加マイグレーション
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(async_jobs)")}
+        if "workspace_scope" not in cols:
+            conn.execute("ALTER TABLE async_jobs ADD COLUMN workspace_scope TEXT NOT NULL DEFAULT ''")
 
 
-def create_job(message: str, provider_config: dict, max_turns: int = 30) -> str:
+def create_job(message: str, provider_config: dict, max_turns: int = 30, workspace_scope: str = "") -> str:
     job_id = uuid.uuid4().hex[:12]
     with _connect() as conn:
         conn.execute(
             """INSERT INTO async_jobs
-               (job_id, message, provider_json, max_turns, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (job_id, message, json.dumps(provider_config), max_turns,
+               (job_id, message, provider_json, max_turns, workspace_scope, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (job_id, message, json.dumps(provider_config), max_turns, workspace_scope,
              datetime.utcnow().isoformat()),
         )
     return job_id

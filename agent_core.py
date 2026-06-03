@@ -1142,8 +1142,14 @@ async def run_agent(
             await emit("tool_start", json.dumps({"name": name, "args": args}, ensure_ascii=False))
 
         # Execute tools concurrently
+        _IMAGE_TOOLS = {"generate_image", "edit_image", "watermark_image"}
         tasks = [
-            asyncio.create_task(_execute_tool_async(name, args))
+            asyncio.create_task(_execute_tool_async(
+                name,
+                {**args, "_workspace_scope": workspace_scope}
+                if name in _IMAGE_TOOLS and workspace_scope and "_workspace_scope" not in args
+                else args
+            ))
             for name, args, _ in parsed_calls
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-06-03（セッション29）v1.6.4
+
+### smoke test → main / for_windows マージ & Windows版テスト
+
+#### smoke test（全項目通過）
+
+| 項目 | 結果 |
+|---|---|
+| ワーカープロセス生死確認 | ✅ |
+| ジョブ投入・SSEストリーミング | ✅ |
+| キャンセル（cancelling→cancelled） | ✅ |
+| classify-bg API | ✅ bg=true 正常返答 |
+| 完了ジョブ削除 | ✅ |
+
+#### マージ
+
+- `feature/async-agent` → `main`（4350030）✅
+- `feature/async-agent` → `for_windows`（f1360c4）✅
+- GitLab push 完了 ✅
+
+#### Windows版 詳細テスト（v1.6.4・ポート8001）
+
+Windows クローン（`C:\Users\yuichi.matsuo\AI-Codeagent-win`）で pull 後、start.bat から起動して Chrome でテスト。
+
+| # | テスト項目 | 結果 |
+|---|---|---|
+| 1 | UI表示・v1.6.4 バージョン確認 | ✅ |
+| 2 | 通常チャット・SSEストリーミング | ✅ |
+| 3 | コード生成・pytestエラー自律修正（fib.py・3 passed） | ✅ |
+| 4 | classify-bg 動作（bg=false時は通常送信・正常） | ✅ |
+| 5 | BG投入・pending→done・BGカード書き込み | ✅ |
+| 6 | BGキャンセル（v1.6.4競合修正動作確認） | ✅ |
+| 7 | リロード後BGカード復元（3枚全て） | ✅ |
+| 8 | シェル・エディタパネル開閉 | ✅ |
+| 9 | LLM切り替え（5モデル確認） | ✅ |
+| 10 | コンソールエラーなし | ✅ |
+
+#### classify-bg 挙動の確認
+
+- `bg=true` → カード表示（「⚡ BGで実行」「→ 通常実行」ボタン）
+- `bg=false` → カードなし・通常送信（モデルが「短いタスク」と判断した場合）
+- Linux版・Windows版ともに同じLLM判断結果であることを確認（バグなし）
+
+---
+
 ## 2026-06-02（セッション28）v1.6.4
 
 ### cancelling→cancelled 競合バグ修正

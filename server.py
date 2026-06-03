@@ -2736,9 +2736,20 @@ try {{
             html_path.unlink()
 
 
+def _detect_platform() -> str:
+    import sys, pathlib
+    if sys.platform == "win32":
+        return "Windows"
+    try:
+        if "microsoft" in pathlib.Path("/proc/version").read_text().lower():
+            return "WSL"
+    except Exception:
+        pass
+    return "Linux"
+
 @app.get("/version")
 async def get_version():
-    return {"version": APP_VERSION}
+    return {"version": APP_VERSION, "platform": _detect_platform()}
 
 
 @app.get("/workspace/download")

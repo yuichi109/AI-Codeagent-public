@@ -4256,7 +4256,7 @@
   initInboxButton();
   fetch('/version').then(r => r.json()).then(d => {
     const el = document.getElementById('app-version');
-    if (el) el.textContent = 'v' + d.version;
+    if (el) el.textContent = 'v' + d.version + (d.platform ? ' · ' + d.platform : '');
   }).catch(() => {});
 
   // ---- 音声入力 (Web Speech API) ----

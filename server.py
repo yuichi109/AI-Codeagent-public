@@ -1,8 +1,10 @@
 import asyncio
+import difflib
 import json
 import shutil
 import subprocess
 import sys
+import uuid
 import requests
 from datetime import datetime
 import httpx
@@ -39,7 +41,7 @@ _OPENAI_DEFAULT_MODELS = [
     "o3",
     "o4-mini",
 ]
-from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
+from tools.file_tools import read_file, write_file, edit_file, copy_file, list_files, glob_files, grep
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
@@ -326,10 +328,14 @@ def show_mermaid_batch_refine_dialog(path: str, _workspace_scope: str = "") -> d
     }
 
 
+# edit_file / write_file の承認待ちリスト {request_id: {"event": asyncio.Event, "approved": bool|None}}
+_pending_edit_approvals: dict = {}
+
 TOOL_REGISTRY = {
     "read_file": read_file,
     "write_file": write_file,
     "edit_file": edit_file,
+    "copy_file": copy_file,
     "list_files": list_files,
     "glob_files": glob_files,
     "grep": grep,
@@ -426,6 +432,21 @@ TOOLS = [
                     "expected_replacements": {"type": "integer", "description": "置換が発生すべき回数 (デフォルト: 1)"},
                 },
                 "required": ["path", "old_str", "new_str"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "copy_file",
+            "description": "ファイルをコピーします。スコープをまたぐコピー（例: HOGE/a.txt → FUGA/a.txt）に使用してください。コピー先に同名ファイルがある場合はユーザーに確認を求めます。src・dst は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {"type": "string", "description": "コピー元ファイルのパス（workspace ルート相対）。例: 'HOGE/config.yaml'（スコープ内）"},
+                    "dst": {"type": "string", "description": "コピー先ファイルのパス（workspace ルート相対）。例: 'FUGA/config.yaml'（別スコープへ）または 'HOGE/backup/config.yaml'（同スコープ内）"},
+                },
+                "required": ["src", "dst"],
             },
         },
     },
@@ -1947,7 +1968,16 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             user_content = f"{auto_ctx}\n\n{user_content}"
     system_prompt = get_system_prompt(bypass_approval)
     if workspace_scope:
-        system_prompt += f"\n\n## 作業ディレクトリ制限\n現在のセッションでは **workspace/{workspace_scope}/** のみを操作すること。このフォルダ外のファイルを読み書き・移動・削除してはならない。work_dir 指定時も必ず workspace/{workspace_scope}/ 以下のパスを使うこと。"
+        system_prompt += (
+            f"\n\n## 作業ディレクトリ制限\n"
+            f"現在のセッションの作業スコープは **workspace/{workspace_scope}/** です。\n"
+            f"- ユーザーが指定したパスは**絶対に書き換えず**そのまま使うこと。パスの変換・リダイレクト禁止。\n"
+            f"- スコープ外のパスを操作しようとするとツールがエラーを返すので、そのエラー内容をユーザーに伝えること。\n"
+            f"- **copy_file の src・dst は常に workspace/ ルート相対パスで指定する**\n"
+            f"  例: src=\"{workspace_scope}/file.txt\", dst=\"OTHER/file.txt\" （スコープをまたぐコピーOK）\n"
+            f"  NG例: dst=\"{workspace_scope}/OTHER/file.txt\" （スコープ名を二重に付けてはいけない）\n"
+            f"- run_command の work_dir は workspace/{workspace_scope}/ 以下を使うこと"
+        )
     if "5.4-mini" in _provider_config.get("model", ""):
         system_prompt += "\n\n絶対に同じ文章・段落を繰り返すな。一度出力した内容は再出力禁止。"
     messages = [{"role": "system", "content": system_prompt}] + trimmed + [{"role": "user", "content": user_content}]
@@ -2077,13 +2107,45 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             if _name in _SCOPE_TOOLS and workspace_scope:
                 _args["_workspace_scope"] = workspace_scope
 
-        # ツールを実行（run_commandはストリーミング、他は並列）
+        # スコープが設定されている場合、書き込み系ツール(write_file/edit_file)のパスがスコープ外なら即エラー返却
+        # copy_file は例外（クロススコープ操作が目的のツール）
+        _WRITE_TOOLS = {"write_file", "edit_file"}
+        if workspace_scope:
+            _scope_dir = (ALLOWED_WORK_DIR / workspace_scope).resolve()
+            _scope_checked = []
+            for _name, _args, _tc_id in parsed_calls:
+                if _name in _WRITE_TOOLS:
+                    _path_arg = _args.get("path", "")
+                    try:
+                        from tools.file_tools import _resolve_safe_path
+                        _resolved = _resolve_safe_path(_path_arg)
+                        if not str(_resolved).startswith(str(_scope_dir)):
+                            _err = json.dumps({
+                                "error": f"スコープ外への書き込みは禁止されています。現在のスコープ: workspace/{workspace_scope}/\n対象パス: {_path_arg}\nこのスコープ内のファイルのみ変更できます。"
+                            }, ensure_ascii=False)
+                            _scope_checked.append((_name, _args, _tc_id, _err))
+                            continue
+                    except Exception:
+                        pass
+                _scope_checked.append((_name, _args, _tc_id, None))
+            # エラーになったツールは結果を差し替え
+            _scope_errors = {_tc_id: _err for _name, _args, _tc_id, _err in _scope_checked if _err}
+            parsed_calls = [(_name, _args, _tc_id) for _name, _args, _tc_id, _ in _scope_checked]
+        else:
+            _scope_errors = {}
+
+        # ツールを実行（run_commandはストリーミング、write/edit/copy_fileは承認フロー、他は並列）
         _STREAMING_TOOLS = {"run_command"}
+        _APPROVAL_TOOLS = {"edit_file", "write_file", "copy_file"}
+        _SEQUENTIAL_TOOLS = _STREAMING_TOOLS | _APPROVAL_TOOLS
         _DR_SKIP_MSG = json.dumps({"error": "Deep Research の同時複数呼び出しは禁止されています。1ターンに1回のみ呼び出してください。"}, ensure_ascii=False)
-        if any(name in _STREAMING_TOOLS for name, _, _ in parsed_calls):
-            # ストリーミングツールが含まれる場合は順次実行
+        if any(name in _SEQUENTIAL_TOOLS for name, _, _ in parsed_calls):
+            # 順次実行（ストリーミング or 承認フロー）
             results = []
             for name, args, tc_id in parsed_calls:
+                if tc_id in _scope_errors:
+                    results.append(_scope_errors[tc_id])
+                    continue
                 if tc_id.endswith("__skipped__"):
                     results.append(_DR_SKIP_MSG)
                 elif name in _STREAMING_TOOLS:
@@ -2094,6 +2156,143 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         elif chunk["type"] == "result":
                             result_str = chunk["result"]
                     results.append(result_str or json.dumps({"error": "ストリーミング結果なし", "stdout": "", "stderr": "", "returncode": -1}))
+                elif name in _APPROVAL_TOOLS:
+                    # diff 生成してユーザー承認を待つ（write_file / edit_file / copy_file）
+                    req_id = uuid.uuid4().hex[:8]
+                    diff_str = ""
+                    can_preview = False
+                    out_of_scope = False
+                    display_path = args.get("path", args.get("dst", ""))
+                    try:
+                        from tools.file_tools import _resolve_safe_path
+                        scope_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+
+                        if name == "write_file":
+                            path_label = args.get("path", "")
+                            target = _resolve_safe_path(path_label)
+                            # write_file は常に workspace ルート相対で表示（どのスコープに書かれるか明示）
+                            try:
+                                display_path = str(target.relative_to(ALLOWED_WORK_DIR))
+                            except ValueError:
+                                display_path = path_label
+                            # スコープ外チェック
+                            if workspace_scope and not str(target.resolve()).startswith(str(scope_dir)):
+                                out_of_scope = True
+                            new_content = args.get("content", "")
+                            if target.exists():
+                                # 上書き → diff 表示
+                                old_content = target.read_text(encoding="utf-8")
+                                diff_lines = list(difflib.unified_diff(
+                                    old_content.splitlines(keepends=True),
+                                    new_content.splitlines(keepends=True),
+                                    fromfile=f"a/{display_path}",
+                                    tofile=f"b/{display_path}",
+                                    lineterm="",
+                                ))
+                                diff_str = "\n".join(diff_lines) if diff_lines else f"（内容に変更なし）"
+                            else:
+                                # 新規作成 → 先頭30行プレビュー
+                                preview_lines = new_content.splitlines()[:30]
+                                diff_str = "\n".join(f"+{l}" for l in preview_lines)
+                                if len(new_content.splitlines()) > 30:
+                                    diff_str += f"\n... （他 {len(new_content.splitlines()) - 30} 行）"
+                            can_preview = True
+
+                        elif name == "edit_file":
+                            path_label = args.get("path", "")
+                            target = _resolve_safe_path(path_label)
+                            try:
+                                display_path = str(target.relative_to(scope_dir))
+                            except ValueError:
+                                display_path = str(target.relative_to(ALLOWED_WORK_DIR))
+                                out_of_scope = bool(workspace_scope)
+                            if target.exists():
+                                old_content = target.read_text(encoding="utf-8")
+                                old_str = args.get("old_str", "")
+                                new_str = args.get("new_str", "")
+                                expected = args.get("expected_replacements", 1)
+                                count = old_content.count(old_str)
+                                if count == expected and count > 0:
+                                    new_content = old_content.replace(old_str, new_str, expected)
+                                    diff_lines = list(difflib.unified_diff(
+                                        old_content.splitlines(keepends=True),
+                                        new_content.splitlines(keepends=True),
+                                        fromfile=f"a/{display_path}",
+                                        tofile=f"b/{display_path}",
+                                        lineterm="",
+                                    ))
+                                    diff_str = "\n".join(diff_lines)
+                                    can_preview = True
+
+                        elif name == "copy_file":
+                            src_path = _resolve_safe_path(args.get("src", ""))
+                            dst_path = _resolve_safe_path(args.get("dst", ""))
+                            try:
+                                display_path = str(dst_path.relative_to(scope_dir))
+                            except ValueError:
+                                display_path = str(dst_path.relative_to(ALLOWED_WORK_DIR))
+                                out_of_scope = bool(workspace_scope)
+                            # コピー先に既存ファイルがある場合のみ承認を求める
+                            if dst_path.exists() and src_path.exists():
+                                try:
+                                    old_content = dst_path.read_text(encoding="utf-8")
+                                    new_content = src_path.read_text(encoding="utf-8")
+                                    diff_lines = list(difflib.unified_diff(
+                                        old_content.splitlines(keepends=True),
+                                        new_content.splitlines(keepends=True),
+                                        fromfile=f"a/{display_path}（現在）",
+                                        tofile=f"b/{display_path}（コピー後）",
+                                        lineterm="",
+                                    ))
+                                    diff_str = "\n".join(diff_lines)
+                                    can_preview = True
+                                except UnicodeDecodeError:
+                                    # バイナリファイルは差分なしで上書き確認だけ出す
+                                    diff_str = f"[バイナリファイル] {display_path} を上書きします"
+                                    can_preview = True
+                    except Exception:
+                        pass
+
+                    if can_preview and diff_str:
+                        ev = asyncio.Event()
+                        _pending_edit_approvals[req_id] = {"event": ev, "approved": None}
+                        _is_new = (name == "write_file" and not _resolve_safe_path(args.get("path", "")).exists())
+                        yield f"data: {json.dumps({'type': 'edit_approval_request', 'request_id': req_id, 'name': name, 'path': display_path, 'diff': diff_str, 'out_of_scope': out_of_scope, 'scope': workspace_scope, 'is_new': _is_new})}\n\n"
+                        # flush 用の keepalive を即時送信（バッファリング対策）
+                        yield f": flush\n\n"
+                        # 承認待ち中も 10 秒ごとに keepalive を送ってブラウザ接続を維持
+                        async def _wait_approval(_ev=ev, _req_id=req_id):
+                            try:
+                                await asyncio.wait_for(_ev.wait(), timeout=300)
+                            except asyncio.TimeoutError:
+                                pass
+                        _approval_task = asyncio.create_task(_wait_approval())
+                        while not _approval_task.done():
+                            done, _ = await asyncio.wait({_approval_task}, timeout=10)
+                            if not done:
+                                yield f": keepalive\n\n"
+                        approved = _pending_edit_approvals.get(req_id, {}).get("approved", False)
+                        _pending_edit_approvals.pop(req_id, None)
+
+                        if approved:
+                            task = asyncio.create_task(execute_tool_async(name, args))
+                            while True:
+                                done, _pending_set = await asyncio.wait({task}, timeout=30)
+                                if not _pending_set:
+                                    break
+                                yield f": keepalive\n\n"
+                            results.append(task.result())
+                        else:
+                            results.append(json.dumps({"message": "ユーザーがキャンセルしました。別のアプローチを検討してください。", "cancelled": True}, ensure_ascii=False))
+                    else:
+                        # diff生成不可（エラーケース等）はそのまま実行
+                        task = asyncio.create_task(execute_tool_async(name, args))
+                        while True:
+                            done, _pending_set = await asyncio.wait({task}, timeout=30)
+                            if not _pending_set:
+                                break
+                            yield f": keepalive\n\n"
+                        results.append(task.result())
                 else:
                     # 長時間ツール実行中は30秒ごとにSSEキープアライブを送ってブラウザ接続を維持
                     task = asyncio.create_task(execute_tool_async(name, args))
@@ -2109,7 +2308,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             async def _skipped(_msg=_DR_SKIP_MSG):
                 return _msg
             _tasks = [
-                asyncio.create_task(_skipped() if tc_id.endswith("__skipped__") else execute_tool_async(name, args))
+                asyncio.create_task(_skipped(_scope_errors[tc_id]) if tc_id in _scope_errors else (_skipped() if tc_id.endswith("__skipped__") else execute_tool_async(name, args)))
                 for name, args, tc_id in parsed_calls
             ]
             while True:
@@ -3743,6 +3942,17 @@ async def editor_chat(req: InlineChatRequest):
         return JSONResponse({"reply": reply})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/edit-approval/{request_id}")
+async def edit_approval_endpoint(request_id: str, request: Request):
+    """edit_file / write_file の承認 / キャンセルを受け付ける"""
+    body = await request.json()
+    if request_id not in _pending_edit_approvals:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    _pending_edit_approvals[request_id]["approved"] = body.get("approved", False)
+    _pending_edit_approvals[request_id]["event"].set()
+    return JSONResponse({"ok": True})
 
 
 @app.post("/workspace/cleanup")

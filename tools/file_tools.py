@@ -100,6 +100,27 @@ def edit_file(path: str, old_str: str, new_str: str, expected_replacements: int 
         return {"error": f"編集エラー: {e}"}
 
 
+def copy_file(src: str, dst: str) -> dict:
+    """ファイルをコピーします。コピー先に同名ファイルがある場合は上書きします。"""
+    import shutil as _shutil
+    try:
+        src_path = _resolve_safe_path(src)
+        dst_path = _resolve_safe_path(dst)
+        if not src_path.exists():
+            return {"error": f"コピー元が見つかりません: {src}"}
+        if src_path.is_dir():
+            return {"error": f"ディレクトリのコピーはサポートしていません。ファイルを指定してください: {src}"}
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        overwritten = dst_path.exists()
+        _shutil.copy2(str(src_path), str(dst_path))
+        msg = f"{src} → {dst} に上書きコピーしました" if overwritten else f"{src} → {dst} にコピーしました"
+        return {"message": msg, "src": str(src_path), "dst": str(dst_path), "overwritten": overwritten}
+    except PermissionError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"コピーエラー: {e}"}
+
+
 def glob_files(pattern: str, path: str = ".") -> dict:
     """glob パターンでファイルパスを検索します。** で再帰検索できます。"""
     try:

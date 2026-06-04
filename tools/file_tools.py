@@ -121,6 +121,27 @@ def copy_file(src: str, dst: str) -> dict:
         return {"error": f"コピーエラー: {e}"}
 
 
+def move_file(src: str, dst: str) -> dict:
+    """ファイルを移動（リネーム）します。移動先に同名ファイルがある場合は上書きします。"""
+    import shutil as _shutil
+    try:
+        src_path = _resolve_safe_path(src)
+        dst_path = _resolve_safe_path(dst)
+        if not src_path.exists():
+            return {"error": f"移動元が見つかりません: {src}"}
+        if src_path.is_dir():
+            return {"error": f"ディレクトリの移動はサポートしていません。ファイルを指定してください: {src}"}
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        overwritten = dst_path.exists()
+        _shutil.move(str(src_path), str(dst_path))
+        msg = f"{src} → {dst} に上書き移動しました" if overwritten else f"{src} → {dst} に移動しました"
+        return {"message": msg, "src": str(src_path), "dst": str(dst_path), "overwritten": overwritten}
+    except PermissionError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"移動エラー: {e}"}
+
+
 def glob_files(pattern: str, path: str = ".") -> dict:
     """glob パターンでファイルパスを検索します。** で再帰検索できます。"""
     try:

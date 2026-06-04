@@ -41,7 +41,7 @@ _OPENAI_DEFAULT_MODELS = [
     "o3",
     "o4-mini",
 ]
-from tools.file_tools import read_file, write_file, edit_file, copy_file, list_files, glob_files, grep
+from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, list_files, glob_files, grep
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
@@ -336,6 +336,7 @@ TOOL_REGISTRY = {
     "write_file": write_file,
     "edit_file": edit_file,
     "copy_file": copy_file,
+    "move_file": move_file,
     "list_files": list_files,
     "glob_files": glob_files,
     "grep": grep,
@@ -445,6 +446,21 @@ TOOLS = [
                 "properties": {
                     "src": {"type": "string", "description": "コピー元ファイルのパス（workspace ルート相対）。例: 'HOGE/config.yaml'（スコープ内）"},
                     "dst": {"type": "string", "description": "コピー先ファイルのパス（workspace ルート相対）。例: 'FUGA/config.yaml'（別スコープへ）または 'HOGE/backup/config.yaml'（同スコープ内）"},
+                },
+                "required": ["src", "dst"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_file",
+            "description": "ファイルを移動（リネーム）します。スコープをまたぐ移動（例: HOGE/a.txt → FUGA/a.txt）や同スコープ内のリネームに使用してください。移動先に同名ファイルがある場合はユーザーに確認を求めます。src・dst は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {"type": "string", "description": "移動元ファイルのパス（workspace ルート相対）。例: 'HOGE/old_name.txt'"},
+                    "dst": {"type": "string", "description": "移動先ファイルのパス（workspace ルート相対）。例: 'HOGE/new_name.txt'（リネーム）または 'FUGA/old_name.txt'（別スコープへ移動）"},
                 },
                 "required": ["src", "dst"],
             },
@@ -1973,8 +1989,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             f"現在のセッションの作業スコープは **workspace/{workspace_scope}/** です。\n"
             f"- ユーザーが指定したパスは**絶対に書き換えず**そのまま使うこと。パスの変換・リダイレクト禁止。\n"
             f"- スコープ外のパスを操作しようとするとツールがエラーを返すので、そのエラー内容をユーザーに伝えること。\n"
-            f"- **copy_file の src・dst は常に workspace/ ルート相対パスで指定する**\n"
-            f"  例: src=\"{workspace_scope}/file.txt\", dst=\"OTHER/file.txt\" （スコープをまたぐコピーOK）\n"
+            f"- **copy_file / move_file の src・dst は常に workspace/ ルート相対パスで指定する**\n"
+            f"  例: src=\"{workspace_scope}/file.txt\", dst=\"OTHER/file.txt\" （スコープをまたぐコピー/移動OK）\n"
             f"  NG例: dst=\"{workspace_scope}/OTHER/file.txt\" （スコープ名を二重に付けてはいけない）\n"
             f"- run_command の work_dir は workspace/{workspace_scope}/ 以下を使うこと"
         )
@@ -2136,7 +2152,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
         # ツールを実行（run_commandはストリーミング、write/edit/copy_fileは承認フロー、他は並列）
         _STREAMING_TOOLS = {"run_command"}
-        _APPROVAL_TOOLS = {"edit_file", "write_file", "copy_file"}
+        _APPROVAL_TOOLS = {"edit_file", "write_file", "copy_file", "move_file"}
         _SEQUENTIAL_TOOLS = _STREAMING_TOOLS | _APPROVAL_TOOLS
         _DR_SKIP_MSG = json.dumps({"error": "Deep Research の同時複数呼び出しは禁止されています。1ターンに1回のみ呼び出してください。"}, ensure_ascii=False)
         if any(name in _SEQUENTIAL_TOOLS for name, _, _ in parsed_calls):
@@ -2249,6 +2265,43 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                                 except UnicodeDecodeError:
                                     # バイナリファイルは差分なしで上書き確認だけ出す
                                     diff_str = f"[バイナリファイル] {display_path} を上書きします"
+                                    can_preview = True
+
+                        elif name == "move_file":
+                            src_path = _resolve_safe_path(args.get("src", ""))
+                            dst_path = _resolve_safe_path(args.get("dst", ""))
+                            try:
+                                display_path = str(dst_path.relative_to(scope_dir))
+                            except ValueError:
+                                display_path = str(dst_path.relative_to(ALLOWED_WORK_DIR))
+                                out_of_scope = bool(workspace_scope)
+                            if src_path.exists():
+                                try:
+                                    src_content = src_path.read_text(encoding="utf-8")
+                                    if dst_path.exists():
+                                        # 移動先に既存ファイルがある場合は差分表示
+                                        old_content = dst_path.read_text(encoding="utf-8")
+                                        diff_lines = list(difflib.unified_diff(
+                                            old_content.splitlines(keepends=True),
+                                            src_content.splitlines(keepends=True),
+                                            fromfile=f"a/{display_path}（現在）",
+                                            tofile=f"b/{display_path}（移動後）",
+                                            lineterm="",
+                                        ))
+                                        diff_str = "\n".join(diff_lines)
+                                    else:
+                                        # 移動先が新規の場合は移動元の内容をプレビュー
+                                        diff_lines = list(difflib.unified_diff(
+                                            [],
+                                            src_content.splitlines(keepends=True),
+                                            fromfile="/dev/null",
+                                            tofile=f"b/{display_path}（移動後）",
+                                            lineterm="",
+                                        ))
+                                        diff_str = "\n".join(diff_lines)
+                                    can_preview = True
+                                except UnicodeDecodeError:
+                                    diff_str = f"[バイナリファイル] {args.get('src', '')} → {display_path} に移動します"
                                     can_preview = True
                     except Exception:
                         pass

@@ -440,12 +440,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "copy_file",
-            "description": "ファイルをコピーします。スコープをまたぐコピー（例: HOGE/a.txt → FUGA/a.txt）に使用してください。コピー先に同名ファイルがある場合はユーザーに確認を求めます。src・dst は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
+            "description": "ファイルまたはディレクトリをコピーします。スコープをまたぐコピー（例: HOGE/a.txt → FUGA/a.txt）に使用してください。ディレクトリを指定すると配下を丸ごと再帰コピーします（既存ディレクトリにはマージ）。コピー先に同名がある場合・ディレクトリコピー時はユーザーに確認を求めます。src・dst は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "src": {"type": "string", "description": "コピー元ファイルのパス（workspace ルート相対）。例: 'HOGE/config.yaml'（スコープ内）"},
-                    "dst": {"type": "string", "description": "コピー先ファイルのパス（workspace ルート相対）。例: 'FUGA/config.yaml'（別スコープへ）または 'HOGE/backup/config.yaml'（同スコープ内）"},
+                    "src": {"type": "string", "description": "コピー元のファイル/ディレクトリのパス（workspace ルート相対）。例: 'HOGE/config.yaml' や 'HOGE/src'（ディレクトリ）"},
+                    "dst": {"type": "string", "description": "コピー先のパス（workspace ルート相対）。例: 'FUGA/config.yaml'（別スコープへ）または 'HOGE/backup'（ディレクトリ）"},
                 },
                 "required": ["src", "dst"],
             },
@@ -455,12 +455,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "move_file",
-            "description": "ファイルを移動（リネーム）します。スコープをまたぐ移動（例: HOGE/a.txt → FUGA/a.txt）や同スコープ内のリネームに使用してください。移動先に同名ファイルがある場合はユーザーに確認を求めます。src・dst は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
+            "description": "ファイルまたはディレクトリを移動（リネーム）します。スコープをまたぐ移動（例: HOGE/a.txt → FUGA/a.txt）や同スコープ内のリネームに使用してください。ディレクトリを指定すると配下を丸ごと移動します（移動先が空いている場合のみ。マージ未対応）。移動先に同名ファイルがある場合・ディレクトリ移動時はユーザーに確認を求めます。src・dst は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "src": {"type": "string", "description": "移動元ファイルのパス（workspace ルート相対）。例: 'HOGE/old_name.txt'"},
-                    "dst": {"type": "string", "description": "移動先ファイルのパス（workspace ルート相対）。例: 'HOGE/new_name.txt'（リネーム）または 'FUGA/old_name.txt'（別スコープへ移動）"},
+                    "src": {"type": "string", "description": "移動元のファイル/ディレクトリのパス（workspace ルート相対）。例: 'HOGE/old_name.txt' や 'HOGE/oldsrc'（ディレクトリ）"},
+                    "dst": {"type": "string", "description": "移動先のパス（workspace ルート相対）。例: 'HOGE/new_name.txt'（リネーム）または 'FUGA/newsrc'（別スコープへ移動）"},
                 },
                 "required": ["src", "dst"],
             },
@@ -2178,6 +2178,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                     diff_str = ""
                     can_preview = False
                     out_of_scope = False
+                    is_dir_op = False
                     display_path = args.get("path", args.get("dst", ""))
                     try:
                         from tools.file_tools import _resolve_safe_path
@@ -2248,8 +2249,15 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                             except ValueError:
                                 display_path = str(dst_path.relative_to(ALLOWED_WORK_DIR))
                                 out_of_scope = bool(workspace_scope)
+                            if src_path.is_dir():
+                                # ディレクトリ丸ごとコピーは常に承認を求める（概要表示）
+                                is_dir_op = True
+                                n = sum(1 for p in src_path.rglob("*") if p.is_file())
+                                merge = "（既存ディレクトリにマージ・同名ファイル上書き）" if dst_path.exists() else ""
+                                diff_str = f"📁 ディレクトリ {args.get('src', '')} を {display_path} にコピーします（{n}個のファイル）{merge}"
+                                can_preview = True
                             # コピー先に既存ファイルがある場合のみ承認を求める
-                            if dst_path.exists() and src_path.exists():
+                            elif dst_path.exists() and src_path.exists():
                                 try:
                                     old_content = dst_path.read_text(encoding="utf-8")
                                     new_content = src_path.read_text(encoding="utf-8")
@@ -2275,7 +2283,16 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                             except ValueError:
                                 display_path = str(dst_path.relative_to(ALLOWED_WORK_DIR))
                                 out_of_scope = bool(workspace_scope)
-                            if src_path.exists():
+                            if src_path.is_dir():
+                                # ディレクトリ丸ごと移動は常に承認を求める（概要表示）
+                                is_dir_op = True
+                                n = sum(1 for p in src_path.rglob("*") if p.is_file())
+                                if dst_path.exists():
+                                    diff_str = f"⚠️ 移動先 {display_path} は既に存在します（マージ未対応のため実行時にエラーになります）"
+                                else:
+                                    diff_str = f"📁 ディレクトリ {args.get('src', '')} を {display_path} に移動します（{n}個のファイル）"
+                                can_preview = True
+                            elif src_path.exists():
                                 try:
                                     src_content = src_path.read_text(encoding="utf-8")
                                     if dst_path.exists():
@@ -2310,7 +2327,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         ev = asyncio.Event()
                         _pending_edit_approvals[req_id] = {"event": ev, "approved": None}
                         _is_new = (name == "write_file" and not _resolve_safe_path(args.get("path", "")).exists())
-                        yield f"data: {json.dumps({'type': 'edit_approval_request', 'request_id': req_id, 'name': name, 'path': display_path, 'diff': diff_str, 'out_of_scope': out_of_scope, 'scope': workspace_scope, 'is_new': _is_new})}\n\n"
+                        yield f"data: {json.dumps({'type': 'edit_approval_request', 'request_id': req_id, 'name': name, 'path': display_path, 'diff': diff_str, 'out_of_scope': out_of_scope, 'scope': workspace_scope, 'is_new': _is_new, 'is_dir': is_dir_op})}\n\n"
                         # flush 用の keepalive を即時送信（バッファリング対策）
                         yield f": flush\n\n"
                         # 承認待ち中も 10 秒ごとに keepalive を送ってブラウザ接続を維持

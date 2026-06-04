@@ -163,12 +163,12 @@ TOOLS: list = [
         "type": "function",
         "function": {
             "name": "copy_file",
-            "description": "ファイルをコピーします。スコープをまたぐコピーに使用してください。src・dst は workspace ルート相対パスで指定すること。",
+            "description": "ファイルまたはディレクトリをコピーします。ディレクトリは配下を丸ごと再帰コピー（既存にはマージ）。スコープをまたぐコピーに使用してください。src・dst は workspace ルート相対パスで指定すること。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "src": {"type": "string", "description": "コピー元ファイルのパス（workspace ルート相対）"},
-                    "dst": {"type": "string", "description": "コピー先ファイルのパス（workspace ルート相対）"},
+                    "src": {"type": "string", "description": "コピー元のファイル/ディレクトリのパス（workspace ルート相対）"},
+                    "dst": {"type": "string", "description": "コピー先のパス（workspace ルート相対）"},
                 },
                 "required": ["src", "dst"],
             },
@@ -178,12 +178,12 @@ TOOLS: list = [
         "type": "function",
         "function": {
             "name": "move_file",
-            "description": "ファイルを移動（リネーム）します。スコープをまたぐ移動や同スコープ内のリネームに使用してください。src・dst は workspace ルート相対パスで指定すること。",
+            "description": "ファイルまたはディレクトリを移動（リネーム）します。ディレクトリは配下を丸ごと移動（移動先が空いている場合のみ）。スコープをまたぐ移動や同スコープ内のリネームに使用してください。src・dst は workspace ルート相対パスで指定すること。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "src": {"type": "string", "description": "移動元ファイルのパス（workspace ルート相対）"},
-                    "dst": {"type": "string", "description": "移動先ファイルのパス（workspace ルート相対）"},
+                    "src": {"type": "string", "description": "移動元のファイル/ディレクトリのパス（workspace ルート相対）"},
+                    "dst": {"type": "string", "description": "移動先のパス（workspace ルート相対）"},
                 },
                 "required": ["src", "dst"],
             },

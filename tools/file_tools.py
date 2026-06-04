@@ -100,8 +100,13 @@ def edit_file(path: str, old_str: str, new_str: str, expected_replacements: int 
         return {"error": f"編集エラー: {e}"}
 
 
+def _count_files(directory: Path) -> int:
+    """ディレクトリ配下のファイル数を再帰的に数える。"""
+    return sum(1 for p in directory.rglob("*") if p.is_file())
+
+
 def copy_file(src: str, dst: str) -> dict:
-    """ファイルをコピーします。コピー先に同名ファイルがある場合は上書きします。"""
+    """ファイル/ディレクトリをコピーします。コピー先に同名がある場合は上書き（ディレクトリはマージ）します。"""
     import shutil as _shutil
     try:
         src_path = _resolve_safe_path(src)
@@ -109,7 +114,17 @@ def copy_file(src: str, dst: str) -> dict:
         if not src_path.exists():
             return {"error": f"コピー元が見つかりません: {src}"}
         if src_path.is_dir():
-            return {"error": f"ディレクトリのコピーはサポートしていません。ファイルを指定してください: {src}"}
+            # ディレクトリ丸ごとコピー（既存ディレクトリにはマージ・同名ファイル上書き）
+            existed = dst_path.exists()
+            n = _count_files(src_path)
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copytree(str(src_path), str(dst_path), dirs_exist_ok=True)
+            if existed:
+                msg = f"ディレクトリ {src} → {dst} に{n}個のファイルをマージコピーしました（同名は上書き）"
+            else:
+                msg = f"ディレクトリ {src} → {dst} に{n}個のファイルをコピーしました"
+            return {"message": msg, "src": str(src_path), "dst": str(dst_path),
+                    "is_dir": True, "file_count": n, "overwritten": existed}
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         overwritten = dst_path.exists()
         _shutil.copy2(str(src_path), str(dst_path))
@@ -122,7 +137,7 @@ def copy_file(src: str, dst: str) -> dict:
 
 
 def move_file(src: str, dst: str) -> dict:
-    """ファイルを移動（リネーム）します。移動先に同名ファイルがある場合は上書きします。"""
+    """ファイル/ディレクトリを移動（リネーム）します。同名ファイルは上書き。ディレクトリは移動先が空きの場合のみ。"""
     import shutil as _shutil
     try:
         src_path = _resolve_safe_path(src)
@@ -130,7 +145,16 @@ def move_file(src: str, dst: str) -> dict:
         if not src_path.exists():
             return {"error": f"移動元が見つかりません: {src}"}
         if src_path.is_dir():
-            return {"error": f"ディレクトリの移動はサポートしていません。ファイルを指定してください: {src}"}
+            # ディレクトリ丸ごと移動。マージ未対応なので移動先が既存ならエラー（誤ったネスト・破壊を防ぐ）
+            if dst_path.exists():
+                return {"error": f"移動先に同名のディレクトリ/ファイルが既に存在します: {dst}\n"
+                                 f"ディレクトリのマージ移動は未対応です。別名を指定するか、先に移動先を削除してください。"}
+            n = _count_files(src_path)
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.move(str(src_path), str(dst_path))
+            msg = f"ディレクトリ {src} → {dst} に{n}個のファイルを移動しました"
+            return {"message": msg, "src": str(src_path), "dst": str(dst_path),
+                    "is_dir": True, "file_count": n, "overwritten": False}
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         overwritten = dst_path.exists()
         _shutil.move(str(src_path), str(dst_path))

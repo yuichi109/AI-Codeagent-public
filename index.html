@@ -641,6 +641,28 @@
   /* ---- Deep Research 確認ダイアログ ---- */
   #dr-confirm-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9200; align-items:center; justify-content:center; }
   #dr-confirm-overlay.open { display:flex; }
+  /* edit_file / write_file 承認モーダル */
+  #edit-approval-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9500; align-items:flex-start; justify-content:center; padding-top:60px; }
+  #edit-approval-overlay.open { display:flex; }
+  #edit-approval-dialog { background:#1e1e2e; border:1px solid #89b4fa; border-radius:12px; width:720px; max-width:96vw; max-height:80vh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.6); }
+  #edit-approval-header { padding:12px 16px 10px; border-bottom:1px solid #313244; display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  #edit-approval-title { font-size:14px; font-weight:bold; color:#cdd6f4; white-space:nowrap; }
+  #edit-approval-path { font-size:12px; color:#89b4fa; font-family:monospace; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:4px; }
+  #edit-approval-scope-warn { display:none; padding:8px 14px; background:#3a2a00; border-bottom:1px solid #f9e2af; font-size:12px; color:#f9e2af; flex-shrink:0; }
+  #edit-approval-scope-warn.visible { display:block; }
+  #edit-approval-diff-wrap { flex:1; overflow:auto; background:#181825; }
+  #edit-approval-diff-pre { margin:0; padding:10px 14px; font-family:monospace; font-size:12px; line-height:1.55; white-space:pre; }
+  .diff-add  { background:#1e3a2e; color:#a6e3a1; display:block; }
+  .diff-del  { background:#3a1e1e; color:#f38ba8; display:block; }
+  .diff-hunk { background:#1a2a3a; color:#89dceb; display:block; }
+  .diff-hdr  { color:#585b70; display:block; }
+  #edit-approval-footer { padding:10px 16px; border-top:1px solid #313244; display:flex; gap:8px; justify-content:flex-end; flex-shrink:0; }
+  #edit-approval-footer button { padding:7px 20px; border-radius:6px; border:none; cursor:pointer; font-size:13px; font-weight:600; }
+  #edit-approval-ok { background:#a6e3a1; color:#1e1e2e; }
+  #edit-approval-ok:hover { background:#94e2d5; }
+  #edit-approval-cancel-btn { background:#313244; color:#cdd6f4; }
+  #edit-approval-cancel-btn:hover { background:#45475a; }
+
   #dr-confirm-modal { background:#1e1e2e; border:1px solid #89b4fa; border-radius:12px; width:400px; max-width:92vw; box-shadow:0 8px 32px rgba(0,0,0,0.5); overflow:hidden; }
   #dr-confirm-header { background:#89b4fa; color:#1e1e2e; padding:10px 16px; font-size:14px; font-weight:bold; display:flex; align-items:center; gap:6px; }
   #dr-confirm-body { padding:16px 20px; font-size:13px; color:#cdd6f4; line-height:1.6; }
@@ -3251,6 +3273,51 @@
     cleanupConfirmStep = 0;
   }
 
+  // --- edit_file / write_file 承認モーダル ---
+  let _editApprovalId = null;
+
+  function showEditApprovalModal(data) {
+    _editApprovalId = data.request_id;
+    let label = '✏️ ファイル編集の確認';
+    if (data.name === 'write_file') label = data.is_new ? '📄 新規ファイル作成の確認' : '📝 ファイル上書きの確認';
+    else if (data.name === 'copy_file') label = '📋 ファイルコピーの確認（上書き）';
+    else if (data.name === 'move_file') label = '📦 ファイル移動の確認';
+    document.getElementById('edit-approval-title').textContent = label;
+    document.getElementById('edit-approval-path').textContent = data.path || '';
+    // スコープ外警告
+    const warnEl = document.getElementById('edit-approval-scope-warn');
+    if (data.out_of_scope && data.scope) {
+      document.getElementById('edit-approval-scope-name').textContent = data.scope;
+      warnEl.classList.add('visible');
+    } else {
+      warnEl.classList.remove('visible');
+    }
+    const pre = document.getElementById('edit-approval-diff-pre');
+    pre.innerHTML = '';
+    for (const line of (data.diff || '').split('\n')) {
+      const span = document.createElement('span');
+      span.textContent = line + '\n';
+      if (line.startsWith('+++') || line.startsWith('---')) span.className = 'diff-hdr';
+      else if (line.startsWith('@@'))  span.className = 'diff-hunk';
+      else if (line.startsWith('+'))   span.className = 'diff-add';
+      else if (line.startsWith('-'))   span.className = 'diff-del';
+      pre.appendChild(span);
+    }
+    document.getElementById('edit-approval-overlay').classList.add('open');
+  }
+
+  async function respondEditApproval(approved) {
+    const id = _editApprovalId;
+    _editApprovalId = null;
+    document.getElementById('edit-approval-overlay').classList.remove('open');
+    if (!id) return;
+    await fetch(`/edit-approval/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved })
+    });
+  }
+
   async function handleCleanupExec() {
     const execBtn = document.getElementById('cleanup-exec-btn');
     const confirmMsg = document.getElementById('cleanup-confirm-msg');
@@ -4087,6 +4154,8 @@
             saveHistory();
           } else if (data.type === 'todo_update') {
             renderTodos(data.todos);
+          } else if (data.type === 'edit_approval_request') {
+            showEditApprovalModal(data);
           } else if (data.type === 'cleanup_preview') {
             showCleanupModal(data.data);
           } else if (data.type === 'ansible_chooser') {
@@ -5765,6 +5834,23 @@
 </div>
 
 <!-- Draw.io ファイル選択モーダル -->
+<div id="edit-approval-overlay" onclick="if(event.target===this)respondEditApproval(false)">
+  <div id="edit-approval-dialog">
+    <div id="edit-approval-header">
+      <span id="edit-approval-title">✏️ ファイル編集の確認</span>
+      <span id="edit-approval-path"></span>
+    </div>
+    <div id="edit-approval-scope-warn">⚠️ 作業ディレクトリ外のファイルです。スコープ: <strong id="edit-approval-scope-name"></strong></div>
+    <div id="edit-approval-diff-wrap">
+      <pre id="edit-approval-diff-pre"></pre>
+    </div>
+    <div id="edit-approval-footer">
+      <button id="edit-approval-cancel-btn" onclick="respondEditApproval(false)">キャンセル</button>
+      <button id="edit-approval-ok" onclick="respondEditApproval(true)">適用</button>
+    </div>
+  </div>
+</div>
+
 <div id="drawio-picker-modal" onclick="if(event.target===this)closeDrawioPicker()">
   <div id="drawio-picker-dialog">
     <h3>📂 .drawio ファイルを選択</h3>

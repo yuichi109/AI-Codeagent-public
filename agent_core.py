@@ -28,7 +28,7 @@ from config import (
     FOUNDRY_API_VERSION,
 )
 from prompts import get_system_prompt
-from tools.file_tools import read_file, write_file, edit_file, list_files, glob_files, grep
+from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, list_files, glob_files, grep
 from tools.command_tools import run_command, _truncate_output
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
@@ -59,6 +59,8 @@ TOOL_REGISTRY: dict = {
     "read_file": read_file,
     "write_file": write_file,
     "edit_file": edit_file,
+    "copy_file": copy_file,
+    "move_file": move_file,
     "list_files": list_files,
     "glob_files": glob_files,
     "grep": grep,
@@ -154,6 +156,36 @@ TOOLS: list = [
                     "expected_replacements": {"type": "integer", "description": "置換が発生すべき回数 (デフォルト: 1)"},
                 },
                 "required": ["path", "old_str", "new_str"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "copy_file",
+            "description": "ファイルをコピーします。スコープをまたぐコピーに使用してください。src・dst は workspace ルート相対パスで指定すること。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {"type": "string", "description": "コピー元ファイルのパス（workspace ルート相対）"},
+                    "dst": {"type": "string", "description": "コピー先ファイルのパス（workspace ルート相対）"},
+                },
+                "required": ["src", "dst"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_file",
+            "description": "ファイルを移動（リネーム）します。スコープをまたぐ移動や同スコープ内のリネームに使用してください。src・dst は workspace ルート相対パスで指定すること。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "src": {"type": "string", "description": "移動元ファイルのパス（workspace ルート相対）"},
+                    "dst": {"type": "string", "description": "移動先ファイルのパス（workspace ルート相対）"},
+                },
+                "required": ["src", "dst"],
             },
         },
     },

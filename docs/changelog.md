@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-04（セッション32）v1.6.7 move_file ツール追加
+
+### 実装内容
+
+#### move_file ツール追加
+
+| 項目 | 内容 |
+|---|---|
+| 実装 | `tools/file_tools.py` に `move_file(src, dst)` 追加（`shutil.move` 使用） |
+| 用途 | ファイルのリネーム・サブディレクトリをまたぐ移動（例: `HOGE/a.txt` → `FUGA/a.txt`） |
+| 承認フロー | 移動先が新規 → 移動元内容をプレビュー表示 / 既存ファイルあり → unified diff表示 |
+| バイナリ | バイナリファイルはテキストメッセージで確認 |
+| キャンセル | キャンセル時はファイルが移動しないことをブラウザテストで確認済み |
+| タイトル | モーダルに「📦 ファイル移動の確認」と表示 |
+
+- `agent_core.py` に `copy_file` / `move_file` 両方を追加（BGエージェントからも使用可能）
+- ディレクトリ丸ごとの移動は現状非対応（ファイル単位のみ）
+
+#### 変更ファイル
+
+- `tools/file_tools.py`: `move_file` 関数追加
+- `server.py`: `move_file` 登録・スキーマ定義・承認フロー・システムプロンプト追加
+- `agent_core.py`: `copy_file` / `move_file` の import・TOOL_REGISTRY・TOOLS 追加
+- `index.html`: `move_file` 承認モーダルのタイトルラベル追加
+- `config.py`: v1.6.6 → v1.6.7
+
+---
+
 ## 2026-06-04（セッション31）v1.6.6 ファイル操作承認フロー・copy_file
 
 ### 実装内容

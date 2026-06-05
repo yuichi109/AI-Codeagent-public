@@ -1559,6 +1559,7 @@ class ChatRequest(BaseModel):
     history: list = []
     images: list = []  # base64 画像リスト [{data: "base64...", mime: "image/png"}, ...]
     bypass_approval: bool = False
+    mode: str = "confirm"  # "confirm"（許可を確認）| "plan"（プランモード=読み取り専用）| "auto"（自動=承認バイパス）
     no_think: bool = False
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
     multi_agent: bool = False
@@ -1705,9 +1706,9 @@ def _gather_auto_context(workspace_scope: str = "") -> str:
     return "<auto_context>\n" + "\n\n".join(parts) + "\n</auto_context>"
 
 
-async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = ""):
+async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False):
     try:
-        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think, workspace_scope):
+        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think, workspace_scope, plan_mode):
             yield chunk
     except Exception as e:
         import traceback
@@ -1954,7 +1955,7 @@ def _sanitize_history(history: list) -> list:
 
 _NOTIFY_KEYWORDS = ["メールして", "メールで教えて", "メールで知らせて", "メールで報告", "メールで通知", "終わったら知らせて", "終わったら教えて", "完了したらメール", "通知して"]
 
-async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = ""):
+async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False):
     _notify_on_done = any(kw in user_message for kw in _NOTIFY_KEYWORDS)
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
@@ -1988,7 +1989,9 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         user_content = user_message
     if no_think and isinstance(user_content, str):
         user_content = f"/no_think\n{user_content}"
-    if bypass_approval and isinstance(user_content, str):
+    if plan_mode and isinstance(user_content, str):
+        user_content = f"[プランモードON: 読み取り専用。変更系ツールは使わず、調査して実装計画だけを提示すること]\n{user_content}"
+    elif bypass_approval and isinstance(user_content, str):
         user_content = f"[承認バイパスON: 確認・提案なしで即実行すること]\n{user_content}"
     # 自動コンテキスト収集（Claude Code方式: git status/diff/log をユーザーメッセージ先頭に注入）
     auto_ctx = _gather_auto_context(workspace_scope)
@@ -1997,7 +2000,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             user_content = [{"type": "text", "text": auto_ctx}] + user_content
         else:
             user_content = f"{auto_ctx}\n\n{user_content}"
-    system_prompt = get_system_prompt(bypass_approval)
+    system_prompt = get_system_prompt(bypass_approval, plan_mode)
     if workspace_scope:
         system_prompt += (
             f"\n\n## 作業ディレクトリ制限\n"
@@ -2178,6 +2181,25 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             parsed_calls = [(_name, _args, _tc_id) for _name, _args, _tc_id, _ in _scope_checked]
         else:
             _scope_errors = {}
+
+        # プランモード: 読み取り専用ツール以外はブロック（変更系を実行させない）
+        if plan_mode:
+            _PLAN_READONLY_TOOLS = {
+                "read_file", "list_files", "glob_files", "grep",
+                "web_search", "web_fetch", "web_research",
+                "code_lint", "todo_read", "todo_update",
+                "rag_search", "rag_list",
+                "read_pdf", "read_docx", "read_xlsx", "read_pptx",
+                "list_ansible_playbooks", "gather_host_info",
+                "protected_list_read", "workspace_cleanup_preview", "check_background",
+            }
+            _plan_block_msg = json.dumps({
+                "error": "プランモード中のため、このツールは実行できません（読み取り専用）。"
+                         "ファイル変更・コマンド実行はせず、調査結果と実装計画を文章で提示してください。"
+            }, ensure_ascii=False)
+            for _name, _args, _tc_id in parsed_calls:
+                if _name not in _PLAN_READONLY_TOOLS and _tc_id not in _scope_errors:
+                    _scope_errors[_tc_id] = _plan_block_msg
 
         # ツールを実行（run_commandはストリーミング、write/edit/copy_fileは承認フロー、他は並列）
         _STREAMING_TOOLS = {"run_command"}
@@ -2674,7 +2696,10 @@ async def chat(req: ChatRequest):
     if req.multi_agent or req.resume_job_id:
         stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
     else:
-        stream = agent_stream(req.message, req.history, req.images, req.bypass_approval, req.no_think, req.workspace_scope)
+        # mode を優先解釈（後方互換: 旧 bypass_approval フラグも auto 扱いで尊重）
+        plan_mode = (req.mode == "plan")
+        bypass = (req.mode == "auto") or req.bypass_approval
+        stream = agent_stream(req.message, req.history, req.images, bypass, req.no_think, req.workspace_scope, plan_mode)
     return StreamingResponse(stream, media_type="text/event-stream")
 
 

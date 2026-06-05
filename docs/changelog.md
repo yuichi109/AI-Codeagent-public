@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-06-05（セッション36）v1.8.0 実行モード（プランモード）導入
+
+### 実装内容（改善ポイント② [docs/improvement-points.md](improvement-points.md)）
+
+承認バイパスのトグルボタンを廃止し、3つの実行モードを選ぶドロップダウンに統合した。
+
+#### モード仕様
+| モード | 挙動 |
+|---|---|
+| 🔒 許可を確認（confirm） | 従来の bypass=OFF。変更系ツールは承認モーダルを表示 |
+| 📋 プランモード（plan） | **読み取り専用**。変更系ツールはサーバー側でブロック。調査して実装計画だけを提示 |
+| 🔓 自動（auto） | 従来の bypass=ON。確認なしで即実行 |
+
+#### バックエンド（server.py / prompts.py）
+- `ChatRequest` に `mode` フィールド追加（後方互換: 旧 `bypass_approval` も auto 扱いで尊重）
+- `/chat` で `mode` を解釈し `plan_mode` / `bypass` を導出して `agent_stream` に伝播
+- プランモード時、読み取り専用許可リスト（read_file/list_files/grep/web_search 等）以外のツール呼び出しを `_scope_errors` 経由でブロック
+- `prompts.py`: `PLAN_SECTION` 追加・`get_system_prompt(bypass_approval, plan_mode)` に拡張
+
+#### フロント（index.html）
+- 承認ボタン → `#mode-select` ドロップダウンに置換（localStorage `agentMode`・旧 `bypassApproval` から自動移行）
+- `getMode()` / `isBypassActive()`（後方互換）/ `isPlanActive()` / `setMode()` 追加
+- `/bypass` を自動モードトグルに変更・`/mode` コマンド新設
+- リクエストボディに `mode` を追加
+
+#### 検証（実API）
+- plan: write_file がブロックされファイル未作成を確認 ✅
+- auto: ファイル即作成を確認 ✅
+- confirm: 従来の承認フロー維持 ✅
+
+#### 変更ファイル
+- `server.py`: ChatRequest・agent_stream/_agent_stream_inner の plan_mode 伝播・プランモードブロック・/chat 解釈
+- `prompts.py`: PLAN_SECTION・get_system_prompt 拡張
+- `index.html`: モードドロップダウン UI/CSS/JS・リクエストボディ
+- `config.py`: v1.7.2 → v1.8.0
+
+---
+
 ## 2026-06-05（セッション35-2）v1.7.2 エージェントループ持久力向上
 
 ### 実装内容（改善ポイント① [docs/improvement-points.md](improvement-points.md)）

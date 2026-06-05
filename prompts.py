@@ -105,6 +105,18 @@ BYPASS_SECTION = """
 
 BYPASS_DISABLED_SECTION = ""
 
+PLAN_SECTION = """
+## 📋 プランモード: ON（最優先ルール）
+
+現在は**読み取り専用のプランモード**。ファイルの変更・コマンド実行・画像生成など、状態を変える操作は一切できない（システム側でブロックされる）。
+
+- 使えるのは調査系ツールのみ（read_file / list_files / glob_files / grep / web_search 等）。
+- 変更系ツール（write_file / edit_file / run_command 等）を呼んでもブロックされ、エラーが返る。**呼ばないこと。**
+- やるべきこと: コードや状況を調査し、**何をどう実装するかの計画を文章で提示する**。
+- 計画は「①やること ②変更するファイル ③想定リスク」を簡潔にまとめる。
+- 計画を出したら「この計画で進めてよければ、モードを『許可を確認』か『自動』に切り替えて指示してください」と伝えて終わる。実装はしない。
+"""
+
 _gitlab_section = f"""
 ## GitLab 連携
 - GitLab ユーザー: {GITLAB_USER}
@@ -169,8 +181,13 @@ _RESPONSES_API_RULE = f"""
 """ if RESPONSES_API_ENABLED else ""
 
 
-def get_system_prompt(bypass_approval: bool = False) -> str:
-    bypass_section = BYPASS_SECTION if bypass_approval else BYPASS_DISABLED_SECTION
+def get_system_prompt(bypass_approval: bool = False, plan_mode: bool = False) -> str:
+    if plan_mode:
+        bypass_section = PLAN_SECTION
+    elif bypass_approval:
+        bypass_section = BYPASS_SECTION
+    else:
+        bypass_section = BYPASS_DISABLED_SECTION
     skills = _load_skills()
     skills_section = f"\n### 登録済みスキル\n\n{skills}" if skills else ""
     claude_mds_section = _load_workspace_agent_mds()

@@ -3282,6 +3282,7 @@
     if (data.name === 'write_file') label = data.is_new ? '📄 新規ファイル作成の確認' : '📝 ファイル上書きの確認';
     else if (data.name === 'copy_file') label = data.is_dir ? '📁 フォルダコピーの確認' : '📋 ファイルコピーの確認（上書き）';
     else if (data.name === 'move_file') label = data.is_dir ? '📁 フォルダ移動の確認' : '📦 ファイル移動の確認';
+    else if (data.name === 'delete_file') label = data.is_dir ? '🗑️ フォルダ削除の確認' : '🗑️ ファイル削除の確認';
     document.getElementById('edit-approval-title').textContent = label;
     document.getElementById('edit-approval-path').textContent = data.path || '';
     // スコープ外警告
@@ -5986,6 +5987,7 @@
         del.title = '削除';
         del.onclick = async (e) => {
           e.stopPropagation();
+          if (!confirm(`画像「${path.split('/').pop()}」を削除しますか？\nこの操作は元に戻せません。`)) return;
           await fetch(`/workspace/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
           thumb.remove();
           if (_srcImgSelectedPath === path) {

@@ -41,7 +41,7 @@ _OPENAI_DEFAULT_MODELS = [
     "o3",
     "o4-mini",
 ]
-from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, list_files, glob_files, grep
+from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, delete_file, list_files, glob_files, grep
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
@@ -337,6 +337,7 @@ TOOL_REGISTRY = {
     "edit_file": edit_file,
     "copy_file": copy_file,
     "move_file": move_file,
+    "delete_file": delete_file,
     "list_files": list_files,
     "glob_files": glob_files,
     "grep": grep,
@@ -463,6 +464,20 @@ TOOLS = [
                     "dst": {"type": "string", "description": "移動先のパス（workspace ルート相対）。例: 'HOGE/new_name.txt'（リネーム）または 'FUGA/newsrc'（別スコープへ移動）"},
                 },
                 "required": ["src", "dst"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "ファイルまたはディレクトリを削除します。ディレクトリを指定すると配下を再帰的に削除します。元に戻せない操作のため、実行前に必ずユーザーに確認を求めます。path は必ず workspace ルート相対パスで指定すること（スコープ名を二重に含めないこと）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "削除するファイル/ディレクトリのパス（workspace ルート相対）。例: 'HOGE/old.txt' や 'HOGE/tmp'（ディレクトリ）"},
+                },
+                "required": ["path"],
             },
         },
     },
@@ -2123,9 +2138,9 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             if _name in _SCOPE_TOOLS and workspace_scope:
                 _args["_workspace_scope"] = workspace_scope
 
-        # スコープが設定されている場合、書き込み系ツール(write_file/edit_file)のパスがスコープ外なら即エラー返却
-        # copy_file は例外（クロススコープ操作が目的のツール）
-        _WRITE_TOOLS = {"write_file", "edit_file"}
+        # スコープが設定されている場合、書き込み系ツール(write_file/edit_file/delete_file)のパスがスコープ外なら即エラー返却
+        # copy_file/move_file は例外（クロススコープ操作が目的のツール）。delete は破壊的なのでスコープ内に限定する
+        _WRITE_TOOLS = {"write_file", "edit_file", "delete_file"}
         if workspace_scope:
             _scope_dir = (ALLOWED_WORK_DIR / workspace_scope).resolve()
             _scope_checked = []
@@ -2152,7 +2167,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 
         # ツールを実行（run_commandはストリーミング、write/edit/copy_fileは承認フロー、他は並列）
         _STREAMING_TOOLS = {"run_command"}
-        _APPROVAL_TOOLS = {"edit_file", "write_file", "copy_file", "move_file"}
+        _APPROVAL_TOOLS = {"edit_file", "write_file", "copy_file", "move_file", "delete_file"}
         _SEQUENTIAL_TOOLS = _STREAMING_TOOLS | _APPROVAL_TOOLS
         _DR_SKIP_MSG = json.dumps({"error": "Deep Research の同時複数呼び出しは禁止されています。1ターンに1回のみ呼び出してください。"}, ensure_ascii=False)
         if any(name in _SEQUENTIAL_TOOLS for name, _, _ in parsed_calls):
@@ -2172,8 +2187,10 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         elif chunk["type"] == "result":
                             result_str = chunk["result"]
                     results.append(result_str or json.dumps({"error": "ストリーミング結果なし", "stdout": "", "stderr": "", "returncode": -1}))
-                elif name in _APPROVAL_TOOLS:
-                    # diff 生成してユーザー承認を待つ（write_file / edit_file / copy_file）
+                elif name in _APPROVAL_TOOLS and not bypass_approval:
+                    # diff 生成してユーザー承認を待つ（write_file / edit_file / copy_file / move_file / delete_file）
+                    # bypass_approval=True（非同期エージェント等）の場合はこの分岐に入らず、
+                    # 最後の else（execute_tool_async 直接実行）に落ちて確認なしで即実行される
                     req_id = uuid.uuid4().hex[:8]
                     diff_str = ""
                     can_preview = False
@@ -2320,6 +2337,30 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                                 except UnicodeDecodeError:
                                     diff_str = f"[バイナリファイル] {args.get('src', '')} → {display_path} に移動します"
                                     can_preview = True
+
+                        elif name == "delete_file":
+                            target = _resolve_safe_path(args.get("path", ""))
+                            try:
+                                display_path = str(target.relative_to(scope_dir))
+                            except ValueError:
+                                display_path = str(target.relative_to(ALLOWED_WORK_DIR))
+                                out_of_scope = bool(workspace_scope)
+                            if target.is_dir():
+                                is_dir_op = True
+                                n = sum(1 for p in target.rglob("*") if p.is_file())
+                                diff_str = f"🗑️ ディレクトリ {display_path} を削除します（{n}個のファイル）。元に戻せません。"
+                                can_preview = True
+                            elif target.exists():
+                                try:
+                                    old_content = target.read_text(encoding="utf-8")
+                                    preview_lines = old_content.splitlines()[:30]
+                                    diff_str = f"🗑️ {display_path} を削除します。元に戻せません。\n\n"
+                                    diff_str += "\n".join(f"-{l}" for l in preview_lines)
+                                    if len(old_content.splitlines()) > 30:
+                                        diff_str += f"\n... （他 {len(old_content.splitlines()) - 30} 行）"
+                                except UnicodeDecodeError:
+                                    diff_str = f"🗑️ [バイナリファイル] {display_path} を削除します。元に戻せません。"
+                                can_preview = True
                     except Exception:
                         pass
 

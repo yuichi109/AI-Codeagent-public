@@ -15,6 +15,34 @@ BLOCKED_COMMANDS = {
 
 LONG_RUNNING_CMDS = {"docker", "apt", "apt-get", "pip", "pip3", "npm", "yarn", "brew", "sudo", "ansible-galaxy", "ansible-playbook", "ansible"}
 
+# 破壊的なファイル削除コマンド。対象パスが作業ディレクトリ外を指す場合はブロックする。
+DESTRUCTIVE_FILE_CMDS = {"rm", "rmdir", "unlink", "shred", "srm"}
+
+
+def _check_destructive_paths(args: list, resolved_work_dir: Path) -> str | None:
+    """rm 等の破壊的コマンドの削除対象が許可ディレクトリ外を指していないか検証する。
+    パストラバーサル（../）や作業ディレクトリ外の絶対パスを検出したらエラー文を返す。
+    問題なければ None。"""
+    base = os.path.basename(args[0])
+    if base not in DESTRUCTIVE_FILE_CMDS:
+        return None
+    for raw in args[1:]:
+        if raw.startswith("-"):
+            continue  # -rf などのフラグはスキップ
+        pp = Path(raw)
+        target = pp.resolve() if pp.is_absolute() else (resolved_work_dir / pp).resolve()
+        target_str = str(target)
+        inside = any(
+            target_str == str(d) or target_str.startswith(str(d) + os.sep)
+            for d in ALLOWED_WORK_DIRS
+        )
+        if not inside:
+            return (
+                f"パストラバーサルを検出しました。'{raw}' は許可された作業ディレクトリ外を指しています。\n"
+                f"作業ディレクトリ外のファイル/ディレクトリ削除は禁止されています。"
+            )
+    return None
+
 
 def _truncate_output(text: str, limit: int = 8000) -> str:
     """長い出力を先頭+末尾で切り詰める。エラーが末尾に出るコマンドに対応。"""
@@ -212,6 +240,11 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
     if not any(resolved_str.startswith(str(d)) for d in ALLOWED_WORK_DIRS):
         dirs = ", ".join(str(d) for d in ALLOWED_WORK_DIRS)
         return {"error": f"許可された作業ディレクトリ外へのアクセスは禁止されています\n許可: {dirs}", "stdout": "", "stderr": "", "returncode": -1}
+
+    # rm/rmdir 等で作業ディレクトリ外（../ や絶対パス）を削除しようとする操作をブロック
+    destructive_err = _check_destructive_paths(args, resolved_work_dir)
+    if destructive_err:
+        return {"error": destructive_err, "stdout": "", "stderr": "", "returncode": -1}
 
     # タイムアウト決定: timeout_minutes > LONG_RUNNING_CMDS > デフォルト の優先順
     if timeout_minutes is not None:

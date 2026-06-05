@@ -28,7 +28,7 @@ from config import (
     FOUNDRY_API_VERSION,
 )
 from prompts import get_system_prompt
-from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, list_files, glob_files, grep
+from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, delete_file, list_files, glob_files, grep
 from tools.command_tools import run_command, _truncate_output
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
@@ -61,6 +61,7 @@ TOOL_REGISTRY: dict = {
     "edit_file": edit_file,
     "copy_file": copy_file,
     "move_file": move_file,
+    "delete_file": delete_file,
     "list_files": list_files,
     "glob_files": glob_files,
     "grep": grep,
@@ -186,6 +187,20 @@ TOOLS: list = [
                     "dst": {"type": "string", "description": "移動先のパス（workspace ルート相対）"},
                 },
                 "required": ["src", "dst"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "ファイルまたはディレクトリを削除します。ディレクトリは配下を再帰的に削除します。元に戻せないため必ずユーザーに確認を求めます。path は workspace ルート相対パスで指定すること。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "削除するファイル/ディレクトリのパス（workspace ルート相対）"},
+                },
+                "required": ["path"],
             },
         },
     },

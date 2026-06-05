@@ -166,6 +166,29 @@ def move_file(src: str, dst: str) -> dict:
         return {"error": f"移動エラー: {e}"}
 
 
+def delete_file(path: str) -> dict:
+    """ファイル/ディレクトリを削除します。ディレクトリは配下を再帰的に削除します。承認フロー対象。"""
+    import shutil as _shutil
+    try:
+        target = _resolve_safe_path(path)
+        if not target.exists():
+            return {"error": f"削除対象が見つかりません: {path}"}
+        # 許可ディレクトリのルート自体（workspace 等）の削除は禁止
+        if any(target == d for d in ALLOWED_WORK_DIRS):
+            return {"error": f"作業ディレクトリのルート自体は削除できません: {path}"}
+        if target.is_dir():
+            n = _count_files(target)
+            _shutil.rmtree(str(target))
+            return {"message": f"ディレクトリ {path} を削除しました（{n}個のファイル）",
+                    "path": str(target), "is_dir": True, "file_count": n}
+        target.unlink()
+        return {"message": f"{path} を削除しました", "path": str(target), "is_dir": False}
+    except PermissionError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"削除エラー: {e}"}
+
+
 def glob_files(pattern: str, path: str = ".") -> dict:
     """glob パターンでファイルパスを検索します。** で再帰検索できます。"""
     try:

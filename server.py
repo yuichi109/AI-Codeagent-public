@@ -2021,8 +2021,13 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     is_local = _provider_config["type"] not in ("azure", "foundry", "gemini")
     tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
-    max_iterations = 30
+    # 自律ループ上限: 通常60、bypass（非同期/マルチAI経由）は確認UIを出せないため120固定
+    max_iterations = 120 if bypass_approval else 60
     iteration = 0
+    # ループ検知: 同一(ツール名+引数)の連続呼び出しを数え、10連続で空回りと判断して停止
+    _last_call_sig = None
+    _repeat_count = 0
+    _spinning = False
     while iteration < max_iterations:
         iteration += 1
         # ローカルモデルは role:tool を Jinja テンプレートで処理できない場合があるため変換
@@ -2125,6 +2130,15 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 else:
                     _filtered.append(_call)
             parsed_calls = _filtered
+
+        # ループ検知: このターンのツール呼び出しシグネチャを直前ターンと比較
+        _call_sig = json.dumps([[n, a] for n, a, _ in parsed_calls], sort_keys=True, ensure_ascii=False)
+        if _call_sig == _last_call_sig:
+            _repeat_count += 1
+        else:
+            _repeat_count = 1
+            _last_call_sig = _call_sig
+        _spinning = (_repeat_count >= 10)
 
         # tool_start イベントを全件先に送信
         for name, args, tc_id in parsed_calls:
@@ -2614,8 +2628,40 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             messages.append(vision_msg)
             turn_messages.append(vision_msg)
 
+        # ループ検知: 同一操作を10連続で繰り返したら空回りとみなして停止
+        if _spinning:
+            msg = "[同じ操作を10回連続で繰り返したため停止しました。アプローチを変える必要があります。]"
+            turn_messages.append({"role": "assistant", "content": msg})
+            yield f"data: {json.dumps({'type': 'answer_chunk', 'content': msg})}\n\n"
+            yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
+            break
+
+        # 上限到達 → 延長確認（bypass時は確認UIを出せないため上限でそのまま打ち止め）
+        if iteration >= max_iterations and not bypass_approval:
+            _ext_req_id = uuid.uuid4().hex[:8]
+            _ext_ev = asyncio.Event()
+            _pending_edit_approvals[_ext_req_id] = {"event": _ext_ev, "approved": None}
+            yield f"data: {json.dumps({'type': 'extend_approval_request', 'request_id': _ext_req_id, 'iteration': iteration})}\n\n"
+            yield f": flush\n\n"
+            async def _wait_ext(_ev=_ext_ev):
+                try:
+                    await asyncio.wait_for(_ev.wait(), timeout=300)
+                except asyncio.TimeoutError:
+                    pass
+            _ext_task = asyncio.create_task(_wait_ext())
+            while not _ext_task.done():
+                done, _ = await asyncio.wait({_ext_task}, timeout=10)
+                if not done:
+                    yield f": keepalive\n\n"
+            _ext_approved = _pending_edit_approvals.get(_ext_req_id, {}).get("approved", False)
+            _pending_edit_approvals.pop(_ext_req_id, None)
+            if _ext_approved:
+                max_iterations += 30  # 承認されたら30回延長してループ続行
+            # 非承認なら while 条件で抜けて下の上限超過ハンドラが発火
+
     # ループ上限超過（無限ループ防止）
-    if iteration >= max_iterations:
+    if iteration >= max_iterations and not _spinning:
         msg = f"[ツール呼び出しが{max_iterations}回に達したため停止しました]"
         turn_messages.append({"role": "assistant", "content": msg})
         yield f"data: {json.dumps({'type': 'answer_chunk', 'content': msg})}\n\n"

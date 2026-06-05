@@ -4190,6 +4190,19 @@
                 }
               }
             }
+          } else if (data.type === 'syntax_check') {
+            const v = data.verdict || {};
+            const fname = (v.path || '').split('/').pop();
+            const badge = document.createElement('div');
+            badge.style.cssText = `font-size:11px;margin:4px 0;padding:3px 8px;border-radius:4px;${v.ok ? 'color:#a6e3a1;background:rgba(166,227,161,0.12);' : 'color:#f38ba8;background:rgba(243,139,168,0.12);'}`;
+            badge.textContent = v.ok
+              ? `🔍 構文チェック OK (${v.checker}) — ${fname}`
+              : `🔍 構文チェック NG (${v.checker}) — ${fname}: ${(v.detail || '').slice(0, 200)}`;
+            if (currentToolGroupEl && currentToolGroupEl.parentNode) {
+              currentToolGroupEl.parentNode.insertBefore(badge, currentToolGroupEl.nextSibling);
+            } else if (currentResultEl) {
+              currentResultEl.appendChild(badge);
+            }
           } else if (data.type === 'answer_chunk') {
             genPhase = 'responding'; genTokenChars += data.content.length; updateGenStatus();
             updateStatusLine(statusEl, 'Responding...');
@@ -7032,6 +7045,18 @@ function _bgStartStream(jobId) {
               outEl.appendChild(meta);
               outEl.scrollTop = outEl.scrollHeight;
             }
+          }
+          // 保存時の構文チェック結果を表示
+          const sc = (info.meta || {}).syntax_check;
+          if (sc && outEl) {
+            const fname = (sc.path || '').split('/').pop();
+            const scEl = document.createElement('div');
+            scEl.style.cssText = `font-size:10px;margin-top:2px;${sc.ok ? 'color:#a6e3a1;' : 'color:#f38ba8;'}`;
+            scEl.textContent = sc.ok
+              ? `🔍 構文OK (${sc.checker}) ${fname}`
+              : `🔍 構文NG (${sc.checker}) ${fname}: ${(sc.detail || '').slice(0, 150)}`;
+            outEl.appendChild(scEl);
+            outEl.scrollTop = outEl.scrollHeight;
           }
         } catch (_) {}
       } else if (d.type === 'job_end') {

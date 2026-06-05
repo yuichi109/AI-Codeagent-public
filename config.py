@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.9.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -169,6 +169,9 @@ RESPONSES_API_ENDPOINT: str = os.getenv("RESPONSES_API_ENDPOINT", "")
 RESPONSES_API_KEY: str      = os.getenv("RESPONSES_API_KEY", "")
 RESPONSES_API_MODEL: str    = os.getenv("RESPONSES_API_MODEL", "")
 RESPONSES_API_VERSION: str  = os.getenv("RESPONSES_API_VERSION", "")
+
+# 保存時の自動構文チェック（検証ループ）。write_file/edit_file 後に構文チェックを走らせ結果を注入する
+VERIFY_ON_WRITE_ENABLED: bool = os.getenv("VERIFY_ON_WRITE", "true").lower() == "true"
 
 # RAG 埋め込みモデル設定 (省略可)
 # RAG_EMBED_MODE: "default"（ChromaDB内蔵）または "azure"（Azure OpenAI text-embedding）

@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-06-05（セッション37）v1.9.0 検証ループ（保存時の自動構文チェック）
+
+### 背景（改善ポイント⑤ [docs/improvement-points.md](improvement-points.md)）
+
+「作らせると初回はだいたいエラー → ユーザーが実行ログを手で貼り付けて指示 → クォート/エスケープ問題でモデルが自分の直前の判断を否定して堂々巡り」という不満への対処。`prompts.py` には既に自己修正の指示があるが小型モデルが従わないため、**仕組みで構文チェックを強制**する。
+
+### 実装内容
+
+`write_file` / `edit_file` でコードファイルを保存した直後に、拡張子に応じた**構文チェックを自動実行**し、合否をツール結果に注入する。モデルはログを貼られなくても保存時に構文エラーを受け取り、客観的な PASS/FAIL で振動が収束する。実行はせず構文チェックのみ。
+
+#### チェッカー
+| 拡張子 | 手段 |
+|---|---|
+| `.py` | `python -m py_compile` |
+| `.json` | `json.loads`（組込） |
+| `.yml`/`.yaml` | `yaml.safe_load`（無ければスキップ） |
+| `.sh`/`.bash` | `bash -n`（Linuxのみ） |
+| `.js`/`.jsx`/`.mjs`/`.cjs` | `node --check`（無ければスキップ） |
+| その他・`.ts`/`.tsx` | スキップ |
+
+#### 新規・変更ファイル
+- `tools/verify_tools.py`（新規）: `verify_file_syntax()` / `augment_tool_result_with_verify()`
+- `config.py`: `VERIFY_ON_WRITE_ENABLED`（`.env` の `VERIFY_ON_WRITE`・デフォルト true）
+- `server.py`: 通常チャットの tool 結果 append 直前で注入・`syntax_check` SSE イベント送出
+- `agent_core.py`: BG の tool 結果 append 直前で注入・`tool_end` の `meta.syntax_check` で送出
+- `index.html`: `syntax_check` イベント／BG `meta.syntax_check` のバッジ表示
+
+#### 設計
+- **advisory 方式**（render_manim の自己修正パターンと同思想）。自動書き換え・ブロックはせず、合否を見せるだけ。既存の3回リトライ制限・10連続同一操作のループ検知が歯止め
+- バイナリ不在環境では黙ってスキップ（None）。py/json/yaml は pure Python なので main・for_windows 両方で動作
+- `VERIFY_ON_WRITE=false` で即オフ
+
+#### 検証
+- 単体: 壊れ py/json 検出・正常 ok・.md スキップ・非対象ツール素通し ✅
+- e2e（実API・auto）: 壊れた py を保存 → `syntax_check{ok:false}` 注入 → **モデルが自分で「1行目に SyntaxError」と検知して報告** ✅
+
+---
+
 ## 2026-06-05（セッション36）v1.8.0 実行モード（プランモード）導入
 
 ### 実装内容（改善ポイント② [docs/improvement-points.md](improvement-points.md)）

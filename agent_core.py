@@ -26,7 +26,9 @@ from config import (
     RESPONSES_API_MODEL,
     AZURE_OPENAI_API_VERSION,
     FOUNDRY_API_VERSION,
+    VERIFY_ON_WRITE_ENABLED,
 )
+from tools.verify_tools import augment_tool_result_with_verify
 from prompts import get_system_prompt
 from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, delete_file, list_files, glob_files, grep
 from tools.command_tools import run_command, _truncate_output
@@ -1219,6 +1221,11 @@ async def run_agent(
                             meta[k] = r[k]
             except Exception:
                 pass
+            # 保存時の自動構文チェック（検証ループ）: 構文エラーを結果に注入してモデルへ突き返す
+            if VERIFY_ON_WRITE_ENABLED:
+                result, verdict = augment_tool_result_with_verify(name, args, result)
+                if verdict:
+                    meta["syntax_check"] = verdict
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc_id,

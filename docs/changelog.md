@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-06-05（セッション35）v1.8.0 削除の安全化
+
+### 実装内容
+
+#### 1. run_command パストラバーサル削除ブロック（`tools/command_tools.py`）
+
+- `rm`/`rmdir`/`unlink`/`shred`/`srm` の対象パスを実行前に検証
+- `../` や workspace 外の絶対パスを指す削除を即ブロック（エラー返却）
+- `&&` チェーン内の rm も分割後に各コマンドが個別に検証される
+- workspace 内の rm は従来通り動作
+
+#### 2. delete_file ツール追加（`tools/file_tools.py` / `agent_core.py` / `server.py`）
+
+- `delete_file(path)` — ファイル/ディレクトリを安全に削除
+- `_resolve_safe_path` でスコープ制限・workspace ルート自体の削除禁止
+- 承認フロー：ファイルは削除内容を赤プレビュー、ディレクトリはファイル数概要
+- スコープ設定時はスコープ外削除を即ブロック
+
+#### 3. bypass_approval が承認フローに効いていなかった問題を修正（`server.py`）
+
+- `elif name in _APPROVAL_TOOLS` → `elif name in _APPROVAL_TOOLS and not bypass_approval` に変更
+- bypass=True（非同期エージェント・Obsidian inbox）時は承認モーダルをスキップして即実行
+- bypass=False（通常チャット）は従来通り承認モーダルあり
+- スコープ制限は bypass 時も維持
+
+#### 4. UI ソース画像削除に confirm 追加（`index.html`）
+
+- 「生成元画像」ピッカーの × ボタンで confirm ダイアログを表示
+
+#### 変更ファイル
+
+- `tools/command_tools.py`: `DESTRUCTIVE_FILE_CMDS` / `_check_destructive_paths()` 追加
+- `tools/file_tools.py`: `delete_file()` 追加
+- `agent_core.py`: `delete_file` インポート・TOOL_REGISTRY 登録・ツール定義追加
+- `server.py`: `delete_file` 登録・承認フローに削除プレビュー追加・`bypass_approval` 分岐修正
+- `index.html`: 削除モーダルラベル追加・ソース画像削除に confirm 追加
+- `config.py`: v1.7.0 → v1.8.0
+
+---
+
 ## 2026-06-04（セッション33）v1.7.0 ディレクトリ丸ごと copy/move 対応
 
 ### 実装内容

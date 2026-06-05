@@ -45,6 +45,8 @@ from tools.file_tools import read_file, write_file, edit_file, copy_file, move_f
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
+from tools.verify_tools import augment_tool_result_with_verify
+from config import VERIFY_ON_WRITE_ENABLED
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup, archive_workspace
 from tools.manim_tools import render_manim
@@ -2624,6 +2626,12 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         }, ensure_ascii=False)
                 except Exception:
                     pass
+
+            # 保存時の自動構文チェック（検証ループ）: 構文エラーを結果に注入してモデルへ突き返す
+            if VERIFY_ON_WRITE_ENABLED:
+                tool_result_for_msg, _verdict = augment_tool_result_with_verify(name, args, tool_result_for_msg)
+                if _verdict:
+                    yield f"data: {json.dumps({'type': 'syntax_check', 'verdict': _verdict}, ensure_ascii=False)}\n\n"
 
             yield f"data: {json.dumps({'type': 'tool_result', 'result': tool_result_for_msg})}\n\n"
 

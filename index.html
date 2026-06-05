@@ -2612,7 +2612,7 @@
       if (u?.role === 'bg_user') {
         const next = history[i + 1];
         if (next?.role === 'bg_result') {
-          _bgRenderChatCard(u.content, next.content, next.status, next.timestamp);
+          _bgRenderChatCard(u.content, next.content, next.status, next.timestamp, null, next.savedPaths || []);
           i += 2;
         } else {
           i++;
@@ -6879,7 +6879,7 @@ function _syncBodies() {
 // ---- Add a job card ----
 function _bgAddCard(jobId, msgPreview) {
   if (document.getElementById(`bg-card-${jobId}`)) return;
-  if (!_bgJobs[jobId]) _bgJobs[jobId] = { status: 'pending', es: null };
+  if (!_bgJobs[jobId]) _bgJobs[jobId] = { status: 'pending', es: null, savedPaths: [] };
   const body = _bgActiveBody() || document.getElementById('bg-pane-body');
   const card = document.createElement('div');
   card.className = 'bg-job-card status-pending';
@@ -6903,16 +6903,17 @@ function _bgSaveToChat(jobId, status) {
   const outEl = document.getElementById(`bg-out-${jobId}`);
   const resultText = outEl ? outEl.textContent : '（出力なし）';
   const prompt = (_bgJobs[jobId] && _bgJobs[jobId].prompt) || '';
+  const savedPaths = (_bgJobs[jobId] && _bgJobs[jobId].savedPaths) || [];
   const timestamp = new Date().toISOString();
   history.push({ role: 'bg_user', content: prompt });
-  history.push({ role: 'bg_result', content: resultText, job_id: jobId, status, timestamp });
-  _bgRenderChatCard(prompt, resultText, status, timestamp);
+  history.push({ role: 'bg_result', content: resultText, job_id: jobId, status, timestamp, savedPaths });
+  _bgRenderChatCard(prompt, resultText, status, timestamp, null, savedPaths);
   foldOldTurns();
   updateTurnCount();
   saveHistory();
 }
 
-function _bgRenderChatCard(prompt, resultText, status, timestamp, placeholder = null) {
+function _bgRenderChatCard(prompt, resultText, status, timestamp, placeholder = null, savedPaths = []) {
   const statusIcon  = { done:'✅', failed:'❌', cancelled:'🚫', cancelling:'🚫' }[status] || '⚡';
   const statusLabel = { done:'完了', failed:'失敗', cancelled:'キャンセル', cancelling:'キャンセル中' }[status] || status;
   const timeStr = timestamp
@@ -6930,7 +6931,7 @@ function _bgRenderChatCard(prompt, resultText, status, timestamp, placeholder = 
   const resultDiv = document.createElement('div');
   resultDiv.className = 'bg-chat-result';
   resultDiv.textContent = resultText;
-  _bgLinkifyImages(resultDiv);
+  _bgLinkifyImages(resultDiv, savedPaths);
   det.appendChild(sum);
   det.appendChild(resultDiv);
   card.appendChild(promptDiv);
@@ -6947,10 +6948,17 @@ function _bgRenderChatCard(prompt, resultText, status, timestamp, placeholder = 
 }
 
 // ---- Image link detection ----
-function _bgLinkifyImages(el) {
+function _bgLinkifyImages(el, extraPaths = []) {
   const text = el.textContent;
-  const matches = [...new Set(text.match(/[\w\/\-\.]+\.(?:png|jpg|jpeg|gif|webp)/gi) || [])];
-  matches.forEach(path => {
+  const fromText = text.match(/[\w\/\-\.]+\.(?:png|jpg|jpeg|gif|webp)/gi) || [];
+  // extraPaths (saved_path from tool results) take priority — merge and deduplicate
+  const seen = new Set();
+  const allPaths = [...extraPaths, ...fromText].filter(p => {
+    if (seen.has(p)) return false;
+    seen.add(p);
+    return true;
+  });
+  allPaths.forEach(path => {
     const url = '/workspace/image?path=' + encodeURIComponent(path);
     const a = document.createElement('a');
     a.href = url; a.target = '_blank';
@@ -7010,6 +7018,11 @@ function _bgStartStream(jobId) {
           if (_IMAGE_TOOLS.includes(info.name) && info.result_preview && outEl) {
             const prov = (info.result_preview.match(/"provider"\s*:\s*"([^"]+)"/) || [])[1];
             const mdl  = (info.result_preview.match(/"model"\s*:\s*"([^"]+)"/) || [])[1];
+            const sp   = (info.result_preview.match(/"saved_path"\s*:\s*"([^"]+)"/) || [])[1];
+            if (sp && _bgJobs[jobId]) {
+              if (!_bgJobs[jobId].savedPaths) _bgJobs[jobId].savedPaths = [];
+              _bgJobs[jobId].savedPaths.push(sp);
+            }
             if (prov && mdl) {
               const meta = document.createElement('div');
               meta.style.cssText = 'color:#a6adc8;font-size:10px;opacity:0.8;margin-top:2px;';
@@ -7024,7 +7037,7 @@ function _bgStartStream(jobId) {
         _bgSetStatus(jobId, finalStatus);
         const toolEl = document.getElementById(`bg-tool-${jobId}`);
         if (toolEl) toolEl.style.display = 'none';
-        if (outEl) _bgLinkifyImages(outEl);
+        if (outEl) _bgLinkifyImages(outEl, _bgJobs[jobId]?.savedPaths || []);
         es.close();
         if (_bgJobs[jobId]) _bgJobs[jobId].es = null;
         _bgUpdateBadge();

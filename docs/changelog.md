@@ -43,6 +43,23 @@
 
 ---
 
+## 2026-06-05（セッション37）v1.8.1 BG画像リンク・メタ表示の修正
+
+### 背景
+BGエージェントで複数画像を生成させた際、完了後のリンクが `workspace/image?path=generated_xxx.png` のように**サブディレクトリ（`SUNO-Global01/AI_Output_Images/`）が欠落**して画像が表示できなかった。また `🖼️ openai / gpt-image-2` のプロバイダー/モデルバッジが長いプロンプト時に出ていなかった。
+
+### 原因と修正
+1. **画像リンクのパス欠落** — `_bgLinkifyImages` がエージェントのテキストから正規表現でファイル名だけ拾っていた。`tool_end` の `meta` に `saved_path` を蓄積し、テキスト抽出より優先して使うよう修正（`index.html`・コミット 282cad7）
+2. **バッジが出ない** — `result_preview` が200文字に切り詰められ、旧キー順 `{prompt(長文), provider, model...}` で provider/model が範囲外に押し出されていた。`image_tools.py` のキー順を provider/model/saved_path 先頭へ変更（9bc01f4）
+3. **根本対策** — `agent_core.py` の `tool_end` に専用 `meta` フィールド（provider/model/saved_path/syntax_check）を追加し、200文字切り詰めに一切依存しない構造へ。`index.html` は `info.meta` を優先・正規表現は後方互換フォールバックとして温存（6c89e3a）
+
+### 変更ファイル
+- `tools/image_tools.py`: generate_image / edit_image の返り値キー順
+- `agent_core.py`: tool_end に meta フィールド追加
+- `index.html`: savedPaths 蓄積・meta 優先・履歴復元時の引き継ぎ
+
+---
+
 ## 2026-06-05（セッション36）v1.8.0 実行モード（プランモード）導入
 
 ### 実装内容（改善ポイント② [docs/improvement-points.md](improvement-points.md)）

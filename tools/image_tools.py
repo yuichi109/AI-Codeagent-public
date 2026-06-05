@@ -96,10 +96,10 @@ def generate_image(prompt: str, size: str = None, quality: str = None, _workspac
         return {
             "image_base64": b64,
             "mime": "image/png",
-            "prompt": prompt,
             "provider": provider,
             "model": model,
             "saved_path": saved_path,
+            "prompt": prompt,
             "message": f"画像を生成しました。ワークスペースに保存済み: {saved_path}",
         }
     except Exception as e:
@@ -242,11 +242,11 @@ def edit_image(image_path: str, prompt: str, size: str = None, _workspace_scope:
         return {
             "image_base64": b64,
             "mime": "image/png",
-            "prompt": prompt,
-            "source_path": image_path,
             "provider": provider,
             "model": model,
             "saved_path": saved_path,
+            "source_path": image_path,
+            "prompt": prompt,
             "message": f"画像を編集しました。ワークスペースに保存済み: {saved_path}",
         }
     except Exception as e:

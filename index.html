@@ -661,6 +661,17 @@
   #edit-approval-ok { background:#a6e3a1; color:#1e1e2e; }
   #edit-approval-ok:hover { background:#94e2d5; }
   #edit-approval-cancel-btn { background:#313244; color:#cdd6f4; }
+  /* 自律ループ継続確認モーダル */
+  #extend-approval-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9600; align-items:flex-start; justify-content:center; padding-top:80px; }
+  #extend-approval-overlay.open { display:flex; }
+  .extend-dialog { background:#1e1e2e; border:1px solid #f9e2af; border-radius:12px; width:440px; max-width:92vw; box-shadow:0 8px 32px rgba(0,0,0,0.6); }
+  .extend-header { padding:12px 16px; border-bottom:1px solid #313244; font-size:14px; font-weight:bold; color:#f9e2af; }
+  .extend-body { padding:16px; font-size:13px; color:#cdd6f4; line-height:1.6; }
+  .extend-footer { padding:10px 16px; border-top:1px solid #313244; display:flex; gap:8px; justify-content:flex-end; }
+  .extend-footer button { padding:7px 18px; border-radius:6px; border:none; cursor:pointer; font-size:13px; font-weight:600; }
+  .extend-go { background:#a6e3a1; color:#1e1e2e; }
+  .extend-go:hover { background:#94e2d5; }
+  .extend-stop { background:#313244; color:#cdd6f4; }
   #edit-approval-cancel-btn:hover { background:#45475a; }
 
   #dr-confirm-modal { background:#1e1e2e; border:1px solid #89b4fa; border-radius:12px; width:400px; max-width:92vw; box-shadow:0 8px 32px rgba(0,0,0,0.5); overflow:hidden; }
@@ -3319,6 +3330,26 @@
     });
   }
 
+  let _extendApprovalId = null;
+  function showExtendApprovalModal(data) {
+    _extendApprovalId = data.request_id;
+    document.getElementById('extend-approval-msg').textContent =
+      `ツール呼び出しが ${data.iteration} 回に達しました。処理を続行しますか？（続行すると最大30回まで延長します）`;
+    document.getElementById('extend-approval-overlay').classList.add('open');
+  }
+
+  async function respondExtendApproval(approved) {
+    const id = _extendApprovalId;
+    _extendApprovalId = null;
+    document.getElementById('extend-approval-overlay').classList.remove('open');
+    if (!id) return;
+    await fetch(`/edit-approval/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved })
+    });
+  }
+
   async function handleCleanupExec() {
     const execBtn = document.getElementById('cleanup-exec-btn');
     const confirmMsg = document.getElementById('cleanup-confirm-msg');
@@ -4157,6 +4188,8 @@
             renderTodos(data.todos);
           } else if (data.type === 'edit_approval_request') {
             showEditApprovalModal(data);
+          } else if (data.type === 'extend_approval_request') {
+            showExtendApprovalModal(data);
           } else if (data.type === 'cleanup_preview') {
             showCleanupModal(data.data);
           } else if (data.type === 'ansible_chooser') {
@@ -5848,6 +5881,17 @@
     <div id="edit-approval-footer">
       <button id="edit-approval-cancel-btn" onclick="respondEditApproval(false)">キャンセル</button>
       <button id="edit-approval-ok" onclick="respondEditApproval(true)">適用</button>
+    </div>
+  </div>
+</div>
+
+<div id="extend-approval-overlay" onclick="if(event.target===this)respondExtendApproval(false)">
+  <div class="extend-dialog">
+    <div class="extend-header">⏳ 処理の継続確認</div>
+    <div class="extend-body"><span id="extend-approval-msg"></span></div>
+    <div class="extend-footer">
+      <button class="extend-stop" onclick="respondExtendApproval(false)">ここで停止</button>
+      <button class="extend-go" onclick="respondExtendApproval(true)">続行（+30回）</button>
     </div>
   </div>
 </div>

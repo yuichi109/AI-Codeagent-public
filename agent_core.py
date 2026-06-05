@@ -1206,11 +1206,17 @@ async def run_agent(
             if isinstance(result, Exception):
                 result = json.dumps({"error": str(result)}, ensure_ascii=False)
             # base64画像データはトークン肥大化を防ぐため除去
+            meta = {}
             try:
                 r = json.loads(result)
-                if isinstance(r, dict) and "image_base64" in r:
-                    r.pop("image_base64")
-                    result = json.dumps(r, ensure_ascii=False)
+                if isinstance(r, dict):
+                    if "image_base64" in r:
+                        r.pop("image_base64")
+                        result = json.dumps(r, ensure_ascii=False)
+                    # 画像系メタは200文字切り詰めで欠落しないよう専用フィールドで渡す
+                    for k in ("provider", "model", "saved_path"):
+                        if r.get(k):
+                            meta[k] = r[k]
             except Exception:
                 pass
             messages.append({
@@ -1219,6 +1225,6 @@ async def run_agent(
                 "content": result,
             })
             preview = result[:200] if len(result) > 200 else result
-            await emit("tool_end", json.dumps({"name": name, "result_preview": preview}, ensure_ascii=False))
+            await emit("tool_end", json.dumps({"name": name, "result_preview": preview, "meta": meta}, ensure_ascii=False))
 
     await emit("max_turns", f"最大ターン数 ({max_turns}) に達しました。")

@@ -7015,10 +7015,12 @@ function _bgStartStream(jobId) {
         try {
           const info = JSON.parse(d.content || '{}');
           const _IMAGE_TOOLS = ['generate_image', 'edit_image', 'watermark_image'];
-          if (_IMAGE_TOOLS.includes(info.name) && info.result_preview && outEl) {
-            const prov = (info.result_preview.match(/"provider"\s*:\s*"([^"]+)"/) || [])[1];
-            const mdl  = (info.result_preview.match(/"model"\s*:\s*"([^"]+)"/) || [])[1];
-            const sp   = (info.result_preview.match(/"saved_path"\s*:\s*"([^"]+)"/) || [])[1];
+          if (_IMAGE_TOOLS.includes(info.name) && outEl) {
+            // info.meta（専用フィールド）を優先。なければ result_preview から正規表現で抽出（後方互換）
+            const m = info.meta || {};
+            const prov = m.provider || (info.result_preview || '').match(/"provider"\s*:\s*"([^"]+)"/)?.[1];
+            const mdl  = m.model    || (info.result_preview || '').match(/"model"\s*:\s*"([^"]+)"/)?.[1];
+            const sp   = m.saved_path || (info.result_preview || '').match(/"saved_path"\s*:\s*"([^"]+)"/)?.[1];
             if (sp && _bgJobs[jobId]) {
               if (!_bgJobs[jobId].savedPaths) _bgJobs[jobId].savedPaths = [];
               _bgJobs[jobId].savedPaths.push(sp);

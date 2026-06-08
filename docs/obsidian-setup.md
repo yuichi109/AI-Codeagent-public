@@ -60,10 +60,16 @@ cat >> ~/.bashrc << 'EOF'
 export GTK_IM_MODULE=ibus
 export QT_IM_MODULE=ibus
 export XMODIFIERS=@im=ibus
+# キーボードを日本語配列に固定（これが無いと半角/全角キーが「`」になり切り替え不能）
+setxkbmap jp 2>/dev/null
 alias obsidian='~/.local/bin/obsidian-ime'
 EOF
 source ~/.bashrc
 ```
+
+> `setxkbmap jp` は必須。日本語キーボードでも WSL 内では US 配列扱いになる環境があり、
+> その場合「半角/全角」キーがバッククォート（`` ` ``）になって日本語に切り替えられない。
+> `setxkbmap: command not found` のときは `sudo apt install x11-xkb-utils`。
 
 > ⚠️ `.bashrc` で ibus-daemon を**直接起動してはいけない**。WSLg のディスプレイ接続が
 > 確立する前に起動するとIME接続が壊れる。起動はラッパー（④-2）に一本化する。
@@ -110,10 +116,7 @@ EOF
 chmod +x ~/.local/bin/obsidian-ime
 ```
 
-> **日本語入力への切り替えは「半角/全角」キー**で行う。
-> 半角/全角を押すと `` ` ``（バッククォート）が連打される場合は、キーボードが US 配列扱いに
-> なっている。ラッパー内の `setxkbmap jp` で解消する（既存環境なら手動で一度実行）。
-> 永続化したい場合は `echo 'setxkbmap jp 2>/dev/null' >> ~/.bashrc` を追記。
+> **日本語入力への切り替えは「半角/全角」キー**で行う（④-1 の `setxkbmap jp` 前提）。
 
 ### ⑤ xdg-open を差し替え（ファイルエクスプローラー誤起動防止）
 

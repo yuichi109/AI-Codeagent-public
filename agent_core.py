@@ -27,6 +27,7 @@ from config import (
     AZURE_OPENAI_API_VERSION,
     FOUNDRY_API_VERSION,
     VERIFY_ON_WRITE_ENABLED,
+    ASYNC_MAX_TURNS,
 )
 from tools.verify_tools import augment_tool_result_with_verify
 from prompts import get_system_prompt
@@ -1072,7 +1073,7 @@ async def run_agent(
     message: str,
     provider_config: dict,
     on_chunk,           # async callable(job_id, seq, ctype, content)
-    max_turns: int = 30,
+    max_turns: int = ASYNC_MAX_TURNS,
     history: list | None = None,
     workspace_scope: str = "",
 ):

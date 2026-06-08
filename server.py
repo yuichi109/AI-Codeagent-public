@@ -47,6 +47,9 @@ from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.verify_tools import augment_tool_result_with_verify
 from config import VERIFY_ON_WRITE_ENABLED
+from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SECONDS
+from tools import schedule_db
+from tools.scheduler import scheduler_loop as _scheduler_loop
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup, archive_workspace
 from tools.manim_tools import render_manim
@@ -268,6 +271,19 @@ async def lifespan(app: FastAPI):
     )
     print(f"[INFO] async_worker 起動 PID={_async_worker_proc.pid}", flush=True)
 
+    # 定時実行スケジューラー起動（in-process asyncio タスク）
+    global _scheduler_task
+    if SCHEDULER_ENABLED:
+        schedule_db.init_db()
+        _scheduler_task = asyncio.create_task(
+            _scheduler_loop(
+                _scheduler_create_job,
+                tick_seconds=SCHEDULER_TICK_SECONDS,
+                catchup_hours=SCHEDULER_CATCHUP_HOURS,
+            )
+        )
+        print("[INFO] スケジューラー起動", flush=True)
+
     # MCP クライアント起動・動的ツール登録
     try:
         await mcp_manager.start()
@@ -281,6 +297,14 @@ async def lifespan(app: FastAPI):
         print(f"[WARN] MCP 起動エラー: {e}")
 
     yield
+
+    # スケジューラー停止
+    if _scheduler_task is not None:
+        _scheduler_task.cancel()
+        try:
+            await _scheduler_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     # inbox ワーカー停止
     stop_worker()
@@ -300,6 +324,48 @@ async def lifespan(app: FastAPI):
 
 
 _async_worker_proc: subprocess.Popen | None = None  # set in lifespan
+_scheduler_task: "asyncio.Task | None" = None  # set in lifespan
+
+
+def _scheduler_create_job(task: dict) -> str:
+    """スケジューラー発火時のコールバック。テンプレ指示文を BG ジョブとして登録する。"""
+    prompt = task.get("template_prompt") or ""
+    if not prompt:
+        raise RuntimeError(f"テンプレ未設定 task_id={task.get('id')}")
+    job_id = _create_async_job(
+        message=prompt,
+        provider_config=dict(_provider_config),
+        max_turns=30,
+        workspace_scope=task.get("workspace_scope") or "",
+    )
+    # 1回限りのタスクは発火後に無効化する
+    if task.get("recurrence_type") == "once":
+        try:
+            schedule_db.set_enabled(task["id"], False)
+        except Exception:
+            pass
+    return job_id
+
+
+def _win_kill_worker_then_exit():
+    """
+    Windows で os._exit する前に async_worker（子プロセス）をツリーごと終了させる。
+
+    os._exit は lifespan の shutdown を飛ばすため、放置すると async_worker が
+    孤児化し tray の自動再起動で二重起動してしまう（コマンド二重実行の原因）。
+    ここでプロセスツリーごと殺してから exit することで孤児化を防ぐ。
+    """
+    import os as _os
+    try:
+        if _async_worker_proc is not None and _async_worker_proc.poll() is None:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(_async_worker_proc.pid)],
+                capture_output=True,
+            )
+    except Exception:
+        pass
+    _os._exit(0)
+
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -332,6 +398,108 @@ def show_mermaid_batch_refine_dialog(path: str, _workspace_scope: str = "") -> d
 
 # edit_file / write_file の承認待ちリスト {request_id: {"event": asyncio.Event, "approved": bool|None}}
 _pending_edit_approvals: dict = {}
+
+# ---------------------------------------------------------------------------
+# 定時実行スケジューラー: 自然言語管理ツール（メインチャットのエージェント用）
+# ---------------------------------------------------------------------------
+_DOW_MAP = {
+    "月": 0, "火": 1, "水": 2, "木": 3, "金": 4, "土": 5, "日": 6,
+    "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+}
+
+
+def _coerce_dow(value) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, int):
+        return value
+    s = str(value).strip().lower()[:3]
+    s_jp = str(value).strip()[0] if str(value).strip() else ""
+    if s in _DOW_MAP:
+        return _DOW_MAP[s]
+    if s_jp in _DOW_MAP:
+        return _DOW_MAP[s_jp]
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def schedule_template_create(name: str, prompt: str) -> dict:
+    """実行内容テンプレート（エージェントへの指示文）を登録する。"""
+    if schedule_db.get_template_by_name(name):
+        return {"error": f"テンプレート '{name}' は既に存在します"}
+    tid = schedule_db.create_template(name, prompt)
+    return {"ok": True, "template_id": tid, "name": name}
+
+
+def schedule_template_list() -> dict:
+    """登録済みの実行内容テンプレート一覧を返す。"""
+    return {"templates": [
+        {"id": t["id"], "name": t["name"], "prompt": t["prompt"]}
+        for t in schedule_db.list_templates()
+    ]}
+
+
+def schedule_task_create(name: str, template_name: str, recurrence_type: str,
+                         time_of_day: str = None, day_of_week=None,
+                         interval_hours: int = None, run_at: str = None,
+                         workspace_scope: str = "") -> dict:
+    """
+    定時タスクを登録する。template_name で実行内容テンプレートを指定する。
+    recurrence_type: daily(毎日) / weekly(毎週) / once(1回) / hourly(毎時) / interval(N時間ごと)
+    daily/weekly は time_of_day='HH:MM'、weekly は day_of_week(0=月..6=日 か 曜日名)も必要。
+    once は run_at='YYYY-MM-DDTHH:MM:SS'。interval は interval_hours が必要。
+    """
+    tpl = schedule_db.get_template_by_name(template_name)
+    if not tpl:
+        return {"error": f"テンプレート '{template_name}' が見つかりません。先に schedule_template_create で作成してください"}
+    try:
+        tid = schedule_db.create_task(
+            name=name, template_id=tpl["id"], recurrence_type=recurrence_type,
+            time_of_day=time_of_day, day_of_week=_coerce_dow(day_of_week),
+            interval_hours=interval_hours, run_at=run_at,
+            workspace_scope=workspace_scope or "",
+        )
+    except ValueError as e:
+        return {"error": str(e)}
+    task = schedule_db.get_task(tid)
+    nr = _scheduler_mod.next_run(task)
+    return {"ok": True, "task_id": tid, "name": name,
+            "next_run": nr.isoformat(timespec="seconds") if nr else None}
+
+
+def schedule_task_list() -> dict:
+    """登録済みの定時タスク一覧（次回予定時刻つき）を返す。"""
+    out = []
+    for t in schedule_db.list_tasks():
+        nr = _scheduler_mod.next_run(t)
+        out.append({
+            "id": t["id"], "name": t["name"], "template": t.get("template_name"),
+            "recurrence_type": t["recurrence_type"],
+            "time_of_day": t.get("time_of_day"), "day_of_week": t.get("day_of_week"),
+            "interval_hours": t.get("interval_hours"), "run_at": t.get("run_at"),
+            "enabled": bool(t["enabled"]),
+            "next_run": nr.isoformat(timespec="seconds") if nr else None,
+        })
+    return {"tasks": out}
+
+
+def schedule_task_delete(task_id: int) -> dict:
+    """定時タスクを削除する。"""
+    if schedule_db.get_task(int(task_id)) is None:
+        return {"error": f"タスク id={task_id} が見つかりません"}
+    schedule_db.delete_task(int(task_id))
+    return {"ok": True, "deleted": int(task_id)}
+
+
+def schedule_task_set_enabled(task_id: int, enabled: bool) -> dict:
+    """定時タスクの有効/無効を切り替える。"""
+    if schedule_db.get_task(int(task_id)) is None:
+        return {"error": f"タスク id={task_id} が見つかりません"}
+    schedule_db.set_enabled(int(task_id), bool(enabled))
+    return {"ok": True, "task_id": int(task_id), "enabled": bool(enabled)}
+
 
 TOOL_REGISTRY = {
     "read_file": read_file,
@@ -385,6 +553,12 @@ TOOL_REGISTRY = {
     "edit_image": edit_image,
     "watermark_image": watermark_image,
     "show_mermaid_batch_refine_dialog": show_mermaid_batch_refine_dialog,
+    "schedule_template_create": schedule_template_create,
+    "schedule_template_list": schedule_template_list,
+    "schedule_task_create": schedule_task_create,
+    "schedule_task_list": schedule_task_list,
+    "schedule_task_delete": schedule_task_delete,
+    "schedule_task_set_enabled": schedule_task_set_enabled,
 }
 
 if RESPONSES_API_ENABLED:
@@ -1218,6 +1392,85 @@ TOOLS = [
                     "path": {"type": "string", "description": "対象MDファイルのパス（作業ディレクトリ相対）"},
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_template_create",
+            "description": "定時実行の『実行内容テンプレート』を登録する。エージェントへの指示文に名前を付けて保存し、後で定時タスクから参照する。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "テンプレートの名前（一意）"},
+                    "prompt": {"type": "string", "description": "実行時にエージェントへ渡す指示文"},
+                },
+                "required": ["name", "prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_template_list",
+            "description": "登録済みの実行内容テンプレート一覧を取得する。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_task_create",
+            "description": "定時タスクを登録する。指定時刻に template_name の指示文を自動実行する。繰り返し: daily(毎日)/weekly(毎週)/once(1回)/hourly(毎時)/interval(N時間ごと)。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "タスク名"},
+                    "template_name": {"type": "string", "description": "実行内容テンプレートの名前（schedule_template_create で作成済みのもの）"},
+                    "recurrence_type": {"type": "string", "enum": ["daily", "weekly", "once", "hourly", "interval"], "description": "繰り返し種別"},
+                    "time_of_day": {"type": "string", "description": "daily/weekly の実行時刻 'HH:MM'（24時間表記）"},
+                    "day_of_week": {"type": "string", "description": "weekly の曜日。0=月..6=日、または '月'〜'日' / 'mon'〜'sun'"},
+                    "interval_hours": {"type": "integer", "description": "interval の間隔（時間）"},
+                    "run_at": {"type": "string", "description": "once の実行日時 'YYYY-MM-DDTHH:MM:SS'"},
+                    "workspace_scope": {"type": "string", "description": "作業スコープ（省略可）"},
+                },
+                "required": ["name", "template_name", "recurrence_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_task_list",
+            "description": "登録済みの定時タスク一覧（次回予定時刻つき）を取得する。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_task_delete",
+            "description": "定時タスクを削除する。",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "integer", "description": "削除するタスクのID"}},
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_task_set_enabled",
+            "description": "定時タスクの有効/無効を切り替える。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "integer", "description": "対象タスクのID"},
+                    "enabled": {"type": "boolean", "description": "true=有効 / false=無効"},
+                },
+                "required": ["task_id", "enabled"],
             },
         },
     },
@@ -2841,6 +3094,169 @@ async def async_worker_status():
     """Check if the worker process is alive."""
     alive = _async_worker_proc.poll() is None
     return JSONResponse({"alive": alive, "pid": _async_worker_proc.pid})
+
+
+# ===========================================================================
+# 定時実行スケジューラー API（/schedule/*）
+# ===========================================================================
+from tools import scheduler as _scheduler_mod  # noqa: E402
+
+
+def _task_with_next_run(task: dict) -> dict:
+    nr = _scheduler_mod.next_run(task)
+    return {**task, "next_run": nr.isoformat(timespec="seconds") if nr else None}
+
+
+class TemplateRequest(BaseModel):
+    name: str
+    prompt: str
+
+
+class TaskRequest(BaseModel):
+    name: str
+    template_id: int
+    recurrence_type: str
+    time_of_day: str | None = None
+    day_of_week: int | None = None
+    interval_hours: int | None = None
+    run_at: str | None = None
+    workspace_scope: str = ""
+    enabled: bool = True
+
+
+class TaskUpdateRequest(BaseModel):
+    name: str | None = None
+    template_id: int | None = None
+    recurrence_type: str | None = None
+    time_of_day: str | None = None
+    day_of_week: int | None = None
+    interval_hours: int | None = None
+    run_at: str | None = None
+    workspace_scope: str | None = None
+    enabled: bool | None = None
+
+
+class RunDecideRequest(BaseModel):
+    action: str  # 'run' | 'skip'
+
+
+# ---- テンプレート ----
+@app.get("/schedule/templates")
+async def schedule_templates_list():
+    return JSONResponse({"templates": schedule_db.list_templates()})
+
+
+@app.post("/schedule/templates")
+async def schedule_template_create_ep(req: TemplateRequest):
+    if schedule_db.get_template_by_name(req.name):
+        return JSONResponse({"error": "同名のテンプレートが既に存在します"}, status_code=400)
+    tid = schedule_db.create_template(req.name, req.prompt)
+    return JSONResponse({"id": tid})
+
+
+@app.put("/schedule/templates/{template_id}")
+async def schedule_template_update_ep(template_id: int, req: TemplateRequest):
+    if schedule_db.get_template(template_id) is None:
+        return JSONResponse({"error": "テンプレートが見つかりません"}, status_code=404)
+    schedule_db.update_template(template_id, name=req.name, prompt=req.prompt)
+    return JSONResponse({"id": template_id, "updated": True})
+
+
+@app.delete("/schedule/templates/{template_id}")
+async def schedule_template_delete_ep(template_id: int):
+    in_use = schedule_db.template_in_use(template_id)
+    if in_use:
+        return JSONResponse(
+            {"error": f"このテンプレートは {in_use} 件のタスクで使用中です"},
+            status_code=400,
+        )
+    schedule_db.delete_template(template_id)
+    return JSONResponse({"id": template_id, "deleted": True})
+
+
+# ---- タスク ----
+@app.get("/schedule/tasks")
+async def schedule_tasks_list():
+    tasks = [_task_with_next_run(t) for t in schedule_db.list_tasks()]
+    return JSONResponse({"tasks": tasks})
+
+
+@app.post("/schedule/tasks")
+async def schedule_task_create_ep(req: TaskRequest):
+    if schedule_db.get_template(req.template_id) is None:
+        return JSONResponse({"error": "テンプレートが見つかりません"}, status_code=400)
+    try:
+        tid = schedule_db.create_task(
+            name=req.name, template_id=req.template_id,
+            recurrence_type=req.recurrence_type, time_of_day=req.time_of_day,
+            day_of_week=req.day_of_week, interval_hours=req.interval_hours,
+            run_at=req.run_at, workspace_scope=req.workspace_scope,
+            enabled=req.enabled,
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"id": tid})
+
+
+@app.put("/schedule/tasks/{task_id}")
+async def schedule_task_update_ep(task_id: int, req: TaskUpdateRequest):
+    if schedule_db.get_task(task_id) is None:
+        return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
+    fields = {k: v for k, v in req.model_dump().items() if v is not None}
+    try:
+        schedule_db.update_task(task_id, **fields)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"id": task_id, "updated": True})
+
+
+@app.delete("/schedule/tasks/{task_id}")
+async def schedule_task_delete_ep(task_id: int):
+    schedule_db.delete_task(task_id)
+    return JSONResponse({"id": task_id, "deleted": True})
+
+
+# ---- 実行記録（occurrence / フラグ）----
+@app.get("/schedule/runs")
+async def schedule_runs_list(task_id: int | None = None, since: str | None = None,
+                             status: str | None = None):
+    return JSONResponse({"runs": schedule_db.list_runs(task_id=task_id, since=since, status=status)})
+
+
+@app.delete("/schedule/runs/{run_id}")
+async def schedule_run_clear_ep(run_id: int):
+    """フラグの手動解除（実行記録を削除して未実行扱いに戻す）。"""
+    schedule_db.clear_run(run_id)
+    return JSONResponse({"id": run_id, "cleared": True})
+
+
+@app.post("/schedule/runs/{run_id}/decide")
+async def schedule_run_decide_ep(run_id: int, req: RunDecideRequest):
+    """取りこぼし(pending)の決定: run=今すぐ実行 / skip=スキップ。"""
+    run = schedule_db.get_run(run_id)
+    if run is None:
+        return JSONResponse({"error": "実行記録が見つかりません"}, status_code=404)
+    if run["status"] != "pending":
+        return JSONResponse({"error": "既に決定済みです", "status": run["status"]}, status_code=400)
+
+    if req.action == "skip":
+        schedule_db.decide_run(run_id, "skipped")
+        return JSONResponse({"id": run_id, "status": "skipped"})
+
+    if req.action == "run":
+        task = schedule_db.get_task(run["task_id"])
+        if task is None:
+            schedule_db.decide_run(run_id, "failed")
+            return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
+        try:
+            job_id = _scheduler_create_job(task)
+            schedule_db.decide_run(run_id, "executed", job_id=job_id)
+            return JSONResponse({"id": run_id, "status": "executed", "job_id": job_id})
+        except Exception as e:
+            schedule_db.decide_run(run_id, "failed")
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    return JSONResponse({"error": "action は 'run' か 'skip'"}, status_code=400)
 
 
 @app.get("/async-agent/mcp-tools")
@@ -4577,8 +4993,8 @@ async def mcp_servers_save(data: dict):
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
     if sys.platform == "win32":
-        import os
-        threading.Timer(0.5, lambda: os._exit(0)).start()
+        # os._exit 前に async_worker をツリーごと終了させ孤児化を防ぐ
+        threading.Timer(0.5, _win_kill_worker_then_exit).start()
         return JSONResponse({"status": "ok"})
     else:
         try:
@@ -5132,9 +5548,9 @@ async def setup_save(req: SetupSaveRequest):
 
     # サービスを再起動
     if sys.platform == "win32":
-        # Windows: tray.py の _monitor が停止を検知して自動再起動する
-        import os
-        threading.Timer(0.5, lambda: os._exit(0)).start()
+        # Windows: tray.py の _monitor が停止を検知して自動再起動する。
+        # os._exit 前に async_worker をツリーごと終了させ孤児化を防ぐ。
+        threading.Timer(0.5, _win_kill_worker_then_exit).start()
         return JSONResponse({"status": "ok"})
     else:
         # Linux/WSL: systemd 経由で再起動

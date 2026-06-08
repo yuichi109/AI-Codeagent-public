@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.10.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -208,6 +208,14 @@ WATERMARK_FONT_SIZE: int  = int(os.getenv("WATERMARK_FONT_SIZE", "0"))  # 0 = au
 
 # ---- 非同期エージェントジョブ設定 ----
 ASYNC_MAX_JOBS: int = int(os.getenv("ASYNC_MAX_JOBS", "5"))
+
+# ---- 定時実行スケジューラー設定 ----
+# サーバー起動中、指定時刻に登録タスクを自動発火する（in-process asyncio ループ）
+SCHEDULER_ENABLED: bool = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+# 取りこぼし（サーバー停止中に過ぎた予定）をUIで確認する遡及窓（時間）
+SCHEDULER_CATCHUP_HOURS: int = int(os.getenv("SCHEDULER_CATCHUP_HOURS", "12"))
+# 発火ループのポーリング間隔（秒）
+SCHEDULER_TICK_SECONDS: int = int(os.getenv("SCHEDULER_TICK_SECONDS", "30"))
 
 # ---- マルチエージェント設定 ----
 # モデル名は現在アクティブなプロバイダーで利用できるものを指定

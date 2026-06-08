@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-06-08（セッション38）v1.10.0 定時実行スケジューラー ＋ 孤児ワーカー修正
+
+### 背景
+
+「AI-Codeagent 起動中に、指定時刻に任意のタスク（サイト訪問・死活監視・レポート生成など何でも）を自動実行したい」という要望。用途は固定せず、エージェントへの指示文を『実行内容テンプレート』として登録し、スケジュールに紐づけて定時発火する 2 層構造。
+
+### 設計の核（非破壊・additive）
+
+- **スケジューラーは別プロセスにしない** — server 内の asyncio タスクとして `lifespan` に追加。別プロセス化すると既存 async_worker と同じ孤児化バグに巻き込まれ二重発火するため。in-process なら server の生死と完全連動。
+- **occurrence（回ごと）単位の冪等化** — `task_runs` に `UNIQUE(task_id, scheduled_at)` を張り `INSERT OR IGNORE` で発火権を原子取得。万一ワーカーが二重でも「その回」は 1 回しか発火しない。
+- **実行は既存 BG 基盤に完全に乗る** — 発火時は `create_job` を呼ぶだけ。実行・ストリーミング・履歴は既存 async_worker が処理。既存 `jobs.db`／`async_job_db.py` には触らず**別 DB `data/schedule.db`** を新設。
+
+### 機能
+
+- 繰り返し: 毎日 / 毎週(曜日) / 1回 / 毎時 / N時間ごと
+- 登録: 自然言語（チャットのツール）＋ 専用 UI フォーム（テンプレはプルダウン選択）
+- 管理 UI: ヘッダー `⏰ 定時` → 専用モーダル（タスク一覧・新規登録・テンプレ管理・フラグ確認/解除）
+- **取りこぼし（キャッチアップ）**: 予定時刻から 12 時間以内に未実行かつフラグなしなら UI で 1 度だけボタン確認（今すぐ実行 / スキップ）。毎時タスクでも質問は最新 1 件に集約、古い回は静かに skipped。フラグは occurrence 単位なので翌回は自動的に未設定。
+- 結果通知: 既存 BG チャットカード描画関数を再利用してチャットに表示（BG 内部は無改変）。
+
+### 新規・変更ファイル
+
+- `tools/schedule_db.py`（新規）: 3 テーブル（task_templates / scheduled_tasks / task_runs）と CRUD・`claim_occurrence`（冪等）・`decide_run`・`purge_old_runs`
+- `tools/scheduler.py`（新規）: `compute_due`（純関数・テスト可）・`next_run`・`scheduler_loop`（毎 tick で 12h 窓全体を走査し on-time 発火 / 取りこぼし検知）
+- `config.py`: `SCHEDULER_ENABLED` / `SCHEDULER_CATCHUP_HOURS=12` / `SCHEDULER_TICK_SECONDS=30`、`APP_VERSION=1.10.0`
+- `server.py`: `/schedule/*` API 群、自然言語管理ツール 6 種を TOOL_REGISTRY / TOOLS に追加、lifespan に scheduler_loop 起動・cancel
+- `index.html`: `⏰ 定時` ボタン・専用モーダル・取りこぼし確認・結果通知ポーリング
+- `tests/test_scheduler.py`（単体 13 件）・`tests/e2e_schedule.py`・`tests/e2e_catchup.py`
+
+### フェーズ2: 既存の孤児ワーカーバグ修正
+
+Windows 版で**設定保存時**（`server.py` の MCP 保存 / setup 保存）に `os._exit(0)` でサーバーだけ即死 → lifespan の shutdown を飛ばし async_worker が孤児化 → tray の自動再起動で二重ワーカー → コマンド二重実行、という積み残しを修正。
+
+- `server.py`: win32 の os._exit 2 箇所を `_win_kill_worker_then_exit()` 経由に変更。os._exit 前に `taskkill /T /F` でワーカーをツリーごと終了。
+- `async_worker.py`: 起動時に `_kill_duplicate_workers()`（psutil でコマンドライン検証してから別 PID の async_worker のみ終了）を防御層として追加。PID 使い回し誤爆を避けるためコマンドライン検証必須。
+- WSL 側は systemctl restart が cgroup ごと殺すため無影響（win32 分岐のみ変更）。
+- （tray メニューの停止/再起動は `1b4e06e` で既に taskkill /T 対処済み。今回は os._exit 経路の穴を塞いだ。）
+
+### 検証
+
+- 単体 13/13 PASS（compute_due 全種別・境界・claim_occurrence 冪等）
+- 実機 e2e（WSL・systemd）: 1分後 once タスク → 自動発火 → BG ジョブ完了「e2e成功」→ once 自動無効化 ✅
+- 取りこぼし e2e: 30 分前予定 → 次 tick で pending → skip → 再質問されない ✅
+- 再起動後 async_worker は 1 つだけ・孤児なしを確認 ✅
+- ※ Windows 固有の taskkill 経路はコードレビュー済み（実機 Windows での確認は次回）
+
+---
+
 ## 2026-06-05（セッション37）v1.9.0 検証ループ（保存時の自動構文チェック）
 
 ### 背景（改善ポイント⑤ [docs/improvement-points.md](improvement-points.md)）

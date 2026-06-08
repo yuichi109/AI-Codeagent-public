@@ -346,6 +346,46 @@
   #cleanup-exec-btn:hover { background: #eb6f8e; }
   #cleanup-exec-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #cleanup-confirm-msg { font-size: 12px; color: #f38ba8; display: none; }
+  /* ---- 定時実行スケジューラー ---- */
+  #schedule-badge { display:none; margin-left:4px; background:#f9e2af; color:#1e1e2e; border-radius:8px; padding:0 6px; font-size:11px; font-weight:bold; }
+  #schedule-badge.show { display:inline-block; }
+  #sched-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:210; align-items:center; justify-content:center; }
+  #sched-overlay.open { display:flex; }
+  #sched-modal { background:#1e1e2e; border:1px solid #313244; border-radius:12px; width:760px; max-width:96vw; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+  #sched-header { padding:14px 20px; border-bottom:1px solid #313244; font-size:15px; font-weight:bold; display:flex; align-items:center; gap:8px; }
+  #sched-header .sp { flex:1; }
+  #sched-close { background:#313244; color:#cdd6f4; border:none; border-radius:6px; width:28px; height:28px; cursor:pointer; font-size:14px; }
+  #sched-close:hover { background:#45475a; }
+  #sched-tabs { display:flex; gap:4px; padding:10px 20px 0; border-bottom:1px solid #313244; }
+  .sched-tab { padding:7px 14px; background:transparent; color:#9399b2; border:none; border-bottom:2px solid transparent; cursor:pointer; font-size:13px; }
+  .sched-tab.active { color:#cdd6f4; border-bottom-color:#89b4fa; font-weight:bold; }
+  #sched-body { padding:16px 20px; overflow-y:auto; flex:1; }
+  .sched-page { display:none; }
+  .sched-page.active { display:block; }
+  #sched-pending-bar { margin-bottom:14px; }
+  .sched-pending-item { background:#2a2438; border:1px solid #f9e2af55; border-radius:8px; padding:10px 12px; margin-bottom:8px; display:flex; align-items:center; gap:10px; }
+  .sched-pending-item .pi-text { flex:1; font-size:13px; color:#f9e2af; }
+  .sched-row { background:#181825; border:1px solid #313244; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .sched-row .r-top { display:flex; align-items:center; gap:8px; }
+  .sched-row .r-name { font-weight:bold; font-size:14px; flex:1; }
+  .sched-row .r-meta { font-size:12px; color:#9399b2; margin-top:4px; }
+  .sched-row .r-runs { font-size:11px; color:#6c7086; margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; }
+  .sched-run-chip { padding:1px 7px; border-radius:6px; background:#313244; }
+  .sched-run-chip.executed { color:#a6e3a1; } .sched-run-chip.skipped { color:#f9e2af; }
+  .sched-run-chip.failed { color:#f38ba8; } .sched-run-chip.pending { color:#fab387; }
+  .sched-btn { padding:5px 12px; border:none; border-radius:6px; cursor:pointer; font-size:12px; background:#313244; color:#cdd6f4; }
+  .sched-btn:hover { background:#45475a; }
+  .sched-btn.primary { background:#89b4fa; color:#1e1e2e; font-weight:bold; }
+  .sched-btn.primary:hover { background:#74a0f0; }
+  .sched-btn.danger { background:#f38ba8; color:#1e1e2e; }
+  .sched-btn.warn { background:#f9e2af; color:#1e1e2e; }
+  .sched-field { margin-bottom:12px; }
+  .sched-field label { display:block; font-size:12px; color:#9399b2; margin-bottom:4px; }
+  .sched-field input, .sched-field select, .sched-field textarea { width:100%; box-sizing:border-box; background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:7px 9px; font-size:13px; font-family:inherit; }
+  .sched-field textarea { resize:vertical; min-height:70px; }
+  .sched-inline { display:flex; gap:10px; } .sched-inline > * { flex:1; }
+  .sched-toggle { font-size:12px; }
+  .sched-empty { color:#6c7086; font-size:13px; text-align:center; padding:18px; }
   /* ---- ワークスペーススコープバー ---- */
   #workspace-scope-bar { padding: 3px 20px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 8px; font-size: 12px; flex-shrink: 0; transition: background 0.4s, border-color 0.4s; }
   #workspace-scope-bar.scoped { background: linear-gradient(90deg, #0d1f0f 0%, #181825 70%); border-bottom-color: #40a840; }
@@ -723,6 +763,7 @@
     <button id="tts-btn" onclick="toggleTTS()" title="AIの返答を読み上げ">🔊 読み上げ</button>
     <button id="drawio-btn" onclick="toggleDrawioPanel()" title="Draw.io 作図エディタ">✏️ Draw.io</button>
     <button id="cleanup-btn" onclick="openCleanupDirect()" title="ワークスペース掃除・保護リスト編集">🧹</button>
+    <button id="schedule-btn" onclick="openScheduleModal()" title="定時実行スケジューラー">⏰ 定時<span id="schedule-badge"></span></button>
     <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
   </div>
 </div>
@@ -952,6 +993,95 @@
       <span id="cleanup-confirm-msg">⚠️ 元に戻せません。本当に削除しますか？</span>
       <button id="cleanup-cancel-btn" onclick="closeCleanupModal()">キャンセル</button>
       <button id="cleanup-exec-btn" onclick="handleCleanupExec()">削除実行 →</button>
+    </div>
+  </div>
+</div>
+
+<!-- 定時実行スケジューラー -->
+<div id="sched-overlay">
+  <div id="sched-modal">
+    <div id="sched-header">⏰ 定時実行スケジューラー<span class="sp"></span>
+      <button id="sched-close" onclick="closeScheduleModal()">✕</button>
+    </div>
+    <div id="sched-tabs">
+      <button class="sched-tab active" data-page="tasks" onclick="schedTab('tasks')">タスク一覧</button>
+      <button class="sched-tab" data-page="new" onclick="schedTab('new')">＋ 新規登録</button>
+      <button class="sched-tab" data-page="templates" onclick="schedTab('templates')">実行内容テンプレ</button>
+    </div>
+    <div id="sched-body">
+      <!-- 取りこぼし確認 -->
+      <div id="sched-pending-bar"></div>
+
+      <!-- タスク一覧 -->
+      <div class="sched-page active" id="sched-page-tasks">
+        <div id="sched-task-list"><div class="sched-empty">読み込み中…</div></div>
+      </div>
+
+      <!-- 新規登録 -->
+      <div class="sched-page" id="sched-page-new">
+        <div class="sched-field">
+          <label>タスク名</label>
+          <input id="snew-name" placeholder="例: 朝の天気チェック">
+        </div>
+        <div class="sched-field">
+          <label>実行内容テンプレート</label>
+          <select id="snew-template"></select>
+        </div>
+        <div class="sched-field">
+          <label>繰り返し</label>
+          <select id="snew-recurrence" onchange="schedOnRecurrenceChange()">
+            <option value="daily">毎日</option>
+            <option value="weekly">毎週（曜日指定）</option>
+            <option value="hourly">毎時</option>
+            <option value="interval">N時間ごと</option>
+            <option value="once">1回のみ</option>
+          </select>
+        </div>
+        <div class="sched-inline">
+          <div class="sched-field" id="snew-time-wrap">
+            <label>時刻 (HH:MM)</label>
+            <input id="snew-time" type="time" value="09:00">
+          </div>
+          <div class="sched-field" id="snew-dow-wrap" style="display:none">
+            <label>曜日</label>
+            <select id="snew-dow">
+              <option value="0">月</option><option value="1">火</option>
+              <option value="2">水</option><option value="3">木</option>
+              <option value="4">金</option><option value="5">土</option>
+              <option value="6">日</option>
+            </select>
+          </div>
+          <div class="sched-field" id="snew-interval-wrap" style="display:none">
+            <label>間隔（時間）</label>
+            <input id="snew-interval" type="number" min="1" value="6">
+          </div>
+          <div class="sched-field" id="snew-runat-wrap" style="display:none">
+            <label>実行日時</label>
+            <input id="snew-runat" type="datetime-local">
+          </div>
+        </div>
+        <div class="sched-field">
+          <label>作業スコープ（省略可）</label>
+          <input id="snew-scope" placeholder="例: SUNO-Global01（空欄=workspace全体）">
+        </div>
+        <button class="sched-btn primary" onclick="schedCreateTask()">タスクを登録</button>
+        <span id="snew-msg" style="margin-left:10px;font-size:12px;"></span>
+      </div>
+
+      <!-- テンプレ管理 -->
+      <div class="sched-page" id="sched-page-templates">
+        <div class="sched-field">
+          <label>新しいテンプレート名</label>
+          <input id="stpl-name" placeholder="例: 死活監視-本番サイト">
+        </div>
+        <div class="sched-field">
+          <label>実行内容（エージェントへの指示文）</label>
+          <textarea id="stpl-prompt" placeholder="例: https://example.com にアクセスして応答ステータスを確認し、異常があれば報告して"></textarea>
+        </div>
+        <button class="sched-btn primary" onclick="schedCreateTemplate()">テンプレを保存</button>
+        <span id="stpl-msg" style="margin-left:10px;font-size:12px;"></span>
+        <div id="sched-template-list" style="margin-top:16px;"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -7248,6 +7378,268 @@ document.addEventListener('mousemove', e => {
 // loadHistory() で積まれた BG カードをここで描画（スクリプトタグをまたぐため）
 (window._pendingBgCards || []).forEach(c => _bgRenderChatCard(c.prompt, c.content, c.status, c.timestamp, c.placeholder));
 window._pendingBgCards = null;
+
+// ===========================================================================
+// 定時実行スケジューラー UI
+// ===========================================================================
+const _RECUR_LABEL = { daily:'毎日', weekly:'毎週', hourly:'毎時', interval:'N時間ごと', once:'1回' };
+const _DOW_LABEL = ['月','火','水','木','金','土','日'];
+let _schedTemplates = [];
+// 結果通知済みの job_id（重複カード防止）
+let _schedNotified = new Set(JSON.parse(localStorage.getItem('schedNotified') || '[]'));
+// 発火済みで結果待ちの run（job_id → run情報）
+let _schedWatchJobs = {};
+
+function openScheduleModal() {
+  document.getElementById('sched-overlay').classList.add('open');
+  schedTab('tasks');
+  schedLoadAll();
+}
+function closeScheduleModal() {
+  document.getElementById('sched-overlay').classList.remove('open');
+}
+function schedTab(page) {
+  document.querySelectorAll('.sched-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.page === page));
+  document.querySelectorAll('.sched-page').forEach(p =>
+    p.classList.toggle('active', p.id === 'sched-page-' + page));
+  if (page === 'templates') schedLoadTemplates();
+  if (page === 'new') schedFillTemplateSelect();
+}
+
+function schedOnRecurrenceChange() {
+  const r = document.getElementById('snew-recurrence').value;
+  document.getElementById('snew-time-wrap').style.display     = (r === 'daily' || r === 'weekly') ? '' : 'none';
+  document.getElementById('snew-dow-wrap').style.display      = (r === 'weekly') ? '' : 'none';
+  document.getElementById('snew-interval-wrap').style.display = (r === 'interval') ? '' : 'none';
+  document.getElementById('snew-runat-wrap').style.display    = (r === 'once') ? '' : 'none';
+}
+
+async function schedLoadAll() {
+  await schedFillTemplateSelect();
+  await schedLoadTasks();
+  await schedLoadPending();
+}
+
+// ---- テンプレート ----
+async function schedFetchTemplates() {
+  try {
+    const r = await fetch('/schedule/templates');
+    const d = await r.json();
+    _schedTemplates = d.templates || [];
+  } catch (e) { _schedTemplates = []; }
+  return _schedTemplates;
+}
+async function schedFillTemplateSelect() {
+  await schedFetchTemplates();
+  const sel = document.getElementById('snew-template');
+  if (!sel) return;
+  if (_schedTemplates.length === 0) {
+    sel.innerHTML = '<option value="">（テンプレ未登録 — 先に作成）</option>';
+  } else {
+    sel.innerHTML = _schedTemplates.map(t =>
+      `<option value="${t.id}">${_bgEsc(t.name)}</option>`).join('');
+  }
+}
+async function schedLoadTemplates() {
+  await schedFetchTemplates();
+  const box = document.getElementById('sched-template-list');
+  if (_schedTemplates.length === 0) {
+    box.innerHTML = '<div class="sched-empty">テンプレートはまだありません</div>';
+    return;
+  }
+  box.innerHTML = _schedTemplates.map(t => `
+    <div class="sched-row">
+      <div class="r-top">
+        <span class="r-name">${_bgEsc(t.name)}</span>
+        <button class="sched-btn danger" onclick="schedDeleteTemplate(${t.id})">削除</button>
+      </div>
+      <div class="r-meta">${_bgEsc(t.prompt)}</div>
+    </div>`).join('');
+}
+async function schedCreateTemplate() {
+  const name = document.getElementById('stpl-name').value.trim();
+  const prompt = document.getElementById('stpl-prompt').value.trim();
+  const msg = document.getElementById('stpl-msg');
+  if (!name || !prompt) { msg.style.color = '#f38ba8'; msg.textContent = '名前と内容は必須です'; return; }
+  const r = await fetch('/schedule/templates', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, prompt }),
+  });
+  const d = await r.json();
+  if (d.error) { msg.style.color = '#f38ba8'; msg.textContent = d.error; return; }
+  msg.style.color = '#a6e3a1'; msg.textContent = '保存しました';
+  document.getElementById('stpl-name').value = '';
+  document.getElementById('stpl-prompt').value = '';
+  schedLoadTemplates();
+}
+async function schedDeleteTemplate(id) {
+  if (!confirm('このテンプレートを削除しますか？')) return;
+  const r = await fetch('/schedule/templates/' + id, { method: 'DELETE' });
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  schedLoadTemplates();
+}
+
+// ---- タスク ----
+async function schedLoadTasks() {
+  const box = document.getElementById('sched-task-list');
+  let tasks = [];
+  try {
+    const r = await fetch('/schedule/tasks');
+    tasks = (await r.json()).tasks || [];
+  } catch (e) {}
+  // 各タスクの最近の実行記録も取得
+  if (tasks.length === 0) {
+    box.innerHTML = '<div class="sched-empty">定時タスクはまだありません。「＋ 新規登録」から作成できます。</div>';
+    return;
+  }
+  const rowsHtml = [];
+  for (const t of tasks) {
+    let runsHtml = '';
+    try {
+      const rr = await fetch('/schedule/runs?task_id=' + t.id);
+      const runs = (await rr.json()).runs || [];
+      runsHtml = runs.slice(0, 5).map(run => {
+        const when = (run.scheduled_at || '').replace('T', ' ').slice(5, 16);
+        return `<span class="sched-run-chip ${run.status}" title="${run.status}">
+          ${when} ${run.status}
+          <a href="#" onclick="schedClearRun(${run.id});return false;" style="color:#6c7086;margin-left:4px;" title="フラグ解除">✕</a>
+        </span>`;
+      }).join('');
+    } catch (e) {}
+    let recurDesc = _RECUR_LABEL[t.recurrence_type] || t.recurrence_type;
+    if (t.recurrence_type === 'daily') recurDesc += ` ${t.time_of_day || ''}`;
+    else if (t.recurrence_type === 'weekly') recurDesc += ` ${_DOW_LABEL[t.day_of_week] || '?'}曜 ${t.time_of_day || ''}`;
+    else if (t.recurrence_type === 'interval') recurDesc += `（${t.interval_hours}h）`;
+    else if (t.recurrence_type === 'once') recurDesc += ` ${(t.run_at || '').replace('T', ' ')}`;
+    const nextStr = t.next_run ? t.next_run.replace('T', ' ') : '—';
+    rowsHtml.push(`
+      <div class="sched-row">
+        <div class="r-top">
+          <span class="r-name">${_bgEsc(t.name)}</span>
+          <label class="sched-toggle"><input type="checkbox" ${t.enabled ? 'checked' : ''}
+            onchange="schedToggleTask(${t.id}, this.checked)"> 有効</label>
+          <button class="sched-btn danger" onclick="schedDeleteTask(${t.id})">削除</button>
+        </div>
+        <div class="r-meta">📋 ${_bgEsc(t.template || '?')}　/　🔁 ${recurDesc}　/　⏭ 次回: ${nextStr}</div>
+        ${runsHtml ? `<div class="r-runs">${runsHtml}</div>` : ''}
+      </div>`);
+  }
+  box.innerHTML = rowsHtml.join('');
+}
+async function schedCreateTask() {
+  const msg = document.getElementById('snew-msg');
+  const name = document.getElementById('snew-name').value.trim();
+  const template_id = parseInt(document.getElementById('snew-template').value);
+  const recurrence_type = document.getElementById('snew-recurrence').value;
+  if (!name) { msg.style.color = '#f38ba8'; msg.textContent = 'タスク名は必須です'; return; }
+  if (!template_id) { msg.style.color = '#f38ba8'; msg.textContent = 'テンプレを選択してください'; return; }
+  const payload = { name, template_id, recurrence_type,
+    workspace_scope: document.getElementById('snew-scope').value.trim() };
+  if (recurrence_type === 'daily' || recurrence_type === 'weekly')
+    payload.time_of_day = document.getElementById('snew-time').value;
+  if (recurrence_type === 'weekly')
+    payload.day_of_week = parseInt(document.getElementById('snew-dow').value);
+  if (recurrence_type === 'interval')
+    payload.interval_hours = parseInt(document.getElementById('snew-interval').value);
+  if (recurrence_type === 'once') {
+    const v = document.getElementById('snew-runat').value;
+    if (!v) { msg.style.color = '#f38ba8'; msg.textContent = '実行日時を入力してください'; return; }
+    payload.run_at = v.length === 16 ? v + ':00' : v;
+  }
+  const r = await fetch('/schedule/tasks', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  if (d.error) { msg.style.color = '#f38ba8'; msg.textContent = d.error; return; }
+  msg.style.color = '#a6e3a1'; msg.textContent = '登録しました';
+  document.getElementById('snew-name').value = '';
+  schedTab('tasks'); schedLoadTasks();
+}
+async function schedToggleTask(id, enabled) {
+  await fetch('/schedule/tasks/' + id, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+}
+async function schedDeleteTask(id) {
+  if (!confirm('このタスクを削除しますか？')) return;
+  await fetch('/schedule/tasks/' + id, { method: 'DELETE' });
+  schedLoadTasks();
+}
+async function schedClearRun(runId) {
+  await fetch('/schedule/runs/' + runId, { method: 'DELETE' });
+  schedLoadTasks();
+}
+
+// ---- 取りこぼし確認（pending）----
+async function schedLoadPending() {
+  let runs = [];
+  try {
+    const r = await fetch('/schedule/runs?status=pending');
+    runs = (await r.json()).runs || [];
+  } catch (e) {}
+  // バッジ更新
+  const badge = document.getElementById('schedule-badge');
+  if (badge) {
+    badge.textContent = runs.length ? runs.length : '';
+    badge.classList.toggle('show', runs.length > 0);
+  }
+  const bar = document.getElementById('sched-pending-bar');
+  if (!bar) return;
+  if (runs.length === 0) { bar.innerHTML = ''; return; }
+  bar.innerHTML = runs.map(run => {
+    const when = (run.scheduled_at || '').replace('T', ' ').slice(0, 16);
+    return `<div class="sched-pending-item">
+      <span class="pi-text">⚠️ 「${_bgEsc(run.task_name || '?')}」が ${when} に未実行です</span>
+      <button class="sched-btn primary" onclick="schedDecide(${run.id}, 'run')">今すぐ実行</button>
+      <button class="sched-btn warn" onclick="schedDecide(${run.id}, 'skip')">スキップ</button>
+    </div>`;
+  }).join('');
+}
+async function schedDecide(runId, action) {
+  const r = await fetch('/schedule/runs/' + runId + '/decide', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  schedLoadPending();
+  schedLoadTasks();
+}
+
+// ---- 結果通知ポーリング（既存BGカードを再利用）----
+async function schedPollResults() {
+  let runs = [];
+  try {
+    // 直近24時間の executed な run を対象
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 19);
+    const r = await fetch('/schedule/runs?status=executed&since=' + since);
+    runs = (await r.json()).runs || [];
+  } catch (e) { return; }
+  for (const run of runs) {
+    if (!run.job_id || _schedNotified.has(run.job_id)) continue;
+    // ジョブの完了状態を確認
+    try {
+      const jr = await fetch('/async-agent/jobs/' + run.job_id);
+      if (!jr.ok) continue;
+      const job = await jr.json();
+      if (['done', 'failed', 'cancelled'].includes(job.status)) {
+        const text = (job.chunks || []).map(c => c.content).join('') || '（出力なし）';
+        _bgRenderChatCard('⏰ ' + (run.task_name || '定時タスク'), text, job.status, new Date().toISOString());
+        _schedNotified.add(run.job_id);
+        localStorage.setItem('schedNotified', JSON.stringify([..._schedNotified].slice(-200)));
+      }
+    } catch (e) {}
+  }
+}
+
+// バッジ・結果通知を定期更新（モーダル開閉に関係なく）
+setInterval(() => { schedLoadPending(); schedPollResults(); }, 30000);
+setTimeout(() => { schedLoadPending(); schedPollResults(); }, 2000);
+schedOnRecurrenceChange();
 
 // Shared mouseup → save to localStorage
 document.addEventListener('mouseup', () => {

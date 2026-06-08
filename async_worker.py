@@ -11,6 +11,7 @@ Usage:
 """
 import asyncio
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -169,6 +170,41 @@ async def _poll_loop(max_concurrent: int) -> None:
         await asyncio.sleep(_POLL_INTERVAL)
 
 
+def _kill_duplicate_workers() -> int:
+    """
+    自分以外の async_worker プロセスを掃除する（孤児ワーカー対策の防御層）。
+
+    os._exit による孤児化を tray の自動再起動が拾うと二重ワーカーになりジョブが
+    二重実行されうる。起動時にコマンドラインを検証して『確実に async_worker』な
+    別 PID のみを終了させる（PID 使い回しによる誤爆を防ぐためコマンドライン検証必須）。
+    """
+    try:
+        import psutil
+    except Exception:
+        return 0
+    me = os.getpid()
+    victims = []
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            if proc.info["pid"] == me:
+                continue
+            cmdline = proc.info.get("cmdline") or []
+            if any("async_worker.py" in str(part) for part in cmdline):
+                proc.terminate()
+                victims.append(proc)
+                print(f"[worker] 孤児ワーカー PID={proc.info['pid']} を終了", flush=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        except Exception:
+            continue
+    if victims:
+        try:
+            psutil.wait_procs(victims, timeout=3)
+        except Exception:
+            pass
+    return len(victims)
+
+
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Async agent background worker")
@@ -176,6 +212,7 @@ def main() -> None:
                         help=f"Max concurrent jobs (default: {ASYNC_MAX_JOBS} from .env)")
     args = parser.parse_args()
 
+    _kill_duplicate_workers()
     init_db()
     n = reset_running_jobs()
     if n:

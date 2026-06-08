@@ -21,7 +21,7 @@ _project_root = Path(__file__).parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from config import ASYNC_MAX_JOBS
+from config import ASYNC_MAX_JOBS, ASYNC_MAX_TURNS
 from tools.async_job_db import (
     init_db,
     reset_running_jobs,
@@ -103,7 +103,7 @@ async def _run_job(job: dict) -> None:
             message=job["message"],
             provider_config=provider_config,
             on_chunk=_on_chunk,
-            max_turns=job.get("max_turns") or 30,
+            max_turns=job.get("max_turns") or ASYNC_MAX_TURNS,
             workspace_scope=job.get("workspace_scope") or "",
         )
 

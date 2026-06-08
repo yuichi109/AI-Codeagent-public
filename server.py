@@ -47,7 +47,7 @@ from tools.web_tools import web_search, web_fetch, web_research
 from tools.code_tools import code_lint
 from tools.verify_tools import augment_tool_result_with_verify
 from config import VERIFY_ON_WRITE_ENABLED
-from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SECONDS
+from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SECONDS, ASYNC_MAX_TURNS
 from tools import schedule_db
 from tools.scheduler import scheduler_loop as _scheduler_loop
 from tools.todo_tools import todo_update, todo_read
@@ -327,17 +327,22 @@ _async_worker_proc: subprocess.Popen | None = None  # set in lifespan
 _scheduler_task: "asyncio.Task | None" = None  # set in lifespan
 
 
-def _scheduler_create_job(task: dict) -> str:
-    """スケジューラー発火時のコールバック。テンプレ指示文を BG ジョブとして登録する。"""
+def _create_job_from_task(task: dict) -> str:
+    """テンプレ指示文を BG ジョブとして登録し job_id を返す（副作用なし）。"""
     prompt = task.get("template_prompt") or ""
     if not prompt:
         raise RuntimeError(f"テンプレ未設定 task_id={task.get('id')}")
-    job_id = _create_async_job(
+    return _create_async_job(
         message=prompt,
         provider_config=dict(_provider_config),
-        max_turns=30,
+        max_turns=ASYNC_MAX_TURNS,
         workspace_scope=task.get("workspace_scope") or "",
     )
+
+
+def _scheduler_create_job(task: dict) -> str:
+    """スケジューラー発火時のコールバック。ジョブ登録＋once タスクの自動無効化。"""
+    job_id = _create_job_from_task(task)
     # 1回限りのタスクは発火後に無効化する
     if task.get("recurrence_type") == "once":
         try:
@@ -3006,7 +3011,7 @@ async def classify_bg(req: ClassifyBgRequest):
 
 class AsyncJobRequest(BaseModel):
     message: str
-    max_turns: int = 30
+    max_turns: int = ASYNC_MAX_TURNS
     workspace_scope: str = ""
 
 
@@ -3207,6 +3212,10 @@ async def schedule_task_update_ep(task_id: int, req: TaskUpdateRequest):
         schedule_db.update_task(task_id, **fields)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    # 毎時/N時間ごとに変更され anchor_at 未設定なら現在時刻を起点に補完
+    updated = schedule_db.get_task(task_id)
+    if updated and updated["recurrence_type"] in ("hourly", "interval") and not updated.get("anchor_at"):
+        schedule_db.update_task(task_id, anchor_at=datetime.now().isoformat(timespec="seconds"))
     return JSONResponse({"id": task_id, "updated": True})
 
 
@@ -3214,6 +3223,21 @@ async def schedule_task_update_ep(task_id: int, req: TaskUpdateRequest):
 async def schedule_task_delete_ep(task_id: int):
     schedule_db.delete_task(task_id)
     return JSONResponse({"id": task_id, "deleted": True})
+
+
+@app.post("/schedule/tasks/{task_id}/run-now")
+async def schedule_task_run_now_ep(task_id: int):
+    """タスクをスケジュールに関係なく今すぐ実行する（once の自動無効化はしない）。"""
+    task = schedule_db.get_task(task_id)
+    if task is None:
+        return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
+    try:
+        job_id = _create_job_from_task(task)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    # 実行記録に残す（マイクロ秒精度で occurrence の衝突を回避）。結果通知ポーリングが拾う。
+    schedule_db.claim_occurrence(task_id, datetime.now().isoformat(), "executed", job_id=job_id)
+    return JSONResponse({"job_id": job_id, "status": "started"})
 
 
 # ---- 実行記録（occurrence / フラグ）----

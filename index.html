@@ -1005,7 +1005,7 @@
     </div>
     <div id="sched-tabs">
       <button class="sched-tab active" data-page="tasks" onclick="schedTab('tasks')">タスク一覧</button>
-      <button class="sched-tab" data-page="new" onclick="schedTab('new')">＋ 新規登録</button>
+      <button class="sched-tab" data-page="new" onclick="schedGoNewTab()">＋ 新規登録</button>
       <button class="sched-tab" data-page="templates" onclick="schedTab('templates')">実行内容テンプレ</button>
     </div>
     <div id="sched-body">
@@ -1017,8 +1017,12 @@
         <div id="sched-task-list"><div class="sched-empty">読み込み中…</div></div>
       </div>
 
-      <!-- 新規登録 -->
+      <!-- 新規登録 / 編集 -->
       <div class="sched-page" id="sched-page-new">
+        <div id="snew-edit-banner" style="display:none;background:#2a2438;border:1px solid #89b4fa55;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:13px;color:#89b4fa;">
+          ✏️ タスクを編集中
+          <button class="sched-btn" style="float:right;" onclick="schedCancelEdit()">新規登録に戻す</button>
+        </div>
         <div class="sched-field">
           <label>タスク名</label>
           <input id="snew-name" placeholder="例: 朝の天気チェック">
@@ -1061,10 +1065,10 @@
           </div>
         </div>
         <div class="sched-field">
-          <label>作業スコープ（省略可）</label>
-          <input id="snew-scope" placeholder="例: SUNO-Global01（空欄=workspace全体）">
+          <label>作業スコープ</label>
+          <select id="snew-scope"><option value="">workspace 全体</option></select>
         </div>
-        <button class="sched-btn primary" onclick="schedCreateTask()">タスクを登録</button>
+        <button class="sched-btn primary" id="snew-submit" onclick="schedSubmitTask()">タスクを登録</button>
         <span id="snew-msg" style="margin-left:10px;font-size:12px;"></span>
       </div>
 
@@ -7043,6 +7047,9 @@ function _bgAddCard(jobId, msgPreview) {
 
 // ---- BG → チャット履歴へ書き込み ----
 function _bgSaveToChat(jobId, status) {
+  // 定時タスク由来のジョブはメインチャットへ⏰カードを別途出すため、BG側のチャット保存はしない
+  // （BGペインのカードはそのまま表示される）
+  if (_schedJobIds.has(jobId)) return;
   const outEl = document.getElementById(`bg-out-${jobId}`);
   const resultText = outEl ? outEl.textContent : '（出力なし）';
   const prompt = (_bgJobs[jobId] && _bgJobs[jobId].prompt) || '';
@@ -7254,6 +7261,7 @@ function _bgUpdateBadge() {
 // ---- Restore from server ----
 async function _bgRestoreFromServer() {
   try {
+    await _schedRefreshJobIds();  // スケジューラー由来ジョブを除外できるよう先に取得
     const res = await fetch('/async-agent/jobs');
     const data = await res.json();
     for (const j of (data.jobs || []).slice().reverse()) {
@@ -7385,6 +7393,15 @@ window._pendingBgCards = null;
 const _RECUR_LABEL = { daily:'毎日', weekly:'毎週', hourly:'毎時', interval:'N時間ごと', once:'1回' };
 const _DOW_LABEL = ['月','火','水','木','金','土','日'];
 let _schedTemplates = [];
+let _schedEditId = null;  // null=新規 / 数値=編集中のタスクID
+// スケジューラー由来の job_id 集合（BG復元側が二重描画しないよう除外するため）
+let _schedJobIds = new Set();
+async function _schedRefreshJobIds() {
+  try {
+    const r = await fetch('/schedule/runs');
+    (await r.json()).runs.forEach(x => { if (x.job_id) _schedJobIds.add(x.job_id); });
+  } catch (e) {}
+}
 // 結果通知済みの job_id（重複カード防止）
 let _schedNotified = new Set(JSON.parse(localStorage.getItem('schedNotified') || '[]'));
 // 発火済みで結果待ちの run（job_id → run情報）
@@ -7404,7 +7421,40 @@ function schedTab(page) {
   document.querySelectorAll('.sched-page').forEach(p =>
     p.classList.toggle('active', p.id === 'sched-page-' + page));
   if (page === 'templates') schedLoadTemplates();
-  if (page === 'new') schedFillTemplateSelect();
+  if (page === 'new') { schedFillTemplateSelect(); schedFillScopeSelect(); }
+}
+
+// 作業スコープのプルダウンを workspace サブフォルダで埋める
+async function schedFillScopeSelect(selected = '') {
+  const sel = document.getElementById('snew-scope');
+  if (!sel) return;
+  let dirs = [];
+  try {
+    const r = await fetch('/workspace/subdirs');
+    dirs = (await r.json()).dirs || [];
+  } catch (e) {}
+  sel.innerHTML = '<option value="">workspace 全体</option>' +
+    dirs.map(d => `<option value="${_bgEsc(d)}">📁 ${_bgEsc(d)}</option>`).join('');
+  sel.value = selected || '';
+}
+
+// タブを直接クリックして開いたときは新規モードに戻す
+function schedGoNewTab() {
+  schedCancelEdit();
+  schedTab('new');
+}
+
+function schedSetEditMode(on) {
+  _schedEditId = on ? _schedEditId : null;
+  document.getElementById('snew-edit-banner').style.display = on ? '' : 'none';
+  document.getElementById('snew-submit').textContent = on ? '変更を保存' : 'タスクを登録';
+}
+
+function schedCancelEdit() {
+  _schedEditId = null;
+  schedSetEditMode(false);
+  ['snew-name', 'snew-scope'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('snew-msg').textContent = '';
 }
 
 function schedOnRecurrenceChange() {
@@ -7520,6 +7570,8 @@ async function schedLoadTasks() {
           <span class="r-name">${_bgEsc(t.name)}</span>
           <label class="sched-toggle"><input type="checkbox" ${t.enabled ? 'checked' : ''}
             onchange="schedToggleTask(${t.id}, this.checked)"> 有効</label>
+          <button class="sched-btn primary" onclick="schedRunNow(${t.id})">▶ 即時実行</button>
+          <button class="sched-btn" onclick="schedEditTask(${t.id})">編集</button>
           <button class="sched-btn danger" onclick="schedDeleteTask(${t.id})">削除</button>
         </div>
         <div class="r-meta">📋 ${_bgEsc(t.template || '?')}　/　🔁 ${recurDesc}　/　⏭ 次回: ${nextStr}</div>
@@ -7528,7 +7580,30 @@ async function schedLoadTasks() {
   }
   box.innerHTML = rowsHtml.join('');
 }
-async function schedCreateTask() {
+async function schedEditTask(id) {
+  // 一覧から対象タスクを取得してフォームに展開
+  let task = null;
+  try {
+    const r = await fetch('/schedule/tasks');
+    task = ((await r.json()).tasks || []).find(t => t.id === id);
+  } catch (e) {}
+  if (!task) { alert('タスクが取得できませんでした'); return; }
+  _schedEditId = id;
+  schedTab('new');
+  await schedFillTemplateSelect();
+  document.getElementById('snew-name').value = task.name || '';
+  document.getElementById('snew-template').value = task.template_id;
+  document.getElementById('snew-recurrence').value = task.recurrence_type;
+  schedOnRecurrenceChange();
+  if (task.time_of_day) document.getElementById('snew-time').value = task.time_of_day;
+  if (task.day_of_week != null) document.getElementById('snew-dow').value = task.day_of_week;
+  if (task.interval_hours != null) document.getElementById('snew-interval').value = task.interval_hours;
+  if (task.run_at) document.getElementById('snew-runat').value = task.run_at.slice(0, 16);
+  await schedFillScopeSelect(task.workspace_scope || '');
+  schedSetEditMode(true);
+}
+
+async function schedSubmitTask() {
   const msg = document.getElementById('snew-msg');
   const name = document.getElementById('snew-name').value.trim();
   const template_id = parseInt(document.getElementById('snew-template').value);
@@ -7548,14 +7623,15 @@ async function schedCreateTask() {
     if (!v) { msg.style.color = '#f38ba8'; msg.textContent = '実行日時を入力してください'; return; }
     payload.run_at = v.length === 16 ? v + ':00' : v;
   }
-  const r = await fetch('/schedule/tasks', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const editing = _schedEditId != null;
+  const r = await fetch(editing ? '/schedule/tasks/' + _schedEditId : '/schedule/tasks', {
+    method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const d = await r.json();
   if (d.error) { msg.style.color = '#f38ba8'; msg.textContent = d.error; return; }
-  msg.style.color = '#a6e3a1'; msg.textContent = '登録しました';
-  document.getElementById('snew-name').value = '';
+  msg.style.color = '#a6e3a1'; msg.textContent = editing ? '変更を保存しました' : '登録しました';
+  schedCancelEdit();
   schedTab('tasks'); schedLoadTasks();
 }
 async function schedToggleTask(id, enabled) {
@@ -7568,6 +7644,15 @@ async function schedDeleteTask(id) {
   if (!confirm('このタスクを削除しますか？')) return;
   await fetch('/schedule/tasks/' + id, { method: 'DELETE' });
   schedLoadTasks();
+}
+async function schedRunNow(id) {
+  const r = await fetch('/schedule/tasks/' + id + '/run-now', { method: 'POST' });
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  // 結果カードは数秒〜30秒後の結果通知ポーリングでチャットに出る
+  setTimeout(schedPollResults, 3000);
+  schedLoadTasks();
+  alert('実行を開始しました。完了するとチャットに結果が表示されます。');
 }
 async function schedClearRun(runId) {
   await fetch('/schedule/runs/' + runId, { method: 'DELETE' });
@@ -7620,15 +7705,26 @@ async function schedPollResults() {
     runs = (await r.json()).runs || [];
   } catch (e) { return; }
   for (const run of runs) {
-    if (!run.job_id || _schedNotified.has(run.job_id)) continue;
+    if (!run.job_id) continue;
+    _schedJobIds.add(run.job_id);  // BG側の二重描画を防ぐため登録
+    if (_schedNotified.has(run.job_id)) continue;
     // ジョブの完了状態を確認
     try {
       const jr = await fetch('/async-agent/jobs/' + run.job_id);
       if (!jr.ok) continue;
       const job = await jr.json();
       if (['done', 'failed', 'cancelled'].includes(job.status)) {
-        const text = (job.chunks || []).map(c => c.content).join('') || '（出力なし）';
-        _bgRenderChatCard('⏰ ' + (run.task_name || '定時タスク'), text, job.status, new Date().toISOString());
+        // 生のツールコール JSON を除き、テキストチャンクのみ表示（BG復元と同じ流儀）
+        const text = (job.chunks || []).filter(c => c.type === 'text').map(c => c.content).join('') || '（出力なし）';
+        const prompt = '⏰ ' + (run.task_name || '定時タスク');
+        const ts = new Date().toISOString();
+        // チャットに描画 ＋ 通常BGと同じく履歴へ保存（リロードしても残るように）
+        _bgRenderChatCard(prompt, text, job.status, ts);
+        history.push({ role: 'bg_user', content: prompt });
+        history.push({ role: 'bg_result', content: text, job_id: run.job_id, status: job.status, timestamp: ts, savedPaths: [] });
+        foldOldTurns();
+        updateTurnCount();
+        saveHistory();
         _schedNotified.add(run.job_id);
         localStorage.setItem('schedNotified', JSON.stringify([..._schedNotified].slice(-200)));
       }

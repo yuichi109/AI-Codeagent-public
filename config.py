@@ -208,6 +208,8 @@ WATERMARK_FONT_SIZE: int  = int(os.getenv("WATERMARK_FONT_SIZE", "0"))  # 0 = au
 
 # ---- 非同期エージェントジョブ設定 ----
 ASYNC_MAX_JOBS: int = int(os.getenv("ASYNC_MAX_JOBS", "5"))
+# BG エージェント1ジョブあたりの最大ターン数（手動⚡・inbox・定時タスク共通）
+ASYNC_MAX_TURNS: int = int(os.getenv("ASYNC_MAX_TURNS", "60"))
 
 # ---- 定時実行スケジューラー設定 ----
 # サーバー起動中、指定時刻に登録タスクを自動発火する（in-process asyncio ループ）

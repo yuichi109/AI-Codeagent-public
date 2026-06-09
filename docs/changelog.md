@@ -21,6 +21,11 @@
 - WSL/Windows 間で `setup.sh` のファイルモードが `100755 → 100644` に落ち `./setup.sh` が実行不可になる問題への対処。
 - Claude Code の **`SessionEnd` フック**（`.claude/settings.local.json`・gitignore対象の個人設定）で、セッション終了時に `wsl -d Ubuntu -- bash -c "chmod +x ~/AI-Codeagent/setup.sh"` を自動実行。リポジトリには含めない（環境固有のため）。
 
+### 調査・次回課題の起票（コード変更なし）
+
+- **日本語ファイル名の画像が開けない件**（GitLab issue **#60**）: `/workspace/image`（`server.py` 4164付近）の `Content-Disposition` に日本語名を直入れ → uvicorn(h11) の latin-1 ヘッダエンコードで失敗（500）。英数字名は開けるが日本語にリネームした画像だけ開けない症状で確認。RFC 5987（`filename*=UTF-8''`）化で解決。デメリットなし（inline表示なので filename は表示に無関係）。
+- **ポート番号の一元管理**（GitLab issue **#61**）: WSL版=systemd `--port 8000` ／ Windows版=`tray.py` `PORT=8001` でハードコードされ、`prompts.py`・`file_tools.py`・`setup.sh` 等に数値が散在（Win版に 8000/8001 表記の不整合も発見）。`config.py`/`.env` にポート変数なし。`.env` の `APP_PORT` を単一ソース化する提案。**理想UX**は `./setup.sh install` で対話的にポートを尋ね（`[デフォルト: 8000]`）`.env` に書込→systemd反映。**進め方: WSL版を完全に仕上げ→全コードチェック→Windows版** の順（ユーザー指定）。実装は次回。
+
 ---
 
 ## 2026-06-09（セッション41）画像・Mermaid 清書まわりの実用度底上げ（v1.10.2 → v1.12.0）

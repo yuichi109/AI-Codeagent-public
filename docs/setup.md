@@ -194,6 +194,7 @@ Azure Portal で以下を用意する:
 # 別マシンのWSL2上で
 git clone https://gitlab.com/yuichi.matsuo/AI-Codeagent.git
 cd AI-Codeagent
+chmod +x setup.sh   # Windows側エディタで編集すると実行権限が落ちるため、念のため毎回付与
 ./setup.sh install
 ```
 
@@ -202,6 +203,7 @@ cd AI-Codeagent
 ```bash
 git clone git@gitlab.com:yuichi.matsuo/AI-Codeagent.git
 cd AI-Codeagent
+chmod +x setup.sh   # Windows側エディタで編集すると実行権限が落ちるため、念のため毎回付与
 ./setup.sh install
 ```
 

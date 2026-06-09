@@ -176,6 +176,23 @@ def apply_auto_watermark(b64: str, workspace_scope: str = "", original_rel_path:
     return new_b64, saved_path
 
 
+def apply_refine_watermark(b64: str, rel_path: str = "", enabled: bool = True) -> tuple[str, str]:
+    """清書(Mermaid img2img)画像用の自動ウォーターマーク。
+
+    enabled=True のときだけ透かしを焼き込み、保存済みファイル(rel_path)に上書きして
+    (watermarked_b64, rel_path) を返す。enabled は清書UIのチェックで都度指定（再起動不要）。
+    スタイル(文字/位置/色/不透明度/サイズ)は通常の WATERMARK_* 設定を共用する。
+    """
+    if not enabled:
+        return b64, rel_path
+    new_b64 = _apply_watermark_to_b64(b64, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE)
+    if rel_path:
+        target = ALLOWED_WORK_DIR / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(base64.b64decode(new_b64))
+    return new_b64, rel_path
+
+
 def watermark_image(
     image_path: str,
     text: str,

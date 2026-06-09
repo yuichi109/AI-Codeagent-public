@@ -1838,6 +1838,7 @@ class MermaidRefineRequest(BaseModel):
     source_path: str = ""      # workspace 内パス（再清書時はこちら）
     prompt: str                # 清書の指示
     workspace_scope: str = ""  # 作業ディレクトリスコープ
+    watermark: bool = True     # 清書画像にウォーターマークを焼き込むか（UIチェックで都度指定・デフォルトON）
 
 
 class MermaidBatchReplaceRequest(BaseModel):
@@ -3362,7 +3363,7 @@ async def mermaid_check(req: MermaidCheckRequest):
 @app.post("/mermaid-refine")
 async def mermaid_refine(req: MermaidRefineRequest):
     """MermaidのPNGをgpt-image-2で清書する（img2img）"""
-    from tools.image_tools import _make_client, _b64_from_response, _save_to_workspace
+    from tools.image_tools import _make_client, _b64_from_response, _save_to_workspace, apply_refine_watermark
     from config import IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_SIZE, ALLOWED_WORK_DIR
     import io as _io, base64 as _b64lib
     try:
@@ -3390,6 +3391,8 @@ async def mermaid_refine(req: MermaidRefineRequest):
         resp = await asyncio.to_thread(lambda: client.images.edit(**kwargs))
         b64 = _b64_from_response(resp.data[0])
         saved_path = _save_to_workspace(b64, "mermaid_refined", req.workspace_scope)
+        # 清書ウォーターマーク（UIチェックで指定・保存済みファイルに上書きで1枚維持）
+        b64, saved_path = apply_refine_watermark(b64, saved_path, req.watermark)
         return JSONResponse({"image": b64, "mime": "image/png", "saved_path": saved_path, "model": IMAGE_MODEL})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

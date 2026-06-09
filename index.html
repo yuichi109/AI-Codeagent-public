@@ -288,6 +288,8 @@
   #pv-azure-btn { background: #45475a; color: #cdd6f4; }
   #pv-azure-btn:hover { background: #f38ba8; color: #1e1e2e; }
   .pv-actions { display: flex; gap: 8px; }
+  .pv-advanced-link { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 9px 14px; border: 1px solid #cba6f7; border-radius: 6px; background: rgba(203,166,247,0.12); color: #cba6f7; font-size: 13px; font-weight: bold; text-decoration: none; transition: background .15s, color .15s; }
+  .pv-advanced-link:hover { background: #cba6f7; color: #1e1e2e; }
   .pv-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a6adc8; cursor: pointer; }
   #pv-current { font-size: 11px; color: #6c7086; border-top: 1px solid #313244; padding-top: 10px; }
   #pv-status { font-size: 12px; min-height: 18px; }
@@ -818,8 +820,8 @@
       <button id="pv-azure-btn" class="pv-btn" onclick="resetToAzure()">Azureに戻す</button>
     </div>
     <div id="pv-current"></div>
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid #313244;text-align:center;">
-      <a href="/setup" target="_blank" style="font-size:12px;color:#6c7086;text-decoration:none;">🔧 詳細設定（.env 編集）</a>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #313244;">
+      <a href="/setup" target="_blank" class="pv-advanced-link">🔧 詳細設定（.env 編集）</a>
     </div>
   </div>
 </div>

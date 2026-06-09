@@ -1198,7 +1198,11 @@
 
   // ---- Mermaid 初期化 ----
   if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+    mermaid.initialize({
+      startOnLoad: false, theme: 'default', securityLevel: 'loose',
+      // 密な図でのノード/ラベルの重なりを軽減（余白を広げ、線を滑らかに）
+      flowchart: { nodeSpacing: 60, rankSpacing: 80, padding: 16, curve: 'basis' },
+    });
   }
 
   function renderMarkdown(text) {
@@ -1587,7 +1591,20 @@
         resultDiv.className = 'mermaid-check-result';
         block.appendChild(resultDiv);
       }
+      // ループガード: 過去に出した修正案 or 現在のコードと同じ案が出たら堂々巡りとして打ち切る
+      // （ユーザーが明示的に問題を指摘した再チェック=userNote時はガードしない）
+      const _norm = s => (s || '').replace(/\s+/g, ' ').trim();
+      const seen = JSON.parse(block.dataset.checkSeen || '[]');
+      if (!userNote && data.fixed_code) {
+        const nf = _norm(data.fixed_code);
+        if (nf === _norm(src.textContent) || seen.includes(nf)) {
+          data.fixed_code = null;  // 堂々巡り → 修正案として扱わない
+          data._looped = true;
+        }
+      }
       if (data.fixed_code) {
+        const nf = _norm(data.fixed_code);
+        if (!seen.includes(nf)) { seen.push(nf); block.dataset.checkSeen = JSON.stringify(seen); }
         const escaped = escHtml(data.fixed_code);
         resultDiv.innerHTML =
           '修正案があります ' +
@@ -1595,6 +1612,10 @@
           `<button class="mermaid-skip-btn">スキップ</button>` +
           `<pre>${escaped}</pre>`;
         resultDiv.querySelector('.mermaid-apply-btn').dataset.code = data.fixed_code;
+      } else if (data._looped) {
+        resultDiv.innerHTML =
+          '<span class="mermaid-checked-badge">✅ これ以上の自動改善はできません</span>' +
+          '<div style="font-size:11px;color:#888;margin-top:4px">同じ修正の堂々巡りを検知しました。残る重なり・いびつさはMermaidの自動レイアウトの限界です。仕上げは「✨ 清書」をお試しください。</div>';
       } else {
         resultDiv.innerHTML =
           '<span class="mermaid-checked-badge">✅ レイアウトに問題なし</span> ' +

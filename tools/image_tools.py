@@ -158,11 +158,20 @@ def _apply_watermark_to_b64(b64: str, text: str, position: str, color: str, opac
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def apply_auto_watermark(b64: str, workspace_scope: str = "") -> tuple[str, str]:
-    """設定に基づき自動ウォーターマークを適用。(watermarked_b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。"""
+def apply_auto_watermark(b64: str, workspace_scope: str = "", original_rel_path: str = "") -> tuple[str, str]:
+    """設定に基づき自動ウォーターマークを適用。(watermarked_b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。
+
+    original_rel_path が渡された場合は元ファイル（generate_image が保存済み）に上書きし、
+    透かし入りの2枚目を作らない（1枚に統合）。未指定なら従来どおり別ファイルとして保存する。
+    """
     if not WATERMARK_ENABLED:
         return b64, ""
     new_b64 = _apply_watermark_to_b64(b64, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE)
+    if original_rel_path:
+        target = ALLOWED_WORK_DIR / original_rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(base64.b64decode(new_b64))
+        return new_b64, original_rel_path
     saved_path = _save_to_workspace(new_b64, "watermarked", workspace_scope)
     return new_b64, saved_path
 

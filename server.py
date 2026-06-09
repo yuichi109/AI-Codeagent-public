@@ -2803,7 +2803,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         # generate_image / edit_image の場合は自動ウォーターマークを適用
                         display_b64 = result_data["image_base64"]
                         if name in ("generate_image", "edit_image"):
-                            wm_b64, wm_path = apply_auto_watermark(display_b64, workspace_scope)
+                            wm_b64, wm_path = apply_auto_watermark(display_b64, workspace_scope, result_data.get("saved_path", ""))
                             if wm_b64 != display_b64:
                                 display_b64 = wm_b64
                                 result_data["image_base64"] = wm_b64

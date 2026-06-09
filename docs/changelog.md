@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-09（セッション40）v1.10.1 セットアップ改善 ＋ UI 視認性向上
+
+### setup.sh の実行権限問題を解消
+
+- `setup.sh` が git に `100644`（実行権限なし）で記録されていたため、`git clone` 直後は `./setup.sh install` が permission denied になっていた。`git update-index --chmod=+x` で `100755` を記録し、以降のクローンで最初から実行可能に。
+- 加えて、Windows 側エディタ（`\\wsl.localhost\...` 経由＝9p）でファイルを保存し直すと実行ビットが毎回落ちる挙動を確認。インストール手順（README / docs/setup.md）の `./setup.sh install` 直前に `chmod +x setup.sh` を明記して確実化。
+
+### LLM 設定パネル「詳細設定（.env 編集）」リンクをボタン化
+
+- 埋もれて見えなかったグレー文字リンク（`#6c7086`）を、Catppuccin mauve アクセントの枠線付きボタン（`.pv-advanced-link`・ホバーで反転）に変更し視認性を改善。
+- `for_windows` ブランチにも cherry-pick し、origin / public 両リモートへ反映。
+
+### docs
+
+- `docs/obsidian-setup.md`: Windows Server 2025（MATSUO-TS2）で WSLg がそのまま動き、本手順で Obsidian 起動・日本語入力が成功したことを追記（VcXsrv 不要を明記）。残課題クローズ。
+
+### 調査メモ（コード変更なし）
+
+- 「/no_think をプロンプトに付加」トグルは、プロバイダー判定なしで先頭に `/no_think` テキストを付加するのみ。これは Qwen3 系ローカルモデル専用の制御で、GPT 系には無効。`reasoning_effort` 制御は `model == "gpt-5-mini"` 完全一致時のみ `low` を渡すハードコードで、gpt-5.4 系には未適用。Qwen を使う場面が残るためトグルは現状維持（放置）と判断。
+
+---
+
 ## 2026-06-08（セッション38）v1.10.0 定時実行スケジューラー ＋ 孤児ワーカー修正
 
 ### 背景

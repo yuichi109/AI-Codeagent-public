@@ -4156,27 +4156,6 @@
       if (!confirmed) return;
     }
 
-    // ---- BG 分類チェック（画像なし・一定以上の長さ・フラグなし時のみ） ----
-    if (!_skipClassify && text.length > 15 && pendingImages.length === 0 && !isMultiAgentActive()) {
-      _skipClassify = false;
-      try {
-        const cr = await fetch('/classify-bg', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: text}),
-          signal: AbortSignal.timeout(5000),
-        });
-        const cd = await cr.json();
-        if (cd.bg) {
-          _bgShowClassifyCard(text, cd.reason);
-          input.value = '';
-          input.style.height = 'auto';
-          return;
-        }
-      } catch(_) { /* 分類失敗時は通常実行 */ }
-    }
-    _skipClassify = false;
-
     input.value = '';
     input.style.height = 'auto';
     abortController = new AbortController();
@@ -4233,6 +4212,30 @@
     });
     // スピナー＋状態表示（Claude Code スタイル）
     const statusEl = createStatusLine(turnEl);
+
+    // ---- BG 分類チェック（UIを先に出してから裏で判定。沈黙をなくす） ----
+    // 画像/ファイル添付なし・一定以上の長さ・フラグなし時のみ
+    if (!_skipClassify && text.length > 15 && imagesToSend.length === 0
+        && filesToSend.length === 0 && !isMultiAgentActive()) {
+      try {
+        const cr = await fetch('/classify-bg', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: text}),
+          signal: AbortSignal.timeout(3000),
+        });
+        const cd = await cr.json();
+        if (cd.bg) {
+          // 長時間タスクと判定: 出したメッセージを撤去してBGカードに切替
+          turnEl.remove();
+          setGenerating(false);
+          _bgShowClassifyCard(text, cd.reason);
+          return;
+        }
+      } catch(_) { /* 分類失敗時は通常実行 */ }
+    }
+    _skipClassify = false;
+
     let aiMsg = null;
     function getOrCreateAiMsg() {
       if (!aiMsg) {

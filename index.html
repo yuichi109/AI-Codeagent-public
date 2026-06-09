@@ -1230,6 +1230,10 @@
           '<div style="font-size:11px;color:#555;margin-bottom:4px">清書の指示を入力してください</div>' +
           '<textarea class="mermaid-refine-prompt" placeholder="例: より見やすく美しくスタイリッシュに清書してください。白背景で。" ' +
           'style="width:100%;height:64px;font-size:12px;padding:4px;border:1px solid #ccc;border-radius:4px;resize:vertical;box-sizing:border-box"></textarea>' +
+          '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#555;margin-top:4px;cursor:pointer" ' +
+          'title="図のラベル文字を抽出してAIに渡し、文字の誤読・複製・追加を防ぎます。ラベル自体を言い換えたい時はOFFにしてください。">' +
+            '<input type="checkbox" class="mermaid-refine-keeplabels" checked style="margin:0"> 図中の文字を維持（誤読・複製を防ぐ）' +
+          '</label>' +
           '<button class="mermaid-btn mermaid-refine-submit-btn" style="margin-top:4px">清書実行</button>' +
         '</div>' +
         '<div class="mermaid-refine-result" style="display:none"></div>' +
@@ -1609,11 +1613,51 @@
     }
   }
 
+  // Mermaidコードから人間可読なラベル（ノード/サブグラフ/エッジ）を抽出する。
+  // 清書(img2img)時にAIへ「この文字を一字一句維持せよ」と渡し、誤読・複製・追加を防ぐ。
+  function _extractMermaidLabels(code) {
+    if (!code) return [];
+    const out = [];
+    const push = (s) => {
+      if (!s) return;
+      // <br>系を空白化・両端の引用符と空白を除去
+      let t = s.replace(/<br\s*\/?>/gi, ' ').replace(/^["'`]+|["'`]+$/g, '').trim();
+      if (t) out.push(t);
+    };
+    // ノード形状の中身: A[ラベル] / A(ラベル) / A((ラベル)) / A{ラベル} / A([ラベル]) など括弧の組み合わせ
+    let m;
+    const shapeRe = /[\[\(\{]+\s*("?)([^"\]\)\}]+?)\1\s*[\]\)\}]+/g;
+    while ((m = shapeRe.exec(code)) !== null) push(m[2]);
+    // エッジラベル: -->|ラベル| / -.->|ラベル| / ==>|ラベル|
+    const pipeRe = /\|\s*("?)([^"|]+?)\1\s*\|/g;
+    while ((m = pipeRe.exec(code)) !== null) push(m[2]);
+    // エッジラベル(中置記法): -- ラベル --> / -- ラベル ---
+    const midRe = /--\s*([^-<>|\n]+?)\s*--[->]/g;
+    while ((m = midRe.exec(code)) !== null) push(m[1]);
+    // サブグラフ見出し: subgraph タイトル / subgraph id ["タイトル"]
+    const sgRe = /subgraph\s+(?:[\w-]+\s*\[\s*"?([^"\]\n]+?)"?\s*\]|"?([^\n"]+?)"?)\s*$/gm;
+    while ((m = sgRe.exec(code)) !== null) push(m[1] || m[2]);
+    // 重複除去・方向キーワード等のノイズ除去
+    const noise = new Set(['TD','TB','BT','LR','RL','graph','flowchart','end']);
+    return [...new Set(out)].filter(s => !noise.has(s));
+  }
+
   async function _mermaidRefine(submitBtn) {
     const block = submitBtn.closest('.mermaid-block');
     if (!block) return;
-    const prompt = block.querySelector('.mermaid-refine-prompt')?.value?.trim();
+    let prompt = block.querySelector('.mermaid-refine-prompt')?.value?.trim();
     if (!prompt) { alert('清書の指示を入力してください'); return; }
+    // 「図中の文字を維持」ONなら、Mermaidからラベルを抽出してプロンプトに自動添付
+    const keepLabels = block.querySelector('.mermaid-refine-keeplabels')?.checked;
+    if (keepLabels) {
+      const code = block.querySelector('.mermaid-src')?.textContent?.trim() || '';
+      const labels = _extractMermaidLabels(code);
+      if (labels.length) {
+        prompt += '\n\n【厳守】図中の文字は次のラベルのみ。これら以外の文字を作らず、変更・複製・追加・翻訳もしないこと。各ラベルは一字一句そのまま使うこと:\n'
+          + labels.map(l => '・' + l).join('\n')
+          + '\n要素の数と接続関係も元画像のまま維持すること。';
+      }
+    }
     // 再清書（source_path）か初回清書（SVG→PNG）かを判断
     const sourcePath = block.dataset.refineSourcePath || '';
     let pngB64 = '';

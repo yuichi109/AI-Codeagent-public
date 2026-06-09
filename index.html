@@ -1238,6 +1238,10 @@
           'title="図のラベル文字を抽出してAIに渡し、文字の誤読・複製・追加を防ぎます。ラベル自体を言い換えたい時はOFFにしてください。">' +
             '<input type="checkbox" class="mermaid-refine-keeplabels" checked style="margin:0"> 図中の文字を維持（誤読・複製を防ぐ）' +
           '</label>' +
+          '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#555;margin-top:2px;cursor:pointer" ' +
+          'title="清書画像にウォーターマーク（透かし）を焼き込みます。文字・色などは設定画面のウォーターマーク設定を共用します。">' +
+            '<input type="checkbox" class="mermaid-refine-watermark" checked style="margin:0"> ウォーターマークを入れる（無断流用対策）' +
+          '</label>' +
           '<button class="mermaid-btn mermaid-refine-submit-btn" style="margin-top:4px">清書実行</button>' +
         '</div>' +
         '<div class="mermaid-refine-result" style="display:none"></div>' +
@@ -1693,9 +1697,10 @@
     resultDiv.style.display = '';
     resultDiv.innerHTML = '<div style="padding:12px;color:#888;font-size:12px">✨ 清書中... しばらくお待ちください</div>';
     try {
+      const wantWatermark = block.querySelector('.mermaid-refine-watermark')?.checked ?? true;
       const body = sourcePath
-        ? { source_path: sourcePath, prompt, workspace_scope: currentWorkspaceScope }
-        : { image: pngB64, prompt, workspace_scope: currentWorkspaceScope };
+        ? { source_path: sourcePath, prompt, workspace_scope: currentWorkspaceScope, watermark: wantWatermark }
+        : { image: pngB64, prompt, workspace_scope: currentWorkspaceScope, watermark: wantWatermark };
       const resp = await fetch('/mermaid-refine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

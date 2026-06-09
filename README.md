@@ -103,6 +103,7 @@ Azure OpenAI / Azure AI Foundry・Gemini・ローカル LLM に対応した、We
 # Linux / WSL2
 git clone https://gitlab.com/yuichi.matsuo/AI-Codeagent.git
 cd AI-Codeagent
+chmod +x setup.sh   # Windows側エディタ経由だと実行権限が落ちるため
 ./setup.sh install
 # ブラウザで http://localhost:8000/setup を開いて API キーを設定
 ```

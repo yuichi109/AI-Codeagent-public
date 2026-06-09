@@ -38,7 +38,7 @@ def _make_client(provider: str):
     elif provider == "azure":
         key      = AZURE_OPENAI_API_KEY     if IMAGE_INHERIT else (IMAGE_AZURE_API_KEY     or AZURE_OPENAI_API_KEY)
         endpoint = AZURE_OPENAI_ENDPOINT    if IMAGE_INHERIT else (IMAGE_AZURE_ENDPOINT    or AZURE_OPENAI_ENDPOINT)
-        version  = AZURE_OPENAI_API_VERSION if IMAGE_INHERIT else (IMAGE_AZURE_API_VERSION or AZURE_OPENAI_API_VERSION or "2024-02-01")
+        version  = AZURE_OPENAI_API_VERSION if IMAGE_INHERIT else (IMAGE_AZURE_API_VERSION or AZURE_OPENAI_API_VERSION or "2025-04-01-preview")
         # 引き継ぎOFF（専用エンドポイント）はGlobal Standard形式でBearer認証が必要
         if IMAGE_INHERIT:
             return AzureOpenAI(api_key=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
@@ -46,7 +46,7 @@ def _make_client(provider: str):
     elif provider == "foundry":
         key      = FOUNDRY_API_KEY     if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_KEY     or FOUNDRY_API_KEY)
         endpoint = FOUNDRY_ENDPOINT    if IMAGE_INHERIT else (IMAGE_FOUNDRY_ENDPOINT    or FOUNDRY_ENDPOINT)
-        version  = FOUNDRY_API_VERSION if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_VERSION or FOUNDRY_API_VERSION or "2024-12-01-preview")
+        version  = FOUNDRY_API_VERSION if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_VERSION or FOUNDRY_API_VERSION or "2025-04-01-preview")
         return AzureOpenAI(azure_ad_token=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
     else:
         raise ValueError(f"未対応のプロバイダー: {provider}")
@@ -158,11 +158,20 @@ def _apply_watermark_to_b64(b64: str, text: str, position: str, color: str, opac
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def apply_auto_watermark(b64: str, workspace_scope: str = "") -> tuple[str, str]:
-    """設定に基づき自動ウォーターマークを適用。(watermarked_b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。"""
+def apply_auto_watermark(b64: str, workspace_scope: str = "", original_rel_path: str = "") -> tuple[str, str]:
+    """設定に基づき自動ウォーターマークを適用。(watermarked_b64, saved_path) を返す。WATERMARK_ENABLED=False なら変更なし。
+
+    original_rel_path が渡された場合は元ファイル（generate_image が保存済み）に上書きし、
+    透かし入りの2枚目を作らない（1枚に統合）。未指定なら従来どおり別ファイルとして保存する。
+    """
     if not WATERMARK_ENABLED:
         return b64, ""
     new_b64 = _apply_watermark_to_b64(b64, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE)
+    if original_rel_path:
+        target = ALLOWED_WORK_DIR / original_rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(base64.b64decode(new_b64))
+        return new_b64, original_rel_path
     saved_path = _save_to_workspace(new_b64, "watermarked", workspace_scope)
     return new_b64, saved_path
 

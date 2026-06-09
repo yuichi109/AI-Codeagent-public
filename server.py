@@ -2803,7 +2803,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         # generate_image / edit_image の場合は自動ウォーターマークを適用
                         display_b64 = result_data["image_base64"]
                         if name in ("generate_image", "edit_image"):
-                            wm_b64, wm_path = apply_auto_watermark(display_b64, workspace_scope)
+                            wm_b64, wm_path = apply_auto_watermark(display_b64, workspace_scope, result_data.get("saved_path", ""))
                             if wm_b64 != display_b64:
                                 display_b64 = wm_b64
                                 result_data["image_base64"] = wm_b64
@@ -3322,11 +3322,13 @@ async def mermaid_check(req: MermaidCheckRequest):
         system_prompt = (
             "あなたはMermaidダイアグラムの品質チェッカーです。"
             "提示されたMermaidコードと、そのコードから生成した図の画像を確認してください。"
-            "以下の問題がある場合のみ、修正したMermaidコードを```mermaidブロックで返してください:\n"
-            "- ノード名・テキストの文字被り・重なり\n"
-            "- 矢印や接続線の重なり・交差\n"
-            "- 読みにくいレイアウト\n"
-            "問題がなければ「問題なし」とだけ答えてください。余分な説明は不要です。"
+            "判読に支障がある明確な問題がある場合のみ、修正したMermaidコードを```mermaidブロックで返してください:\n"
+            "- ノード名・ラベルの文字が他要素と明確に重なって読めない\n"
+            "- 矢印・接続線が重なって接続関係が判別できない\n"
+            "修正手段は、座標を直接動かせないため『ラベル短縮・<br>での改行・方向(LR/TD)変更・subgraphでのグルーピング・不要なクロスリンク削減』などコードで実際に効くものだけを使うこと。\n"
+            "重要: 完璧さやレイアウトの好みは求めない。判読できるなら、多少の交差や余白の偏りがあっても必ず「問題なし」とだけ答えること。\n"
+            "ノードが多すぎて構造的に重なりが避けられない場合は、コードを変更せず「問題なし」と答えること（AIによる清書での仕上げを想定）。\n"
+            "余分な説明は不要です。"
         )
     note_text = f"\n\nユーザーからの指摘: {req.user_note}" if req.user_note else ""
     user_content = [
@@ -3347,6 +3349,11 @@ async def mermaid_check(req: MermaidCheckRequest):
         content = resp.choices[0].message.content or ""
         m = _re.search(r'```mermaid\s*([\s\S]*?)```', content)
         fixed_code = m.group(1).strip() if m else None
+        # 無変更の検出: 返ってきた修正コードが元と実質同じなら修正案として扱わない（堂々巡り防止）
+        if fixed_code:
+            _norm = lambda s: _re.sub(r'\s+', ' ', s or '').strip()
+            if _norm(fixed_code) == _norm(req.code):
+                fixed_code = None
         return JSONResponse({"fixed_code": fixed_code, "message": content})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

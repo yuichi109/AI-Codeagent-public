@@ -24,6 +24,9 @@ Error: EISDIR: illegal operation on a directory, watch '\\wsl.localhost\Ubuntu\h
 
 WSLg（Windows 11 内蔵）を使うため、Ubuntu 側に X11 パッケージは不要。Obsidian は Windows のタスクバーに普通のアプリとして表示される。
 
+> **Windows Server 2025 でも動作確認済み（2026-06-09 / MATSUO-TS2, Desktop Experience あり）。**
+> 「Server では WSLg が使えないのでは」と当初懸念したが、`wsl.exe --update` 済みなら WSLg 基盤（`/mnt/wslg`・DISPLAY）はそのまま動き、本手順がそっくり通用する。VcXsrv 等の外部 X サーバーは不要。Obsidian の起動・日本語入力ともに開発機（Windows 11）と同じ結果が得られた。
+
 ### ① Obsidian インストール
 
 ```bash

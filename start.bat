@@ -121,15 +121,15 @@ if "%HAVE_WINGET%"=="0" (
     exit /b 1
 )
 
-:: build winget IDs for the missing tools only
-set "PS_IDS="
-if not defined PY_EXE    set "PS_IDS=!PS_IDS!,'Python.Python.3.12'"
-if not defined GIT_FOUND set "PS_IDS=!PS_IDS!,'Git.Git'"
-if not defined NODE_FOUND set "PS_IDS=!PS_IDS!,'OpenJS.NodeJS.LTS'"
-set "PS_IDS=!PS_IDS:~1!"
+:: build the missing-tools list (logical names) for the installer script
+set "MISS_IDS="
+if not defined PY_EXE    set "MISS_IDS=!MISS_IDS!,python"
+if not defined GIT_FOUND set "MISS_IDS=!MISS_IDS!,git"
+if not defined NODE_FOUND set "MISS_IDS=!MISS_IDS!,node"
+set "MISS_IDS=!MISS_IDS:~1!"
 
 echo.
-echo     Installing the missing tools via winget.
+echo     Installing the missing tools ^(winget, with direct-download fallback^).
 if "%IS_ADMIN%"=="1" (
     echo     ^(running as administrator^)
     call :install_inline
@@ -184,31 +184,14 @@ for /f "usebackq tokens=*" %%p in (`powershell -NoProfile -Command "[Environment
 if defined SYS_PATH set "PATH=%PATH%;%SYS_PATH%"
 goto :eof
 
-:: --- elevated already: install missing tools inline ---
+:: --- elevated already: run the installer script in this session ---
 :install_inline
-winget source reset --force >nul 2>&1
-winget source update >nul 2>&1
-if not defined PY_EXE    winget install -e --id Python.Python.3.12 --source winget --silent --accept-package-agreements --accept-source-agreements
-if not defined GIT_FOUND winget install -e --id Git.Git --source winget --silent --accept-package-agreements --accept-source-agreements
-if not defined NODE_FOUND winget install -e --id OpenJS.NodeJS.LTS --source winget --silent --accept-package-agreements --accept-source-agreements
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install_prereqs.ps1" -Tools "!MISS_IDS!"
 goto :eof
 
-:: --- standard user: elevate only the install step (one UAC prompt) ---
+:: --- standard user: run the installer script elevated (one UAC prompt) ---
 :install_elevated
-set "PS1=%TEMP%\aica_prereq_%RANDOM%.ps1"
-> "%PS1%" echo $ErrorActionPreference='Continue'
->>"%PS1%" echo $ids = @(!PS_IDS!)
->>"%PS1%" echo if(-not (Get-Command winget -ErrorAction SilentlyContinue)){ Write-Host '[ERROR] winget not found in elevated session. Install Python/Git/Node.js manually.'; Read-Host 'Press Enter to close'; exit }
->>"%PS1%" echo Write-Host '[winget] preparing package source...'
->>"%PS1%" echo winget source reset --force ^| Out-Null
->>"%PS1%" echo winget source update ^| Out-Null
->>"%PS1%" echo foreach($id in $ids){
->>"%PS1%" echo   Write-Host ('[install] ' + $id)
->>"%PS1%" echo   winget install -e --id $id --source winget --accept-package-agreements --accept-source-agreements
->>"%PS1%" echo }
->>"%PS1%" echo Read-Host 'Done. Press Enter to close'
-powershell -NoProfile -Command "try { Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%PS1%' } catch { Write-Host '[WARN] UAC was cancelled.' }"
-del "%PS1%" >nul 2>&1
+powershell -NoProfile -Command "try { Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%~dp0scripts\install_prereqs.ps1','-Tools','!MISS_IDS!' } catch { Write-Host '[WARN] UAC was cancelled.' }"
 goto :eof
 
 :: --- manual install guidance ---

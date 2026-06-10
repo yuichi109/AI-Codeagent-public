@@ -7,6 +7,17 @@
 
 ## 2026-06-10（セッション44）Windows版 初回インストール時にポート番号を対話入力（v1.13.4）＋ /setup 初期表示の余計な Foundry カードを抑止（v1.13.5）＋ start.bat を2段構えに再構成（v1.13.6）
 
+### v1.13.8 winget が使えない環境向けに「直接ダウンロード→無人インストール」フォールバックを追加（Server 2025）
+
+- **症状**: Windows Server 2025 で `winget source reset --force` + `update` を行っても winget が `0x8a15000f`（ソース未同期）から回復せず、Python/Git/Node.js が一切入らない。
+- **手がかり**: 同 PC でも winget は python.org から Python を完走ダウンロードできていた（＝ネットワークと公式サイト到達は生きている。壊れているのは winget のソース機構だけ）。
+- **修正**: 必須ツール導入を winget 依存から切り離し、**同梱スクリプト `scripts/install_prereqs.ps1`** に集約。各ツールについて **①winget を試し、失敗したら②公式インストーラを直接ダウンロードして無人インストール**する2段フォールバックにした。
+  - Python: python.org の `python-3.12.10-amd64.exe` を `/quiet InstallAllUsers=1 PrependPath=1`
+  - Git: GitHub API で最新版を取得（失敗時は固定版にフォールバック）し `/VERYSILENT`
+  - Node.js: `nodejs.org/dist/index.json` から最新 LTS を解決し `msiexec /i ... /quiet`
+  - `start.bat` は不足ツール名（python/git/node）を渡してこのスクリプトを呼ぶだけにスリム化。標準ユーザーは従来どおりインストール部分のみ昇格（UAC 1回）。
+- **検証**: PS1 構文 OK・start.bat は引き続き純 ASCII（非ASCIIバイト0）。実機の直接DL成否は次回テストで確認。
+
 ### v1.13.7 start.bat の文字化けクラッシュと winget ソース未初期化を修正（Server 2025 実機）
 
 - **症状1（文字化けでコマンド誤実行）**: 実機（Windows Server 2025）で `start.bat` 実行時、先頭付近で `'…本体）へは進まない' は…コマンドではありません` のように **`::` コメント行の一部がコマンドとして実行**されてしまう。

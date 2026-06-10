@@ -131,5 +131,4 @@ foreach ($t in $wantList) {
 }
 
 Write-Host ''
-Write-Host 'Done. You can close this window.'
-Read-Host 'Press Enter to close'
+Write-Host 'Tool installation finished. Continuing setup...'

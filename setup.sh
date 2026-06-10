@@ -77,6 +77,15 @@ cmd_setup() {
         ok "sudo NOPASSWD を設定しました（/etc/sudoers.d/nopass）"
     fi
 
+    # パッケージ索引の更新（まっさらな WSL Ubuntu では索引が空で、以降の apt-get install が
+    # 「先に apt update しろ」と失敗するため、最初のインストール前に一度だけ実行する）
+    section "パッケージ索引の更新（apt-get update）"
+    if sudo apt-get update -q; then
+        ok "パッケージ索引を更新しました"
+    else
+        warn "apt-get update に失敗しました（ネットワーク/プロキシ設定を確認）。以降のインストールが失敗する場合があります"
+    fi
+
     # .env 作成（空ファイル・上書きなし）
     # APIキー等の設定はブラウザ（/setup）で行う
     if [ ! -f "$ENV_FILE" ]; then

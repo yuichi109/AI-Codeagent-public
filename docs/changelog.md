@@ -5,7 +5,15 @@
 
 ---
 
-## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版完了 v1.13.0・issue #61）
+## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版完了 v1.13.0・issue #61）＋ setup.sh の apt-get update 追加（v1.13.1）
+
+### v1.13.1 setup.sh: 初回インストール時の apt-get update を追加
+
+- **症状**: まっさらな WSL Ubuntu で `./setup.sh install` を実行すると、最初の `apt-get install python3-venv`（109行目付近）で「先に `apt update` を実行しろ」と弾かれる。
+- **原因**: `cmd_setup` の最初の `apt-get install` より前に `apt-get update` が無かった（`apt-get update -q` は Docker セクションにのみ存在＝Docker リポジトリ追加後の更新用）。新規環境はパッケージ索引が空のため失敗していた。
+- **修正**: sudo NOPASSWD チェック直後（最初のインストール前）に `sudo apt-get update -q` を一度だけ実行。失敗時は warn を出して継続（ネットワーク/プロキシ起因を案内）。Docker セクションの `apt-get update` はリポジトリ追加後の更新用として維持。
+- 両ブランチ（main / for_windows）に反映。
+
 
 サーバーポートが systemd・各コード・スキルに散在していた問題（issue #61）を、`.env` の `APP_PORT` を単一ソースとして集約。**WSL版を完全に仕上げ・全コード監査の上、Windows版（tray.py）まで完了**して issue #61 をクローズ可能に。
 

@@ -13,7 +13,6 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$ProgressPreference    = 'SilentlyContinue'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
 # Pinned versions for the direct-download fallback (bump occasionally).
@@ -36,8 +35,21 @@ function Try-Winget([string]$id) {
 
 function Download-File([string]$url, [string]$outFile) {
     Write-Host "  [download] $url"
+    if (Test-Path $outFile) { Remove-Item $outFile -Force -ErrorAction SilentlyContinue }
+    # Prefer BITS: shows a native progress bar and is fast (unlike IWR's slow bar).
     try {
+        Import-Module BitsTransfer -ErrorAction Stop
+        Start-BitsTransfer -Source $url -Destination $outFile -ErrorAction Stop -DisplayName 'AI Code Agent setup' -Description $url
+        if (Test-Path $outFile) { return $true }
+    } catch {
+        Write-Host "  [download] BITS unavailable, falling back to direct download (no progress bar)..."
+    }
+    # Fallback: Invoke-WebRequest with progress bar suppressed (the bar makes IWR very slow).
+    try {
+        $old = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $outFile -ErrorAction Stop
+        $ProgressPreference = $old
         return (Test-Path $outFile)
     } catch {
         Write-Host "  [download] FAILED: $($_.Exception.Message)"

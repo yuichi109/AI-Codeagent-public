@@ -7,6 +7,12 @@
 
 ## 2026-06-10（セッション44）Windows版 初回インストール時にポート番号を対話入力（v1.13.4）＋ /setup 初期表示の余計な Foundry カードを抑止（v1.13.5）＋ start.bat を2段構えに再構成（v1.13.6）
 
+### v1.13.9 ツール直接ダウンロードに進捗バーを復活（BITS転送）
+
+- **背景**: v1.13.8 のフォールバックDLは `Invoke-WebRequest` の進捗バーを切っていた（PS5.1 では進捗バー描画でDLが数十倍遅くなる既知問題のため）。結果、~70MB の Git/Node DL 中に**無反応に見えて**進捗が分からなかった。実機 Server 2025 では Python はDL→インストール成功（exit=0）を確認。
+- **修正**: `Download-File` を **BITS転送（`Start-BitsTransfer`）優先**に変更。BITS はネイティブの進捗バーを出し、かつ高速（IWRの遅延問題が無い）。BITS が使えない環境では従来の `Invoke-WebRequest`（進捗バー抑止）にフォールバック。リダイレクト・システムプロキシも BITS が処理。
+- 既存の winget→直接DL の2段フォールバック構造は不変。
+
 ### v1.13.8 winget が使えない環境向けに「直接ダウンロード→無人インストール」フォールバックを追加（Server 2025）
 
 - **症状**: Windows Server 2025 で `winget source reset --force` + `update` を行っても winget が `0x8a15000f`（ソース未同期）から回復せず、Python/Git/Node.js が一切入らない。

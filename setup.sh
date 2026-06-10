@@ -32,6 +32,16 @@ require_root() {
     fi
 }
 
+# .env のキーを upsert する（存在すれば置換・なければ追記）
+set_env_var() {
+    local key="$1" val="$2"
+    if [ -f "$ENV_FILE" ] && grep -qE "^${key}=" "$ENV_FILE"; then
+        sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    else
+        echo "${key}=${val}" >> "$ENV_FILE"
+    fi
+}
+
 # ──────────────────────────────────────────────
 # メニュー表示
 # ──────────────────────────────────────────────
@@ -75,6 +85,22 @@ cmd_setup() {
     else
         ok ".env はすでに存在します（スキップ）"
     fi
+
+    # サーバーポート設定（対話・単一ソース APP_PORT）
+    section "サーバーポート"
+    CURRENT_PORT="$(grep -E '^APP_PORT=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+    DEFAULT_PORT="${CURRENT_PORT:-8000}"
+    while true; do
+        read -rp "サーバーのポート番号 [デフォルト: ${DEFAULT_PORT}]: " INPUT_PORT
+        INPUT_PORT="${INPUT_PORT:-$DEFAULT_PORT}"
+        if [[ "$INPUT_PORT" =~ ^[0-9]+$ ]] && [ "$INPUT_PORT" -ge 1 ] && [ "$INPUT_PORT" -le 65535 ]; then
+            APP_PORT="$INPUT_PORT"
+            break
+        fi
+        warn "1〜65535 の数値を入力してください"
+    done
+    set_env_var "APP_PORT" "$APP_PORT"
+    ok "ポート ${APP_PORT} を .env に設定しました（systemd に反映します）"
 
     # Python venv
     section "Python 仮想環境"
@@ -197,15 +223,12 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         warn "  ansible-galaxy collection install community.vmware --upgrade"
     fi
 
-    # systemd サービス（自動登録）
+    # systemd サービス（毎回ユニットを再生成。ポートは .env の APP_PORT を単一ソースとする）
     section "systemd サービス登録"
-    if systemctl is-enabled "$SERVICE_NAME" &>/dev/null 2>&1; then
-        ok "サービスはすでに登録済みです"
-        sudo systemctl restart "$SERVICE_NAME"
-        ok "サービスを再起動しました"
-    else
-        CURRENT_USER="$(whoami)"
-        sudo tee "$SERVICE_FILE" > /dev/null << EOF
+    CURRENT_USER="$(whoami)"
+    # 注: \${APP_PORT} は systemd が EnvironmentFile(.env) から展開する（ここでは bash 展開させない）。
+    #     Environment を先に置き、未設定時の既定 8000 を EnvironmentFile が上書きする。
+    sudo tee "$SERVICE_FILE" > /dev/null << EOF
 [Unit]
 Description=AI Code Agent (FastAPI + uvicorn)
 After=network.target
@@ -214,19 +237,19 @@ After=network.target
 Type=simple
 User=${CURRENT_USER}
 WorkingDirectory=${SCRIPT_DIR}
-ExecStart=${VENV_DIR}/bin/uvicorn server:app --host 0.0.0.0 --port 8000
+Environment=APP_PORT=8000
+EnvironmentFile=${ENV_FILE}
+ExecStart=${VENV_DIR}/bin/uvicorn server:app --host 0.0.0.0 --port \${APP_PORT}
 Restart=on-failure
 RestartSec=5
-EnvironmentFile=${ENV_FILE}
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        sudo systemctl daemon-reload
-        sudo systemctl enable "$SERVICE_NAME"
-        sudo systemctl start "$SERVICE_NAME"
-        ok "サービスを登録・起動しました"
-    fi
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
+    sudo systemctl restart "$SERVICE_NAME"
+    ok "サービスを登録・起動しました（ポート ${APP_PORT}）"
 
     # 完了メッセージ
     section "セットアップ完了"
@@ -235,7 +258,7 @@ EOF
     echo ""
     echo "  ブラウザで以下にアクセスして設定を行ってください:"
     echo ""
-    echo "    http://localhost:8000/setup"
+    echo "    http://localhost:${APP_PORT}/setup"
     echo ""
 }
 

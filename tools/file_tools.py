@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 from datetime import datetime
-from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS
+from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS, APP_PORT
 
 
 def _is_under_allowed_dir(target: Path) -> bool:
@@ -52,10 +52,10 @@ def read_file(path: str, encoding: str = "utf-8") -> dict:
 
 
 def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
-    # docker-compose ファイルでポート8000の使用を禁止
+    # docker-compose ファイルでエージェントサーバーのポート使用を禁止
     import re
-    if re.search(r'docker-compose', path) and re.search(r'["\']8000:', content):
-        return {"error": "ポート8000はエージェントサーバー(uvicorn)が使用中のため使用禁止です。8080や8001など別のポートを使用してください。"}
+    if re.search(r'docker-compose', path) and re.search(rf'["\']{APP_PORT}:', content):
+        return {"error": f"ポート{APP_PORT}はエージェントサーバー(uvicorn)が使用中のため使用禁止です。8080など別のポートを使用してください。"}
     try:
         target = _resolve_safe_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)

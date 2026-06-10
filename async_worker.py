@@ -21,7 +21,7 @@ _project_root = Path(__file__).parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from config import ASYNC_MAX_JOBS, ASYNC_MAX_TURNS
+from config import ASYNC_MAX_JOBS, ASYNC_MAX_TURNS, APP_PORT
 from tools.async_job_db import (
     init_db,
     reset_running_jobs,
@@ -37,7 +37,7 @@ from agent_core import run_agent, register_mcp_proxy
 # job_id -> asyncio.Task
 _running: dict[str, "asyncio.Task[None]"] = {}
 
-_SERVER_BASE_URL = "http://127.0.0.1:8000"
+_SERVER_BASE_URL = f"http://127.0.0.1:{APP_PORT}"
 
 
 async def _register_mcp_tools_from_server() -> None:

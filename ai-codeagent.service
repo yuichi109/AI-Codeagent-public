@@ -6,10 +6,13 @@ After=network.target
 Type=simple
 User=user
 WorkingDirectory=/home/user/AI-Codeagent
-ExecStart=/home/user/AI-Codeagent/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000
+# ポートは .env の APP_PORT を単一ソースとする（未設定時は既定 8000）。
+# Environment を先に置き、EnvironmentFile(.env) で上書きさせる（順序が重要）。
+Environment=APP_PORT=8000
+EnvironmentFile=/home/user/AI-Codeagent/.env
+ExecStart=/home/user/AI-Codeagent/venv/bin/uvicorn server:app --host 0.0.0.0 --port ${APP_PORT}
 Restart=on-failure
 RestartSec=5
-EnvironmentFile=/home/user/AI-Codeagent/.env
 
 [Install]
 WantedBy=multi-user.target

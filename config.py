@@ -1,9 +1,10 @@
 import os
 import re
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.12.1"
+APP_VERSION = "1.13.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -75,6 +76,12 @@ if OBSIDIAN_VAULT_PATH:
         ALLOWED_WORK_DIRS.append(_vault_path)
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
+
+# ---- サーバーポート（単一ソース）----
+# WSL版=systemd の ExecStart / Windows版=tray.py が参照する唯一の定義。
+# 変更は .env の APP_PORT で行う（WSL版は ./setup.sh install で対話的に設定可能）。
+# 既定はプラットフォーム別: Windows=8001（WSL版と同一PCで併用しても衝突しない）/ それ以外=8000。
+APP_PORT: int = int(os.getenv("APP_PORT", "8001" if sys.platform == "win32" else "8000"))
 
 # Obsidian inbox 監視（機能B）
 OBSIDIAN_INBOX_ENABLED: bool = os.getenv("OBSIDIAN_INBOX_ENABLED", "false").lower() == "true"

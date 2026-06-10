@@ -7,6 +7,15 @@
 
 ## 2026-06-10（セッション44）Windows版 初回インストール時にポート番号を対話入力（v1.13.4）＋ /setup 初期表示の余計な Foundry カードを抑止（v1.13.5）＋ start.bat を2段構えに再構成（v1.13.6）
 
+### v1.13.11 「今どの処理中か」を常に表示（無言の待ち時間を排除）
+
+- 無言になりうる箇所すべてに進行ステータスを追加し、画面が止まって見える瞬間をなくした。
+  - winget 試行: `[winget] trying <id> (please wait)...` → 成功/直接DL切替を明示
+  - 各インストーラ実行中: `[installing] running the installer - please wait...` ＋ 完了で `done (exit=N)`
+  - winget ソース準備中: `[winget] preparing package source (please wait)...`
+  - Playwright: `--quiet` 撤去＋「Installing Playwright」「Downloading the Chromium browser」を明示
+  - 起動直前: `[start] Launching AI Code Agent (server + tray icon)...`
+
 ### v1.13.10 初回インストールのUX修正（真っ黒な無地待ち画面の撲滅・1窓化）
 
 - **症状（致命的UX）**: 初回インストール時、ツール導入は別の昇格窓で進む一方、**元の窓が無出力の真っ黒画面のまま**待機 → ユーザーが「フリーズした」と思って閉じてしまう。pip も `--quiet` で無出力の空白時間があり不安。窓が勝手に閉じて結果も読めない。

@@ -28,9 +28,11 @@ function Have-Winget {
 
 function Try-Winget([string]$id) {
     if (-not (Have-Winget)) { return $false }
-    Write-Host "  [winget] $id"
+    Write-Host "  [winget] trying $id (please wait)..."
     & winget install -e --id $id --source winget --silent --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    if ($LASTEXITCODE -eq 0) { Write-Host "  [winget] OK"; return $true }
+    Write-Host "  [winget] not available here, switching to direct download"
+    return $false
 }
 
 function Download-File([string]$url, [string]$outFile) {
@@ -58,7 +60,9 @@ function Download-File([string]$url, [string]$outFile) {
 }
 
 function Run-Wait([string]$file, [string[]]$argList) {
+    Write-Host "  [installing] running the installer - please wait (this can take a minute)..."
     $p = Start-Process -FilePath $file -ArgumentList $argList -Wait -PassThru
+    Write-Host "  [installing] done (exit=$($p.ExitCode))"
     return $p.ExitCode
 }
 
@@ -112,6 +116,7 @@ Write-Host '============================================================'
 
 # Best-effort winget source repair (harmless if winget is healthy / absent).
 if (Have-Winget) {
+    Write-Host '[winget] preparing package source (please wait)...'
     & winget source reset --force 2>$null | Out-Null
     & winget source update 2>$null | Out-Null
 }

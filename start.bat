@@ -82,8 +82,9 @@ echo ============================================================
 set "CHROMIUM_FOUND=0"
 for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium-*") do set "CHROMIUM_FOUND=1"
 if "!CHROMIUM_FOUND!"=="1" goto playwright_skip
-echo [setup] Installing Playwright chromium...
-venv\Scripts\python.exe -m pip install playwright==1.60.0 --quiet
+echo [setup] Installing Playwright ^(browser automation^) - please wait...
+venv\Scripts\python.exe -m pip install playwright==1.60.0
+echo [setup] Downloading the Chromium browser - please wait...
 venv\Scripts\python.exe -m playwright install chromium
 if errorlevel 1 (
     echo [WARN] Failed to install Playwright chromium.
@@ -92,6 +93,8 @@ if errorlevel 1 (
 )
 :playwright_skip
 
+echo.
+echo [start] Launching AI Code Agent ^(server + tray icon^)...
 :: --- launch tray ---
 if exist "venv\Scripts\pythonw.exe" (
     start "" "venv\Scripts\pythonw.exe" "%~dp0tray.py"

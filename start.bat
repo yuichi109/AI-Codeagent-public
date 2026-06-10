@@ -35,6 +35,7 @@ if errorlevel 1 (
 ::  PHASE 2: app setup and launch
 :: ============================================================
 if exist "venv\Scripts\python.exe" goto app_runtime
+set "FIRST_RUN=1"
 
 echo.
 echo ============================================================
@@ -48,11 +49,11 @@ echo [1/3] Creating virtual environment...
 if errorlevel 1 ( echo [ERROR] Failed to create venv. & pause & exit /b 1 )
 
 :: --- install packages ---
-echo [2/3] Installing packages ^(this may take a while^)...
+echo [2/3] Installing packages ^(this may take a few minutes; progress is shown below^)...
 call venv\Scripts\activate.bat
 set PIP_DISABLE_PIP_VERSION_CHECK=1
-python.exe -m pip install --upgrade pip --quiet
-python.exe -m pip install -r requirements.txt --quiet
+python.exe -m pip install --upgrade pip
+python.exe -m pip install -r requirements.txt
 if errorlevel 1 ( echo [ERROR] Failed to install packages. & pause & exit /b 1 )
 
 :: --- create .env (interactive port) ---
@@ -97,6 +98,23 @@ if exist "venv\Scripts\pythonw.exe" (
 ) else (
     start "" "venv\Scripts\python.exe" "%~dp0tray.py"
 )
+
+:: normal (non first-time) runs just launch the tray and close
+if not "%FIRST_RUN%"=="1" exit /b 0
+
+:: first-time setup: tell the user how to open the app, and keep the window open
+set "APP_PORT_SHOW=8001"
+for /f "usebackq tokens=2 delims==" %%a in (`findstr /b "APP_PORT=" .env 2^>nul`) do set "APP_PORT_SHOW=%%a"
+echo.
+echo ============================================================
+echo   Setup complete!
+echo.
+echo   Open in your browser:   http://localhost:!APP_PORT_SHOW!
+echo   It also lives in the tray ^(bottom-right; click the up-arrow
+echo   to show hidden icons^).
+echo ============================================================
+echo.
+pause
 exit /b 0
 
 :: ============================================================
@@ -129,14 +147,25 @@ if not defined NODE_FOUND set "MISS_IDS=!MISS_IDS!,node"
 set "MISS_IDS=!MISS_IDS:~1!"
 
 echo.
-echo     Installing the missing tools ^(winget, with direct-download fallback^).
 if "%IS_ADMIN%"=="1" (
-    echo     ^(running as administrator^)
+    echo     Installing the missing tools as administrator...
+    echo     ^(winget first, with direct-download fallback^)
     call :install_inline
-) else (
-    echo     Administrator approval is required. Click "Yes" on the UAC prompt.
-    call :install_elevated
+    goto after_install
 )
+:: not admin: relaunch the WHOLE setup elevated so everything stays in ONE visible window
+echo     Administrator rights are needed to install:!MISSING!
+echo     A new administrator window will open and continue the entire setup there.
+echo     Click "Yes" on the UAC prompt.  ^(This window will then close.^)
+powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs } catch { exit 1 }"
+if errorlevel 1 (
+    echo.
+    echo [WARN] Administrator approval was cancelled. Setup aborted.
+    call :prereq_manual_guide
+    pause
+)
+exit
+:after_install
 
 :: refresh PATH and re-check after install
 call :refresh_path
@@ -187,11 +216,6 @@ goto :eof
 :: --- elevated already: run the installer script in this session ---
 :install_inline
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install_prereqs.ps1" -Tools "!MISS_IDS!"
-goto :eof
-
-:: --- standard user: run the installer script elevated (one UAC prompt) ---
-:install_elevated
-powershell -NoProfile -Command "try { Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%~dp0scripts\install_prereqs.ps1','-Tools','!MISS_IDS!' } catch { Write-Host '[WARN] UAC was cancelled.' }"
 goto :eof
 
 :: --- manual install guidance ---

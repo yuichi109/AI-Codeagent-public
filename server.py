@@ -5367,6 +5367,11 @@ async def setup_save(req: SetupSaveRequest):
 
     lines = ["# AI Code Agent 設定ファイル（/setup で生成）", ""]
 
+    # サーバーポート（setup.sh / 手動設定の APP_PORT を維持する。単一ソース。
+    # これを書き戻さないと保存のたびに APP_PORT が消え、再起動で既定 8000 に戻ってしまう）
+    if existing_raw.get("APP_PORT"):
+        lines += ["# サーバーポート（単一ソース）", f"APP_PORT={existing_raw['APP_PORT']}", ""]
+
     # providers リストを種別ごとに分類して .env に書き込む
     foundry_count = 0
     for prov in req.providers:

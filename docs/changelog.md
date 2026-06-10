@@ -5,7 +5,16 @@
 
 ---
 
-## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版完了 v1.13.0・issue #61）＋ setup.sh の apt-get update 追加（v1.13.1）
+## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版 v1.13.0・issue #61）＋ setup.sh の apt-get update（v1.13.1）＋ /setup 保存でのポート消失バグ修正（v1.13.2）
+
+### v1.13.2 /setup 保存で APP_PORT が消えて 8000 に戻るバグを修正（重要）
+
+- **症状**: 新規インストールで `./setup.sh install`（ポート選択）後、`/setup` のセットアップ画面を保存してサービスが再起動すると、**選んだポートが失われ 8000 でしかアクセスできなくなる**。
+- **原因**: `POST /setup/save`（`server.py`）は `.env` を再生成する際、「未知キーを保持する」ために `existing_lines` を作っていた（5350付近）が、**最終書き込み（`env_path.write_text`）では proxy 行しか拾っておらず、`APP_PORT` を含む未知キーが捨てられていた**。APP_PORT が消えると systemd の既定 `Environment=APP_PORT=8000` が効いて 8000 に戻る。
+- **修正**: 保存時に既存 `.env` の `APP_PORT` を明示的に書き戻す（`existing_raw.get("APP_PORT")` があれば出力に含める）。未設定なら従来どおり既定（WSL=8000/Win=8001）。WSL・Windows 共通の `/setup/save` なので両プラットフォームに効く。
+- **検証**: 実 `.env`／APP_PORT=8080 合成／APP_PORT 無し の3ケースで保存後の出力に正しく反映/非反映を確認。
+- **既存ユーザーの復旧**: 既に保存でAPP_PORTが消えた `.env` は、`./setup.sh install` で再設定するか `.env` に `APP_PORT=<番号>` を手書き → `sudo systemctl restart ai-codeagent`。
+- 補足（別件・未対応）: `existing_lines` による「未知キー全般の保持」は今も proxy 以外は機能していない（APP_PORT 以外のユーザー独自キーも保存で消える潜在バグ）。今回は影響の大きい APP_PORT のみ明示対応。
 
 ### v1.13.1 setup.sh: 初回インストール時の apt-get update を追加
 

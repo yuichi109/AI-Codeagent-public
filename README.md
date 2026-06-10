@@ -109,12 +109,17 @@ chmod +x setup.sh   # Windows側エディタ経由だと実行権限が落ちる
 ```
 
 ```bat
-rem Windows ネイティブ版
+rem Windows ネイティブ版（ユーザープロファイル配下に置くこと。Program Files は不可）
 git clone https://gitlab.com/yuichi.matsuo/AI-Codeagent.git AI-Codeagent-win
 cd AI-Codeagent-win
 git checkout for_windows
 start.bat
 ```
+
+> **前提ソフト（Python / Git / Node.js）が事前に入っていれば一般ユーザー権限で完結します。**
+> 未インストールの場合は `start.bat` が途中で winget による自動インストールを行い、**その際に管理者昇格（UAC）が必須**です（Git・Node.js はマシン全体に導入されるため）。
+> Node.js は MCP / Playwright を使う場合のみ必要（無くても本体は動作）。
+> 初回だけ管理者で 3 つを入れておけば、以降は昇格なしで起動できます。詳細・Windows Server 2025 の注意は [docs/setup.md](docs/setup.md) を参照。
 
 ---
 

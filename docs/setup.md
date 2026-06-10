@@ -5,22 +5,43 @@
 | ブランチ | 対象環境 | 特徴 |
 |---|---|---|
 | `main` | Linux / WSL2 | systemd サービス・bubblewrap サンドボックス・SearXNG 対応 |
-| `for_windows` | Windows ネイティブ | WSL・Docker 不要。`setup.bat` で起動。サンドボックスなし |
+| `for_windows` | Windows ネイティブ | WSL・Docker 不要。`start.bat` で起動。サンドボックスなし |
 
 ---
 
 ## Windows ネイティブ版（for_windows ブランチ）
 
-WSL・Docker・管理者権限なしで動作します。
+WSL・Docker は不要です。
 
 ### 動作確認済み環境
 
 | 項目 | バージョン |
 |---|---|
-| OS | Windows 10 / 11 |
+| OS | Windows 10 / 11 / Windows Server 2022・2025 |
 | Python | 3.10 以上（未インストールでも自動導入） |
-| Git | 任意（未インストールでも自動導入） |
+| Git | 必須（クローンに使用。未インストールでも自動導入） |
+| Node.js | 任意（MCP / Playwright 機能を使う場合のみ。無くても本体は動作） |
 | ブラウザ | Chrome / Edge / Firefox (最新版) |
+
+### 管理者権限について（重要）
+
+**前提ソフト（Python / Git / Node.js）が既にインストール済みなら、一般ユーザー権限のまま `start.bat` を実行できます。**
+venv 作成・pip・Playwright chromium（`%LOCALAPPDATA%` へ導入）・`.env` 作成・トレイ起動はすべてユーザー範囲で完結します。
+
+一方、これらが**未インストールの場合は `start.bat` が途中で winget による自動インストールを行い、その際に管理者昇格（UAC）が必須**になります（特に Git・Node.js は Program Files へマシン全体導入のため）。
+
+> **推奨**: 初回だけ管理者権限で Python・Git・Node.js を入れておけば、以降の `start.bat` 実行は昇格なし（一般ユーザー）で完結します。一番トラブルが少ない手順です。
+>
+> ```powershell
+> # PowerShell を「管理者として実行」して一度だけ
+> winget install -e --id Python.Python.3.12 --source winget --accept-package-agreements --accept-source-agreements
+> winget install -e --id Git.Git          --source winget --accept-package-agreements --accept-source-agreements
+> winget install -e --id OpenJS.NodeJS.LTS --source winget --accept-package-agreements --accept-source-agreements
+> ```
+>
+> **Windows Server 2025 の注意**: ① winget（App Installer）が標準では入っていない場合があり、先に用意が必要なことがある ② LAN の別PCからアクセスするなら、初回起動時に Defender ファイアウォールの受信許可（管理者操作）が要る（`localhost` だけなら不要）。
+>
+> **クローン先**は `C:\Program Files\...` のような保護フォルダを避け、ユーザープロファイル配下（例 `C:\Users\<user>\AI-Codeagent-win`）に置くこと。保護フォルダだと書き込みに失敗します。
 
 ### インストール手順
 
@@ -41,18 +62,18 @@ cd AI-Codeagent
 
 > プライベートリポジトリの場合、ユーザー名に `oauth2`、パスワードに GitLab PAT を入力してください。
 
-**Step 2: setup.bat をダブルクリック**
+**Step 2: start.bat をダブルクリック**
 
-`setup.bat` が以下を自動で行います:
+`start.bat` が以下を自動で行います:
 
-1. Python / Git が未インストールなら **winget** で自動インストール
+1. Python / Git / Node.js が未インストールなら **winget** で自動インストール（→ **管理者昇格が要求される**）
 2. Python 仮想環境（venv）を作成
 3. `requirements.txt` のパッケージをインストール
-4. `.env` を `.env.example` から生成
-5. サーバーを起動（ポート 8001）
+4. `.env` を `.env.example` から生成し、**サーバーポートを対話入力**（既定 8001・Enter でそのまま）
+5. サーバーを起動
 
 > **winget** は Windows 10 1709 以降 / Windows 11 に標準搭載されています。
-> Python や Git が既にインストール済みの場合はスキップされます。
+> Python・Git・Node.js が既にインストール済みの場合は自動インストール（と管理者昇格）はスキップされ、一般ユーザー権限で進みます。
 
 **Step 3: ブラウザで設定**
 

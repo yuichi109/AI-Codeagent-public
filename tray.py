@@ -23,7 +23,27 @@ except Exception:
     sys.exit(1)
 
 BASE_DIR = Path(__file__).parent
-PORT = 8001
+
+
+def _resolve_port() -> int:
+    """BASE_DIR/.env の APP_PORT を単一ソースとして読む（cwd 非依存・Windows 既定 8001）。
+    server プロセスの config.APP_PORT も同じ .env を読むため両者が一致する。"""
+    env_file = BASE_DIR / ".env"
+    if env_file.exists():
+        try:
+            text = env_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = env_file.read_text(encoding="cp932", errors="replace")
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("APP_PORT=") and "#" not in line.split("=", 1)[0]:
+                val = line.partition("=")[2].strip()
+                if val.isdigit():
+                    return int(val)
+    return 8001
+
+
+PORT = _resolve_port()
 URL = f"http://localhost:{PORT}"
 
 # Windows の絵文字フォント候補（Segoe UI Emoji が最優先）

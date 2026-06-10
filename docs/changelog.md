@@ -5,9 +5,18 @@
 
 ---
 
-## 2026-06-10（セッション43）ポート番号の一元管理（WSL版）（v1.12.2・issue #61）
+## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版完了 v1.13.0・issue #61）
 
-サーバーポートが systemd・各コード・スキルに散在していた問題（issue #61）を、`.env` の `APP_PORT` を単一ソースとして集約。**WSL版を完全に仕上げ、全コードを監査**した。Windows版（tray.py）は次回。
+サーバーポートが systemd・各コード・スキルに散在していた問題（issue #61）を、`.env` の `APP_PORT` を単一ソースとして集約。**WSL版を完全に仕上げ・全コード監査の上、Windows版（tray.py）まで完了**して issue #61 をクローズ可能に。
+
+### Windows版（v1.13.0）ポート一元化完了
+
+- **`config.py` の既定をプラットフォーム別に**: `APP_PORT = int(os.getenv("APP_PORT", "8001" if sys.platform == "win32" else "8000"))`。Windows 既定 8001（WSL版と同一PCで併用しても衝突しない）/ WSL・Linux 既定 8000。`.env` に `APP_PORT` があれば常にそれが優先。
+- **`tray.py`**: ハードコード `PORT = 8001` を撤廃し、`_resolve_port()` で `BASE_DIR/.env` の `APP_PORT` を読む（**cwd 非依存**・既定 8001・不正値や未設定は 8001 にフォールバック）。これで `PORT`・`URL`・`_free_port()`・uvicorn 起動の `--port` がすべて追従。サーバー子プロセスは従来どおり `cwd=BASE_DIR, env=_load_env()` で同じ `.env` を読むため、tray と server が必ず同一ポートになる。
+- **検証**: `_resolve_port` を7パターン（.env なし／APP_PORT 無し／正常値／他キー混在／コメント行／不正値／前後空白）でテスト→全PASS。プラットフォーム別既定の式（win32→8001 / linux→8000）と `py_compile`（tray.py・config.py）も確認。WSL の `config.APP_PORT` は 8000 のまま（リグレッションなし）。
+- **ブランチ**: main に実装後、`for_windows` へマージ同期（運用上 main とほぼ同一・start.bat の差分のみ保持）。
+
+### WSL版（v1.12.2）
 
 ### 単一ソース化
 

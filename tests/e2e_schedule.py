@@ -1,11 +1,12 @@
 """スケジューラー e2e（実機API）。サーバー稼働中に実行する。"""
+import os
 import sys
 import time
 import json
 import urllib.request
 from datetime import datetime, timedelta
 
-B = "http://localhost:8000"
+B = f"http://localhost:{os.getenv('APP_PORT', '8000')}"
 
 
 def call(method, path, body=None):

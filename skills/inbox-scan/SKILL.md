@@ -8,17 +8,17 @@ trigger: /inbox-scan
 
 ユーザーが `/inbox-scan`、「inbox をスキャン」「inbox を確認」と入力したとき：
 
-**必ず POST メソッドで** `http://localhost:8000/inbox/scan` を呼び出し、結果をユーザーに伝える。
+**必ず POST メソッドで** `http://localhost:{APP_PORT}/inbox/scan` を呼び出し、結果をユーザーに伝える。
 
 ```bash
-curl -s -X POST http://localhost:8000/inbox/scan
+curl -s -X POST http://localhost:{APP_PORT}/inbox/scan
 ```
 
 または Python:
 
 ```python
 import requests
-res = requests.post("http://localhost:8000/inbox/scan")
+res = requests.post("http://localhost:{APP_PORT}/inbox/scan")
 print(res.json())
 ```
 

@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-06-10（セッション43）ポート番号の一元管理（WSL版）（v1.12.2・issue #61）
+
+サーバーポートが systemd・各コード・スキルに散在していた問題（issue #61）を、`.env` の `APP_PORT` を単一ソースとして集約。**WSL版を完全に仕上げ、全コードを監査**した。Windows版（tray.py）は次回。
+
+### 単一ソース化
+
+- **`config.py`**: `APP_PORT = int(os.getenv("APP_PORT", "8000"))` を追加（唯一の定義）。`.env.example` にも追記。
+- **ランタイム参照を全て config 駆動／相対化**:
+  - `async_worker.py`: `_SERVER_BASE_URL` を `f"http://127.0.0.1:{APP_PORT}"` 化。
+  - `tools/file_tools.py`: docker-compose ポートガードを `APP_PORT` 参照に動的化。
+  - `prompts.py`: curl例・予約ポート文言を `{APP_PORT}` 化。さらに **`_load_skills()` でスキルMD内の `{APP_PORT}` プレースホルダを実値に置換**（`str.replace` なので他の波括弧に無影響）。
+  - `skills/inbox-scan`・`skills/get-proj`: `localhost:8000` → `localhost:{APP_PORT}`。
+  - `tests/e2e_schedule.py`・`e2e_catchup.py`: `APP_PORT` env 駆動化。
+
+### systemd ユニットの設計（真の単一ソース）
+
+- **方式**: `Environment=APP_PORT=8000`（既定）→ `EnvironmentFile=.env`（上書き）→ `ExecStart ... --port ${APP_PORT}`（systemd 展開）。順序が重要（Environment を先に置き .env が上書き）。
+- これにより **ポートが `.env` だけに存在**し、unit に二重持ちしない。`./setup.sh install` の対話プロンプト（`[デフォルト: 8000]`・1〜65535 バリデーション）で `.env` に upsert。
+- **`ai-codeagent.service`（手動インストール経路・docs/setup.md:438）と setup.sh 生成ユニットを同一テンプレートに統一**。これが当初の取りこぼし（手動経路のハードコード）を解消。
+- setup.sh の systemd 登録は「登録済みでも毎回ユニット再生成」に変更（テンプレート更新を確実に反映）。
+
+### 検証（実機 end-to-end）
+
+- `systemd-run` で env 優先順位・既定フォールバック（空展開なし）・`${APP_PORT}` 展開を確認。`systemd-analyze verify` で両ユニット VALID。
+- 実機3フェーズ: 8000適用 → **.env を 8080 に変えて restart のみで反映**（daemon-reload 不要）→ 8000 復帰。各フェーズで listen・HTTP 200・旧ポート解放・**async_worker（子プロセス）のポート追従**をジャーナルで確認（12/12）。
+- 全コード監査: 自ポートへの HTTP は async_worker の1箇所のみ（config化済）、CORS/リダイレクトのポート焼き込み無し、MCP設定は stdio、フロントは全て相対、保存済み全60セッションにポート付き画像リンク0。**画像は相対 `/workspace/image?path=` 参照のためポート変更でも破綻しない**ことを実データで確認。
+
+### 既知の残件
+
+- **Windows版（tray.py）**: `PORT = 8001` のハードコードは未対応（指定どおり後回し）。WSL確定後に着手し、完了時に v1.13.0 でまとめる予定。
+
+---
+
 ## 2026-06-09（セッション42）チャット送信の体感改善 ＋ setup.sh 実行権限の自動付与（v1.12.1）
 
 ### v1.12.1 エンター押下後の「沈黙」を解消

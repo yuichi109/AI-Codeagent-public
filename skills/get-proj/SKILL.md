@@ -10,7 +10,7 @@ trigger: /get-proj
 
 ### ステップ1: GitLabプロジェクト一覧を取得して選ばせる
 
-`run_command("curl -s http://localhost:8000/gitlab/projects")` を実行し、
+`run_command("curl -s http://localhost:{APP_PORT}/gitlab/projects")` を実行し、
 以下の形式で**番号付きリスト**で表示する。**表形式・箇条書きは使わない。**
 
 ```

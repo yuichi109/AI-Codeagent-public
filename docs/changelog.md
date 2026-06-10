@@ -5,7 +5,7 @@
 
 ---
 
-## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版 v1.13.0・issue #61）＋ setup.sh の apt-get update（v1.13.1）＋ /setup 保存でのポート消失バグ修正（v1.13.2）
+## 2026-06-10（セッション43）ポート番号の一元管理（WSL版 v1.12.2 → Windows版 v1.13.0・issue #61）＋ setup.sh の apt-get update（v1.13.1）＋ /setup 保存での設定消失バグ修正（v1.13.2〜v1.13.3）
 
 ### v1.13.2 /setup 保存で APP_PORT が消えて 8000 に戻るバグを修正（重要）
 
@@ -14,7 +14,14 @@
 - **修正**: 保存時に既存 `.env` の `APP_PORT` を明示的に書き戻す（`existing_raw.get("APP_PORT")` があれば出力に含める）。未設定なら従来どおり既定（WSL=8000/Win=8001）。WSL・Windows 共通の `/setup/save` なので両プラットフォームに効く。
 - **検証**: 実 `.env`／APP_PORT=8080 合成／APP_PORT 無し の3ケースで保存後の出力に正しく反映/非反映を確認。
 - **既存ユーザーの復旧**: 既に保存でAPP_PORTが消えた `.env` は、`./setup.sh install` で再設定するか `.env` に `APP_PORT=<番号>` を手書き → `sudo systemctl restart ai-codeagent`。
-- 補足（別件・未対応）: `existing_lines` による「未知キー全般の保持」は今も proxy 以外は機能していない（APP_PORT 以外のユーザー独自キーも保存で消える潜在バグ）。今回は影響の大きい APP_PORT のみ明示対応。
+
+### v1.13.3 /setup 保存でフォーム管理外キーが全て消える問題を根治
+
+- v1.13.2 は APP_PORT のみの応急対応だったが、同根の消失が他にもあったため根治。
+- **実害が確認された消失**: ① `no_proxy`/`NO_PROXY`（known_prefixes に入っていたため `existing_lines` から除外され、5577 の proxy 書き戻しはコメント行しか拾えていなかった。**実機の .env でも proxy 行が既に消えていた**）② `ASYNC_*`・`SCHEDULER_*`・`VERIFY_ON_WRITE` 等、setup.sh や手動で追加したフォーム管理外キー全般（`existing_lines` に集めるだけで書き戻していなかった）。
+- **修正**: ① `no_proxy`/`NO_PROXY` を known_prefixes から除外（フォームは管理していないため）→ proxy 書き戻しが実際に機能するように。② 出力済みキー集合（`written_keys`）を作り、**フォーム管理外の既存キーを最後に全て書き戻す汎用パス**を追加（同名キーはデデュープ）。known_prefixes（フォーム管理キー）は従来どおり除外＝フォームでプロバイダー削除した場合はちゃんと消える。
+- **検証（実物の `setup_save` 関数で e2e）**: 実 `.env` をバックアップ→独自キー・proxy 行を投入→**最悪ケース（空フォーム保存）**で実行→ APP_PORT / no_proxy / NO_PROXY / 独自キー / ASYNC_MAX_JOBS / GITLAB_PAT(マスクfallback) の保持と重複なしを確認（8/8 PASS）→ バイト一致で復元。
+- **注意（既存環境）**: 過去の保存で既に消えた値（特に社内プロキシの `no_proxy`/`NO_PROXY`）は自動復活しない。社内環境で使う場合は `.env` への再追記が必要。
 
 ### v1.13.1 setup.sh: 初回インストール時の apt-get update を追加
 

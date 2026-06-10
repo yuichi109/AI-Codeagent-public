@@ -5337,6 +5337,10 @@ async def setup_save(req: SetupSaveRequest):
                 existing_raw[k.strip()] = v.strip()
 
     # 既存 .env を読んで「既知キー以外のコメント行・カスタム行」を保持
+    # known_prefixes = /setup フォームが管理するキー（フォームの値で再生成される。
+    # フォームでプロバイダー等を削除したとき .env からも消える必要があるため、ここで除外する）。
+    # それ以外（APP_PORT・proxy・ASYNC_*・SCHEDULER_* など setup.sh や手動で追加したキー）は
+    # existing_lines に集め、最後に必ず書き戻す。
     existing_lines = []
     known_prefixes = (
         "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "OPENAI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
@@ -5345,7 +5349,6 @@ async def setup_save(req: SetupSaveRequest):
         "IMAGE_",
         "NOTIFY_",
         "OBSIDIAN_",
-        "no_proxy", "NO_PROXY",
     )
     if env_path.exists():
         for line in env_path.read_text().splitlines():
@@ -5579,9 +5582,29 @@ async def setup_save(req: SetupSaveRequest):
         _set_mcp_enabled("obsidian", ob["mcp_enabled"] == "true")
 
     # プロキシ行（既存から保持）
-    proxy_lines = [l for l in existing_lines if "proxy" in l.lower() or "PROXY" in l]
+    proxy_lines = [l for l in existing_lines if ("proxy" in l.lower() or "PROXY" in l) and "=" in l and not l.strip().startswith("#")]
     if proxy_lines:
         lines += ["# プロキシバイパス"] + proxy_lines + [""]
+
+    # フォーム管理外の既存キーをすべて書き戻す（消失防止の最終防衛線）。
+    # APP_PORT・ASYNC_*・SCHEDULER_*・VERIFY_ON_WRITE 等、setup.sh や手動で .env に
+    # 追加したキーは /setup 保存後も必ず残す。ここで書き戻さないと保存のたびに消える。
+    written_keys = {
+        l.partition("=")[0].strip()
+        for l in lines
+        if "=" in l and not l.strip().startswith("#")
+    }
+    leftover_lines = []
+    for line in existing_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue  # コメント・空行は書き戻し対象外（セクション再構成で位置が変わるため）
+        key = stripped.partition("=")[0].strip()
+        if key and key not in written_keys:
+            leftover_lines.append(line)
+            written_keys.add(key)  # 同名キーの重複書き戻しを防ぐ
+    if leftover_lines:
+        lines += ["# その他の既存設定（/setup フォーム管理外のキー・自動保持）"] + leftover_lines + [""]
 
     env_path.write_text("\n".join(lines))
 

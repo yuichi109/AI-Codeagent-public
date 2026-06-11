@@ -104,33 +104,44 @@
   #input-box:focus-within { border-color: #89b4fa; }
   #input { background: transparent; border: none; color: #cdd6f4; font-size: 14px; outline: none; resize: none; line-height: 1.5; max-height: 200px; overflow-y: auto; padding: 0; width: 100%; }
   #image-preview-area { display: flex; gap: 8px; flex-wrap: wrap; }
-  #input-bottom { display: flex; align-items: center; justify-content: space-between; }
-  #input-left { display: flex; align-items: center; gap: 2px; }
-  #input-right { display: flex; align-items: center; gap: 4px; }
-  #attach-btn { padding: 5px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 20px; line-height: 1; }
-  #attach-btn:hover { background: #45475a; color: #cdd6f4; }
-  #mic-btn { padding: 5px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 20px; line-height: 1; transition: background 0.2s; }
-  #mic-btn:hover { background: #45475a; color: #cdd6f4; }
+  #input-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  #input-left { display: flex; align-items: center; gap: 4px; }
+  #input-right { display: flex; align-items: center; gap: 6px; }
+  /* 統一アイコンボタン（添付・コード・直接保存・生成元画像・マイク） */
+  .cbtn { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; background: transparent; color: #a6adc8; border: none; border-radius: 8px; cursor: pointer; transition: background 0.15s, color 0.15s; flex-shrink: 0; }
+  .cbtn:hover { background: #45475a; color: #cdd6f4; }
+  .cbtn svg { width: 18px; height: 18px; display: block; }
+  #srcimg-btn.active { background: rgba(137,180,250,0.18); color: #89b4fa; }
   #mic-btn.recording { background: #f38ba8; color: #1e1e2e; animation: mic-pulse 1s ease-in-out infinite; }
   #mic-btn.unsupported { opacity: 0.4; cursor: not-allowed; }
-  #mode-select { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.4; white-space: nowrap; appearance: none; -webkit-appearance: none; transition: color 0.2s, border-color 0.2s; }
-  #mode-select:hover { color: #cdd6f4; border-color: #6c7086; }
-  #mode-select:focus { outline: none; }
-  #mode-select option { background: #1e1e2e; color: #cdd6f4; }
-  #mode-select.mode-auto { color: #a6e3a1; border-color: #a6e3a1; font-weight: bold; }
-  #mode-select.mode-plan { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
-  #ma-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px 0 0 6px; cursor: pointer; font-size: 14px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
+  /* 区切り線 */
+  .cbar-div { width: 1px; height: 20px; background: #45475a; margin: 0 4px; flex-shrink: 0; }
+  /* 自前ドロップダウン（ネイティブ select を使わない＝この環境の「文字が消える」不具合を原理的に回避） */
+  .dd { position: relative; display: inline-flex; flex-shrink: 0; }
+  .dd-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px 6px 11px; background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 8px; cursor: pointer; font-size: 12px; line-height: 1.4; white-space: nowrap; transition: color 0.2s, border-color 0.2s; }
+  .dd-btn:hover { border-color: #6c7086; }
+  .dd-caret { width: 8px; height: 8px; border-right: 2px solid #6c7086; border-bottom: 2px solid #6c7086; transform: translateY(-2px) rotate(45deg); margin-left: 2px; }
+  .dd-menu { display: none; position: absolute; bottom: calc(100% + 5px); left: 0; min-width: 100%; background: #181825; border: 1px solid #45475a; border-radius: 8px; padding: 4px; z-index: 50; box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+  .dd.open .dd-menu { display: block; }
+  .dd-item { display: block; width: 100%; text-align: left; padding: 6px 12px; background: transparent; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .dd-item:hover { background: #313244; }
+  .dd-item.sel { color: #89b4fa; }
+  /* モードの状態色（ボタン枠＋文字） */
+  #mode-dd-btn.mode-auto { color: #a6e3a1; border-color: #a6e3a1; font-weight: bold; }
+  #mode-dd-btn.mode-auto .dd-caret { border-color: #a6e3a1; }
+  #mode-dd-btn.mode-plan { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
+  #mode-dd-btn.mode-plan .dd-caret { border-color: #cba6f7; }
+  /* マルチAI（セグメント: ボタン＋品質ドロップダウン） */
+  .ma-group { display: inline-flex; align-items: center; flex-shrink: 0; }
+  #ma-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; background: transparent; color: #a6adc8; border: 1px solid #45475a; border-radius: 8px 0 0 8px; cursor: pointer; font-size: 12px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
+  #ma-btn svg { width: 15px; height: 15px; }
   #ma-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #ma-btn.active { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
-  #ma-mode { padding: 3px 6px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-left: none; border-radius: 0 6px 6px 0; cursor: pointer; font-size: 12px; appearance: none; -webkit-appearance: none; }
-  #ma-mode:focus { outline: none; }
-  #ma-btn.active + #ma-mode { color: #cba6f7; border-color: #cba6f7; }
-  #srcimg-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
-  #srcimg-btn:hover { color: #cdd6f4; border-color: #6c7086; }
-  #srcimg-btn.active { color: #89b4fa; border-color: #89b4fa; font-weight: bold; }
-  #srcimg-clear-btn { padding: 2px 6px; background: transparent; color: #6c7086; border: 1px solid #45475a; border-left: none; border-radius: 0 6px 6px 0; cursor: pointer; font-size: 12px; line-height: 1.6; transition: color 0.15s, background 0.15s; margin-left: -2px; }
-  #srcimg-clear-btn:hover { color: #f38ba8; border-color: #f38ba8; background: #3d2030; }
-  #srcimg-btn.active { border-radius: 6px 0 0 6px; }
+  #maq-dd .dd-btn { border-radius: 0 8px 8px 0; border-left: none; color: #a6adc8; }
+  #ma-btn.active + #maq-dd .dd-btn { color: #cba6f7; border-color: #cba6f7; }
+  #srcimg-clear-btn { display: inline-grid; place-items: center; height: 32px; padding: 0 7px; background: rgba(137,180,250,0.18); color: #a6adc8; border: none; border-radius: 0 8px 8px 0; cursor: pointer; font-size: 13px; transition: color 0.15s, background 0.15s; }
+  #srcimg-clear-btn:hover { color: #f38ba8; background: #3d2030; }
+  #srcimg-btn.active { border-radius: 8px 0 0 8px; }
   /* Draw.io パネル */
   #drawio-panel { display:none; position:fixed; inset:0; background:#1e1e2e; z-index:8500; flex-direction:column; }
   #drawio-panel.open { display:flex; }
@@ -183,9 +194,11 @@
   #srcimg-paste-btn { background:#313244; color:#cdd6f4; border:1px solid #45475a; border-radius:7px; padding:6px 14px; font-size:12px; cursor:pointer; width:100%; text-align:center; transition:border-color 0.15s,background 0.15s; flex-shrink:0; }
   #srcimg-paste-btn:hover { border-color:#89b4fa; background:#3d3f5a; }
   @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(243,139,168,0.6); } 50% { box-shadow: 0 0 0 6px rgba(243,139,168,0); } }
-  #send { padding: 6px 16px; background: #89b4fa; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; }
+  #send { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; background: #89b4fa; color: #11111b; border: none; border-radius: 9px; cursor: pointer; font-weight: bold; font-size: 13px; transition: background 0.15s; }
+  #send svg { width: 16px; height: 16px; }
+  #send:hover { background: #a8c7fb; }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
-  #stop { padding: 6px 16px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; display: none; }
+  #stop { padding: 7px 14px; background: #f38ba8; color: #11111b; border: none; border-radius: 9px; cursor: pointer; font-weight: bold; font-size: 13px; display: none; }
   /* BG classify prompt card (shown in chat when AI suggests BG) */
   .bg-classify-card { display:flex; align-items:flex-start; gap:12px; background:#313244; border:1px solid #a6e3a1; border-radius:10px; padding:12px 16px; margin:8px auto; max-width:680px; width:100%; box-sizing:border-box; }
   .bg-classify-icon { font-size:22px; flex-shrink:0; line-height:1; }
@@ -194,7 +207,9 @@
   .bg-classify-actions { display:flex; gap:8px; align-items:center; flex-shrink:0; }
   .bg-classify-btn-bg { padding:5px 14px; background:#a6e3a1; color:#1e1e2e; border:none; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; }
   .bg-classify-btn-normal { padding:5px 14px; background:#45475a; color:#cdd6f4; border:none; border-radius:6px; cursor:pointer; font-size:12px; }
-  #bg-btn { padding: 6px 12px; background: #a6e3a1; color: #1e1e2e; border: none; border-radius: 7px; cursor: pointer; font-weight: bold; font-size: 13px; position: relative; }
+  #bg-btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; background: #313244; color: #a6e3a1; border: none; border-radius: 9px; cursor: pointer; font-weight: bold; font-size: 12px; position: relative; transition: background 0.15s; }
+  #bg-btn svg { width: 15px; height: 15px; }
+  #bg-btn:hover { background: #3d3f54; }
   #bg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   #bg-badge { position:absolute; top:-6px; right:-6px; background:#f38ba8; color:#1e1e2e; border-radius:10px; font-size:10px; font-weight:bold; padding:1px 5px; display:none; }
 
@@ -251,7 +266,7 @@
   .bsb-cancelled,.bsb-cancelling { background:#6c7086; color:#cdd6f4; }
   .bg-icon-btn  { background:none; border:none; color:#6c7086; cursor:pointer; font-size:14px; padding:2px 5px; border-radius:4px; }
   .bg-icon-btn:hover { color:#cdd6f4; background:#45475a; }
-  #gen-status { display: none; font-size: 13px; color: #cdd6f4; font-family: monospace; }
+  #gen-status { display: none; font-size: 11px; color: #585b70; font-family: monospace; white-space: nowrap; }
   .img-preview { position: relative; }
   .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
   .img-preview-del { position: absolute; top: -4px; right: -4px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; line-height: 16px; text-align: center; padding: 0; }
@@ -263,8 +278,6 @@
   .file-chip-del:hover { color: #f38ba8; }
   .file-chip.uploaded { border-color: #a6e3a1; }
   body.drag-over::after { content: 'ファイルをドロップして添付'; position: fixed; inset: 0; background: rgba(30,30,46,0.85); color: #cba6f7; font-size: 24px; display: flex; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; }
-  #codeblock-btn { padding: 4px 8px; background: transparent; color: #6c7086; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: monospace; font-weight: bold; line-height: 1; }
-  #codeblock-btn:hover, #attach-btn:hover { color: #cdd6f4; background: #45475a; }
   /* ---- プロバイダー設定 ---- */
   #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
@@ -1170,28 +1183,32 @@
     <div id="image-preview-area"></div>
     <div id="input-bottom">
       <div id="input-left">
-        <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="ファイルを添付（画像・YAML・JSON・テキスト等）">📎</button>
+        <button id="attach-btn" class="cbtn" onclick="document.getElementById('file-input').click()" title="ファイルを添付（画像・YAML・JSON・テキスト等）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="file-input" type="file" accept="image/*,.yml,.yaml,.json,.toml,.ini,.conf,.txt,.md,.py,.sh,.bash,.js,.ts,.html,.css,.xml,.env" multiple style="display:none" onchange="handleFileSelect(event)">
-        <button id="codeblock-btn" onclick="insertCodeBlock()" title="コードブロックを挿入（選択テキストを囲む）">&lt;/&gt;</button>
-        <button id="rawwrite-btn" onclick="toggleRawWriteBar()" title="コードをLLMを通さず直接ファイルに保存">💾 直接保存</button>
+        <button id="codeblock-btn" class="cbtn" onclick="insertCodeBlock()" title="コードブロックを挿入（選択テキストを囲む）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+        <button id="rawwrite-btn" class="cbtn" onclick="toggleRawWriteBar()" title="コードをLLMを通さず直接ファイルに保存（直接保存）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
         <div id="rawwrite-bar" style="display:none;align-items:center;gap:6px;margin-top:4px;">
           <input id="rawwrite-path" placeholder="保存先 (例: check.yml)" style="flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--surface2);background:var(--base);color:var(--text);font-size:13px;">
           <button onclick="doRawWrite()" style="padding:4px 10px;border-radius:6px;background:var(--blue);color:#fff;border:none;cursor:pointer;font-size:13px;">保存</button>
           <button onclick="toggleRawWriteBar()" style="padding:4px 8px;border-radius:6px;background:var(--surface1);color:var(--text);border:none;cursor:pointer;font-size:13px;">✕</button>
         </div>
-        <button id="srcimg-btn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定">🖼 生成元画像</button><button id="srcimg-clear-btn" onclick="clearSrcImg()" title="生成元画像の参照を解除" style="display:none">×</button>
-        <select id="mode-select" onchange="onModeChange()" title="実行モード: 許可を確認 / プランモード（読み取り専用） / 自動（確認なし）">
-          <option value="confirm">🔒 許可を確認</option>
-          <option value="plan">📋 プランモード</option>
-          <option value="auto">🔓 自動</option>
-        </select>
-        <button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行">🤖 マルチAI</button><select id="ma-mode" title="品質/コストのバランス設定"><option value="balance">バランス</option><option value="quality">品質優先</option><option value="economy">コスト優先</option></select>
+        <button id="srcimg-btn" class="cbtn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定（生成元画像）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button><button id="srcimg-clear-btn" onclick="clearSrcImg()" title="生成元画像の参照を解除" style="display:none">×</button>
+        <span class="cbar-div"></span>
+        <div class="dd" id="mode-dd" title="実行モード: 許可を確認 / プランモード（読み取り専用） / 自動（確認なし）">
+          <button type="button" class="dd-btn" id="mode-dd-btn"><span class="dd-label">許可を確認</span><span class="dd-caret"></span></button>
+          <div class="dd-menu">
+            <button type="button" class="dd-item" data-value="confirm">許可を確認</button>
+            <button type="button" class="dd-item" data-value="plan">プランモード</button>
+            <button type="button" class="dd-item" data-value="auto">自動</button>
+          </div>
+        </div>
+        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div></span>
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
-        <button id="mic-btn" onclick="toggleMic()" title="音声入力（日本語）"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
-        <button id="bg-btn" onclick="bgBtnClick()" title="テキストあり→BGジョブ投入 / テキストなし→BG結果エリア開閉">⚡ BG<span id="bg-badge"></span></button>
-        <button id="send" onclick="sendMessage()">送信</button>
+        <button id="mic-btn" class="cbtn" onclick="toggleMic()" title="音声入力（日本語）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
+        <button id="bg-btn" onclick="bgBtnClick()" title="テキストあり→BGジョブ投入 / テキストなし→BG結果エリア開閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>BG<span id="bg-badge"></span></button>
+        <button id="send" onclick="sendMessage()">送信<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
         <button id="stop" onclick="stopGeneration()">■ 停止</button>
       </div>
     </div>
@@ -1802,27 +1819,48 @@
   // 後方互換: 自動モード = 旧バイパスON
   function isBypassActive() { return getMode() === 'auto'; }
   function isPlanActive()   { return getMode() === 'plan'; }
-  function onModeChange() {
-    const sel = document.getElementById('mode-select');
-    if (!sel) return;
-    localStorage.setItem('agentMode', sel.value);
-    updateModeSelect();
+  // ---- 自前ドロップダウン共通（ネイティブ select 不使用） ----
+  function _initDropdown(ddId, onSelect) {
+    const dd = document.getElementById(ddId);
+    if (!dd) return;
+    const btn = dd.querySelector('.dd-btn');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = !dd.classList.contains('open');
+      document.querySelectorAll('.dd.open').forEach(d => d.classList.remove('open'));
+      dd.classList.toggle('open', willOpen);
+    });
+    dd.querySelectorAll('.dd-item').forEach(it => {
+      it.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dd.classList.remove('open');
+        onSelect(it.dataset.value);
+      });
+    });
   }
+  document.addEventListener('click', () => document.querySelectorAll('.dd.open').forEach(d => d.classList.remove('open')));
+
+  const MODE_LABELS = { confirm: '許可を確認', plan: 'プランモード', auto: '自動' };
+  function onModeChange() { updateModeSelect(); }   // 後方互換（自前DDでは未使用）
   function setMode(m) {
     localStorage.setItem('agentMode', m);
     updateModeSelect();
   }
   function updateModeSelect() {
-    const sel = document.getElementById('mode-select');
-    if (!sel) return;
+    const btn = document.getElementById('mode-dd-btn');
+    if (!btn) return;
     const m = getMode();
-    sel.value = m;
+    const lbl = btn.querySelector('.dd-label');
+    if (lbl) lbl.textContent = MODE_LABELS[m] || m;
     // モード別に枠色を変えて状態を可視化
-    sel.classList.toggle('mode-auto', m === 'auto');
-    sel.classList.toggle('mode-plan', m === 'plan');
+    btn.classList.toggle('mode-auto', m === 'auto');
+    btn.classList.toggle('mode-plan', m === 'plan');
+    const dd = document.getElementById('mode-dd');
+    if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === m));
   }
   // 初期化
   updateModeSelect();
+  _initDropdown('mode-dd', (v) => setMode(v));
   loadNoThink();
 
   // ---- マルチエージェント: 計画確認待ち状態 ----
@@ -1877,31 +1915,36 @@
   }
   function updateMultiAgentBtn() {
     const btn = document.getElementById('ma-btn');
-    const sel = document.getElementById('ma-mode');
+    const dd = document.getElementById('maq-dd');
     if (!btn) return;
     if (isMultiAgentActive()) {
       btn.classList.add('active');
       btn.title = 'マルチエージェント: ON（複数AIが役割分担して実行）';
-      if (sel) sel.style.display = '';
+      if (dd) dd.style.display = '';
     } else {
       btn.classList.remove('active');
       btn.title = 'マルチエージェント: OFF（通常の単一エージェントモード）';
-      if (sel) sel.style.display = 'none';
+      if (dd) dd.style.display = 'none';
     }
   }
+  // 品質/コスト設定は専用キー maQuality に保存（旧実装は agentMode と共用で壊れていた）
   function getAgentMode() {
-    const sel = document.getElementById('ma-mode');
-    return sel ? sel.value : 'balance';
+    return localStorage.getItem('maQuality') || 'balance';
+  }
+  const MAQ_LABELS = { balance: 'バランス', quality: '品質優先', economy: 'コスト優先' };
+  function updateMaQuality() {
+    const btn = document.getElementById('maq-dd-btn');
+    if (!btn) return;
+    const v = getAgentMode();
+    const lbl = btn.querySelector('.dd-label');
+    if (lbl) lbl.textContent = MAQ_LABELS[v] || v;
+    const dd = document.getElementById('maq-dd');
+    if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
   }
   // 初期化
   updateMultiAgentBtn();
-  // モード選択をlocalStorageで永続化
-  const _maSel = document.getElementById('ma-mode');
-  if (_maSel) {
-    const saved = localStorage.getItem('agentMode');
-    if (saved) _maSel.value = saved;
-    _maSel.addEventListener('change', () => localStorage.setItem('agentMode', _maSel.value));
-  }
+  updateMaQuality();
+  _initDropdown('maq-dd', (v) => { localStorage.setItem('maQuality', v); updateMaQuality(); });
 
   function stopGeneration() {
     if (abortController) abortController.abort();

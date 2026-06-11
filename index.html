@@ -2965,6 +2965,7 @@
   // ---- 別モデルで再実行バー（各ターンの末尾に付与・プロバイダー横断対応） ----
   const RERUN_MODEL_KEY = 'agentRerunModel';   // 保存値は "preset_id::model"
   let _rerunModels = [];                        // [{preset_id, provider, model}]（/rerun-models から取得）
+  let _rerunProviderName = null;                // 再実行中だけ、回答ラベルに出すプロバイダー名（横断時の表示用）
 
   // マルチAI設定の割当モデル（横断・重複排除）を取得し、既存バーを作り直す
   async function refreshRerunModels() {
@@ -3017,25 +3018,21 @@
     return bar;
   }
 
-  // "preset_id::model" を解釈し、プロバイダー切替→モデル指定（横断対応）
-  async function _applyRerunModel(value) {
+  // "preset_id::model" を解釈
+  function _parseRerunValue(value) {
     const i = value.indexOf('::');
-    const presetId = i >= 0 ? value.slice(0, i) : '';
-    const model    = i >= 0 ? value.slice(i + 2) : value;
-    localStorage.setItem(RERUN_MODEL_KEY, value);
+    return { presetId: i >= 0 ? value.slice(0, i) : '', model: i >= 0 ? value.slice(i + 2) : value };
+  }
+
+  // サーバーの使用モデルだけ切り替える（上部UI=updatePvCurrent は呼ばない＝上部プルダウンは変えない）
+  // 別プロバイダーなら先に preset 切替（/providers/deployment は現プロバイダーのモデルしか受け付けないため順序必須）
+  async function _serverSwitchModel(presetId, model, fromPreset) {
     try {
-      // 別プロバイダーなら先に preset 切替（/providers/deployment は現プロバイダーのモデルしか受け付けないため順序必須）
-      if (presetId && presetId !== _currentPreset) {
+      if (presetId && presetId !== fromPreset) {
         await fetch('/providers/preset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preset: presetId }) });
       }
       await fetch('/providers/deployment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
-    } catch (_) { /* 失敗時は既存設定のまま実行 */ }
-    // UI とグローバルを最新化（updatePvCurrent 経由で再実行リストも更新される）
-    try {
-      const cur = await fetch('/providers/current').then(r => r.json());
-      updatePvCurrent(cur);
-      await loadDeployments();
-    } catch (_) {}
+    } catch (_) { /* 失敗時は既存設定のまま */ }
   }
 
   // 通常ターン: 末尾に再実行バーを付与
@@ -3046,14 +3043,26 @@
     if (bar) turnEl.appendChild(bar);
   }
 
+  // 再実行は「一時的」: スナップショット → モデル一時切替 → 実行 → 元の設定へ復元（上部プルダウンは変えない）
   async function _rerunWithModel(userText, value) {
     if (abortController) return;          // 生成中は無視
     if (!value) return;
-    await _applyRerunModel(value);
+    localStorage.setItem(RERUN_MODEL_KEY, value);
+    const { presetId, model } = _parseRerunValue(value);
+    const m = _rerunModels.find(x => `${x.preset_id}::${x.model}` === value);
+    _rerunProviderName = m ? m.provider : null;   // 回答ラベルに出す再実行先プロバイダー名
+    let token = null;
+    try { token = (await (await fetch('/providers/snapshot', { method: 'POST' })).json()).token; } catch (_) {}
+    await _serverSwitchModel(presetId, model, _currentPreset);
     input.value = userText;
     input.style.height = 'auto';
     _skipClassify = true;                 // 再実行はBG分類に回さず通常実行
-    sendMessage();
+    try {
+      await sendMessage();                // ストリーム完了まで待つ
+    } finally {
+      _rerunProviderName = null;
+      if (token) { try { await fetch('/providers/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }); } catch (_) {} }
+    }
   }
 
   // BG結果カード: ⚡ 自分で投げたジョブのみ再実行バーを付与（⏰ 定時タスクは対象外）
@@ -3064,10 +3073,21 @@
     if (bar) { bar.style.marginLeft = '0'; card.appendChild(bar); }
   }
 
+  let _rerunBgBusy = false;
   async function _rerunBgWithModel(prompt, value) {
-    if (!value) return;
-    await _applyRerunModel(value);
-    bgSubmitJob(prompt);                  // 同じ依頼を新しいBGジョブとして投げ直す
+    if (_rerunBgBusy || !value) return;
+    _rerunBgBusy = true;
+    localStorage.setItem(RERUN_MODEL_KEY, value);
+    const { presetId, model } = _parseRerunValue(value);
+    let token = null;
+    try { token = (await (await fetch('/providers/snapshot', { method: 'POST' })).json()).token; } catch (_) {}
+    try {
+      await _serverSwitchModel(presetId, model, _currentPreset);
+      await bgSubmitJob(prompt);          // ジョブ作成時に設定が固定されるので、戻すのは作成後でOK
+    } finally {
+      if (token) { try { await fetch('/providers/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }); } catch (_) {} }
+      _rerunBgBusy = false;
+    }
   }
 
   function appendMsg(parent, cls, text) {
@@ -4673,7 +4693,7 @@
             // モデル名をラベルに表示
             if (data.model) {
               currentModelName = data.model;
-              if (aiMsg?._labelEl) aiMsg._labelEl.textContent = `${_currentProviderName} (${data.model})`;
+              if (aiMsg?._labelEl) aiMsg._labelEl.textContent = `${_rerunProviderName || _currentProviderName} (${data.model})`;
             }
             // ツールグループを折りたたみ、サマリーを完了表示に更新
             if (currentToolGroupEl) {

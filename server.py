@@ -3758,6 +3758,35 @@ async def providers_set_deployment(req: DeploymentRequest):
     return JSONResponse({"status": "ok", "model": req.model})
 
 
+# 「別モデルで再実行」用: 一時的にモデルを切り替える前に現在設定を退避し、後で確実に戻す。
+# ローカル/カスタム接続は preset で戻せないため、フル設定（api_key 含む）をサーバー内に退避する。
+_provider_snapshots: dict[str, dict] = {}
+
+
+@app.post("/providers/snapshot")
+async def providers_snapshot():
+    """現在のプロバイダー設定を退避し、復元用トークンを返す。"""
+    token = uuid.uuid4().hex
+    _provider_snapshots[token] = dict(_provider_config)
+    # 退避が無限に溜まらないよう上限を設ける（古いものから捨てる）
+    if len(_provider_snapshots) > 50:
+        for k in list(_provider_snapshots)[:-50]:
+            _provider_snapshots.pop(k, None)
+    return JSONResponse({"token": token})
+
+
+@app.post("/providers/restore")
+async def providers_restore(body: dict):
+    """snapshot で退避した設定に戻す（再実行後に上部UIの選択へ戻すため）。"""
+    global _provider_config
+    snap = _provider_snapshots.pop(body.get("token", ""), None)
+    if snap is None:
+        return JSONResponse({"error": "snapshot not found"}, status_code=404)
+    _provider_config = dict(snap)
+    _save_provider_config(_provider_config)
+    return JSONResponse({"status": "ok", "type": _provider_config["type"], "model": _provider_config["model"]})
+
+
 @app.get("/providers/current")
 async def providers_current():
     return JSONResponse({

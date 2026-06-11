@@ -7098,19 +7098,41 @@ function _syncBodies() {
   [...src.querySelectorAll('.bg-job-card')].forEach(c => dest.prepend(c));
 }
 
+// ---- 時刻フォーマット（サーバーは UTC naive isoformat で保存 → JST 表示）----
+function _bgFmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(/[zZ]|[+\-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+  if (isNaN(d)) return '';
+  return d.toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+// カードの時刻表示を更新（完了済みなら完了時刻、未完なら投入時刻）
+function _bgSetTime(jobId, createdAt, finishedAt) {
+  const el = document.getElementById(`bg-time-${jobId}`);
+  if (!el) return;
+  const t = _bgFmtTime(finishedAt) || _bgFmtTime(createdAt);
+  if (!t) return;
+  el.textContent = (finishedAt ? '✓ ' : '🕒 ') + t;
+  el.title = (createdAt ? '投入: ' + _bgFmtTime(createdAt) : '')
+           + (finishedAt ? '　完了: ' + _bgFmtTime(finishedAt) : '');
+}
+
 // ---- Add a job card ----
-function _bgAddCard(jobId, msgPreview) {
+function _bgAddCard(jobId, msgPreview, createdAt = null) {
   if (document.getElementById(`bg-card-${jobId}`)) return;
   if (!_bgJobs[jobId]) _bgJobs[jobId] = { status: 'pending', es: null, savedPaths: [] };
   const body = _bgActiveBody() || document.getElementById('bg-pane-body');
   const card = document.createElement('div');
   card.className = 'bg-job-card status-pending';
   card.id = `bg-card-${jobId}`;
+  // 新規投入時は createdAt 未指定 → 今の時刻（ISO UTC）で表示
+  const ts = createdAt || new Date().toISOString();
   card.innerHTML = `
     <div class="bg-job-meta">
       <span class="bg-status-badge bsb-pending" id="bg-badge-${jobId}">pending</span>
       <span style="color:#6c7086;font-size:10px;margin-left:6px;">${jobId}</span>
       <span id="bg-tool-${jobId}" style="display:none;color:#89b4fa;font-size:10px;margin-left:8px;"></span>
+      <span id="bg-time-${jobId}" style="color:#6c7086;font-size:10px;margin-left:8px;float:right;">🕒 ${_bgFmtTime(ts)}</span>
     </div>
     <div class="bg-job-msg" title="${_bgEsc(msgPreview)}">${_bgEsc(msgPreview)}</div>
     <div class="bg-job-output" id="bg-out-${jobId}"><span style="color:#6c7086">実行待ち…</span></div>
@@ -7274,6 +7296,7 @@ function _bgStartStream(jobId) {
       } else if (d.type === 'job_end') {
         const finalStatus = d.status || 'done';
         _bgSetStatus(jobId, finalStatus);
+        _bgSetTime(jobId, null, new Date().toISOString());  // 完了時刻を表示
         const toolEl = document.getElementById(`bg-tool-${jobId}`);
         if (toolEl) toolEl.style.display = 'none';
         if (outEl) _bgLinkifyImages(outEl, _bgJobs[jobId]?.savedPaths || []);
@@ -7342,8 +7365,9 @@ async function _bgRestoreFromServer() {
     for (const j of (data.jobs || []).slice().reverse()) {
       if (document.getElementById(`bg-card-${j.job_id}`)) continue;
       _bgJobs[j.job_id] = { status: j.status, es: null, prompt: j.message_preview || '' };
-      _bgAddCard(j.job_id, j.message_preview || '');
+      _bgAddCard(j.job_id, j.message_preview || '', j.created_at);
       _bgSetStatus(j.job_id, j.status);
+      _bgSetTime(j.job_id, j.created_at, j.finished_at);
       if (['pending','running'].includes(j.status)) {
         _bgStartStream(j.job_id);
       } else {
@@ -7792,7 +7816,9 @@ async function schedPollResults() {
         // 生のツールコール JSON を除き、テキストチャンクのみ表示（BG復元と同じ流儀）
         const text = (job.chunks || []).filter(c => c.type === 'text').map(c => c.content).join('') || '（出力なし）';
         const prompt = '⏰ ' + (run.task_name || '定時タスク');
-        const ts = new Date().toISOString();
+        // 実際の発火/予定時刻を使う（ポーリングした「今」ではない）。
+        // 別ブラウザや翌日に開いたとき過去ジョブが今の時刻でスタンプされるバグの修正。
+        const ts = run.decided_at || run.scheduled_at || new Date().toISOString();
         // チャットに描画 ＋ 通常BGと同じく履歴へ保存（リロードしても残るように）
         _bgRenderChatCard(prompt, text, job.status, ts);
         history.push({ role: 'bg_user', content: prompt });

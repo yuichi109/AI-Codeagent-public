@@ -40,6 +40,15 @@
   #chat-wrapper { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
   #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; }
   .turn { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; width: 100%; max-width: 860px; }
+  /* 別モデルで再実行（各ターン下・普段は薄く、ホバーで点灯） */
+  .rerun-bar { display: flex; align-items: center; gap: 6px; margin-left: 16px; opacity: 0; transition: opacity .12s; }
+  .turn:hover .rerun-bar, .bg-chat-card:hover .rerun-bar { opacity: 1; }
+  .bg-chat-card .rerun-bar { margin-top: 6px; }
+  .rerun-btn { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: 1px solid #313244; color: #6c7086; font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer; }
+  .rerun-btn:hover { border-color: #89b4fa; color: #89b4fa; }
+  .rerun-model { background: #181825; color: #a6adc8; border: 1px solid #313244; font-size: 11px; padding: 2px 6px; border-radius: 6px; cursor: pointer; max-width: 150px; }
+  .rerun-model:hover { border-color: #89b4fa; }
+  .rerun-model:focus { outline: none; border-color: #89b4fa; }
   /* メッセージラッパー（ロールラベル + バブル）*/
   .msg-wrapper { display: flex; flex-direction: column; gap: 4px; }
   .user-wrapper { align-self: flex-end; align-items: flex-end; max-width: 78%; }
@@ -2438,6 +2447,7 @@
           }
         }
         turns.push({ el: turnEl, userText: u.content, aiText, modelName });
+        _attachRerunBar(turnEl, u.content);
         turnIdx++;
         i = j;
       }
@@ -2841,6 +2851,7 @@
         if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
       }
       turns.push({ el: turnEl, userText: u.content, aiText, modelName });
+      _attachRerunBar(turnEl, u.content);
       turnIdx++;
       i = j;
     }
@@ -2949,6 +2960,114 @@
     el.className = 'turn';
     chat.appendChild(el);
     return el;
+  }
+
+  // ---- 別モデルで再実行バー（各ターンの末尾に付与・プロバイダー横断対応） ----
+  const RERUN_MODEL_KEY = 'agentRerunModel';   // 保存値は "preset_id::model"
+  let _rerunModels = [];                        // [{preset_id, provider, model}]（/rerun-models から取得）
+
+  // マルチAI設定の割当モデル（横断・重複排除）を取得し、既存バーを作り直す
+  async function refreshRerunModels() {
+    try {
+      const r = await fetch('/rerun-models');
+      _rerunModels = (await r.json()).models || [];
+    } catch (_) { _rerunModels = []; }
+    // モデル一覧が変わっている可能性があるため、既存バーは作り直す
+    document.querySelectorAll('.rerun-bar').forEach(b => b.remove());
+    turns.forEach(t => _attachRerunBar(t.el, t.userText));
+    document.querySelectorAll('.bg-chat-card[data-rerun-prompt]')
+      .forEach(c => _attachBgRerunBar(c, c.dataset.rerunPrompt));
+  }
+
+  // 再実行バー本体を組み立てる（通常ターン・BGカードで共通）。onRerun(value) が実行処理。value="preset_id::model"
+  function _buildRerunBar(onRerun) {
+    if (_rerunModels.length < 1) return null;   // 出せるモデルが無ければ非表示
+    const bar = document.createElement('div');
+    bar.className = 'rerun-bar';
+    const btn = document.createElement('button');
+    btn.className = 'rerun-btn';
+    btn.innerHTML = '⟳ 再実行';
+    const sel = document.createElement('select');
+    sel.className = 'rerun-model';
+    // 既定選択: 保存値が現リストにあればそれ、無ければ現在のプロバイダー＋モデル、無ければ先頭
+    const has = (v) => _rerunModels.some(m => `${m.preset_id}::${m.model}` === v);
+    const saved  = localStorage.getItem(RERUN_MODEL_KEY);
+    const curVal = (_currentPreset && _currentModel) ? `${_currentPreset}::${_currentModel}` : '';
+    const def = (saved && has(saved)) ? saved
+              : (has(curVal) ? curVal : `${_rerunModels[0].preset_id}::${_rerunModels[0].model}`);
+    // プロバイダーでグループ化（複数プロバイダーのときだけ optgroup を出す）
+    const groups = {};
+    _rerunModels.forEach(m => { (groups[m.provider] = groups[m.provider] || []).push(m); });
+    const multi = Object.keys(groups).length > 1;
+    Object.entries(groups).forEach(([prov, list]) => {
+      let container = sel;
+      if (multi) { const og = document.createElement('optgroup'); og.label = prov; sel.appendChild(og); container = og; }
+      list.forEach(m => {
+        const v = `${m.preset_id}::${m.model}`;
+        const o = document.createElement('option');
+        o.value = v; o.textContent = m.model;
+        if (v === def) o.selected = true;
+        container.appendChild(o);
+      });
+    });
+    sel.onchange = () => localStorage.setItem(RERUN_MODEL_KEY, sel.value);
+    btn.onclick = () => onRerun(sel.value);
+    bar.appendChild(btn);
+    bar.appendChild(sel);
+    return bar;
+  }
+
+  // "preset_id::model" を解釈し、プロバイダー切替→モデル指定（横断対応）
+  async function _applyRerunModel(value) {
+    const i = value.indexOf('::');
+    const presetId = i >= 0 ? value.slice(0, i) : '';
+    const model    = i >= 0 ? value.slice(i + 2) : value;
+    localStorage.setItem(RERUN_MODEL_KEY, value);
+    try {
+      // 別プロバイダーなら先に preset 切替（/providers/deployment は現プロバイダーのモデルしか受け付けないため順序必須）
+      if (presetId && presetId !== _currentPreset) {
+        await fetch('/providers/preset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preset: presetId }) });
+      }
+      await fetch('/providers/deployment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    } catch (_) { /* 失敗時は既存設定のまま実行 */ }
+    // UI とグローバルを最新化（updatePvCurrent 経由で再実行リストも更新される）
+    try {
+      const cur = await fetch('/providers/current').then(r => r.json());
+      updatePvCurrent(cur);
+      await loadDeployments();
+    } catch (_) {}
+  }
+
+  // 通常ターン: 末尾に再実行バーを付与
+  function _attachRerunBar(turnEl, userText) {
+    if (!turnEl || !userText) return;
+    if (turnEl.querySelector('.rerun-bar')) return; // 二重付与防止
+    const bar = _buildRerunBar((value) => _rerunWithModel(userText, value));
+    if (bar) turnEl.appendChild(bar);
+  }
+
+  async function _rerunWithModel(userText, value) {
+    if (abortController) return;          // 生成中は無視
+    if (!value) return;
+    await _applyRerunModel(value);
+    input.value = userText;
+    input.style.height = 'auto';
+    _skipClassify = true;                 // 再実行はBG分類に回さず通常実行
+    sendMessage();
+  }
+
+  // BG結果カード: ⚡ 自分で投げたジョブのみ再実行バーを付与（⏰ 定時タスクは対象外）
+  function _attachBgRerunBar(card, prompt) {
+    if (!card || !prompt) return;
+    if (card.querySelector('.rerun-bar')) return;
+    const bar = _buildRerunBar((value) => _rerunBgWithModel(prompt, value));
+    if (bar) { bar.style.marginLeft = '0'; card.appendChild(bar); }
+  }
+
+  async function _rerunBgWithModel(prompt, value) {
+    if (!value) return;
+    await _applyRerunModel(value);
+    bgSubmitJob(prompt);                  // 同じ依頼を新しいBGジョブとして投げ直す
   }
 
   function appendMsg(parent, cls, text) {
@@ -3979,10 +4098,12 @@
   let _currentProviderType = 'azure';
   let _currentProviderName = 'Azure OpenAI';
   let _currentModel = '';
+  let _currentPreset = 'azure';   // 現在のプロバイダー preset_id（再実行の横断切替に使用）
   let _webResearchProvider = 'tavily';
 
   function updatePvCurrent(data) {
     _currentProviderType = data.type;
+    _currentPreset = data.preset_id || data.type || '';
     const label = data.type === 'foundry' ? (data.name || 'Azure AI Foundry')
                 : data.type === 'azure'   ? 'Azure OpenAI'
                 : data.type === 'gemini'  ? 'Google Gemini'
@@ -4001,6 +4122,7 @@
     } else {
       sel.style.display = 'none';
     }
+    refreshRerunModels();   // プロバイダー/モデルが変わったら再実行リストも更新
   }
 
   async function loadDeployments() {
@@ -4597,6 +4719,7 @@
       history.push({ role: 'assistant', content: finalAnswer });
     }
     turns.push({ el: turnEl, userText: text, aiText: finalAnswer, modelName: currentModelName });
+    _attachRerunBar(turnEl, text);
 
     foldOldTurns();
     updateTurnCount();
@@ -7183,6 +7306,11 @@ function _bgRenderChatCard(prompt, resultText, status, timestamp, placeholder = 
   det.appendChild(resultDiv);
   card.appendChild(promptDiv);
   card.appendChild(det);
+  // ⚡ 自分で投げたBGのみ再実行バーを付与（⏰ 定時タスクは対象外）
+  if (!prompt.startsWith('⏰')) {
+    card.dataset.rerunPrompt = prompt;
+    _attachBgRerunBar(card, prompt);
+  }
   const chatEl = document.getElementById('chat');
   if (chatEl) {
     if (placeholder && placeholder.parentNode === chatEl) {
@@ -7485,6 +7613,8 @@ document.addEventListener('mousemove', e => {
 // loadHistory() で積まれた BG カードをここで描画（スクリプトタグをまたぐため）
 (window._pendingBgCards || []).forEach(c => _bgRenderChatCard(c.prompt, c.content, c.status, c.timestamp, c.placeholder));
 window._pendingBgCards = null;
+// 復元したBGカードにも再実行バーを付ける（再実行リスト取得後に後追い）
+if (typeof refreshRerunModels === 'function') refreshRerunModels();
 
 // ===========================================================================
 // 定時実行スケジューラー UI

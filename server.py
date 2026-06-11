@@ -4009,6 +4009,50 @@ async def ma_providers():
     return JSONResponse({"providers": providers})
 
 
+@app.get("/rerun-models")
+async def rerun_models():
+    """別モデル再実行バー用のモデル一覧。
+    マルチAI設定（保存済み）で各役割に割り当てられたモデルを横断・重複排除して返す。
+    未設定（設定ファイルなし）なら現在プロバイダーのモデル一覧にフォールバック（B案）。"""
+    name_by_preset = {}
+    if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY:
+        name_by_preset["azure"] = "Azure OpenAI"
+    for inst in FOUNDRY_INSTANCES:
+        name_by_preset[inst["id"]] = inst["name"]
+    if GEMINI_API_KEY:
+        name_by_preset["gemini"] = "Google Gemini"
+    if OPENAI_API_KEY:
+        name_by_preset["openai"] = "OpenAI"
+
+    items, seen = [], set()
+    if _MA_CONFIG_FILE.exists():
+        # マルチAI設定の割当モデルだけ（横断・重複排除）
+        for _role, rc in _load_ma_config().items():
+            pid, model = rc.get("preset_id"), rc.get("model")
+            if not pid or not model or (pid, model) in seen:
+                continue
+            seen.add((pid, model))
+            items.append({"preset_id": pid, "provider": name_by_preset.get(pid, pid), "model": model})
+    else:
+        # フォールバック: 現在プロバイダーのモデル一覧
+        cur_pid = _provider_config.get("preset_id", _provider_config["type"])
+        cur_name = _provider_config.get("name") or name_by_preset.get(cur_pid, cur_pid)
+        if _provider_config["type"] == "foundry":
+            inst = _active_foundry_instance()
+            deps = inst["models"] if inst else FOUNDRY_MODELS
+        elif _provider_config["type"] == "gemini":
+            deps = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
+        elif _provider_config["type"] == "openai":
+            deps = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
+        elif _provider_config["type"] == "azure":
+            deps = AZURE_OPENAI_DEPLOYMENTS
+        else:
+            deps = []   # ローカル/カスタム接続は preset 切替不可なので対象外
+        for m in deps:
+            items.append({"preset_id": cur_pid, "provider": cur_name, "model": m})
+    return JSONResponse({"models": items})
+
+
 @app.get("/multi-agent/config")
 async def ma_config_get():
     return JSONResponse(_load_ma_config())

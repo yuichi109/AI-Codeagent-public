@@ -18,7 +18,7 @@
   - Tailscale 経由でスマホから Web UI にアクセスできるようになったが、UIがPC向けで使いにくい。
   - 同じ `index.html` をレスポンシブ化（専用ページは作らない）。文字拡大・サイドペインのドロワー化・ヘッダー折りたたみ・タップ領域拡大。viewport メタタグ確認。任意でPWA化。
 - **Tailscale 連携の自動化**（★）: スマホ等から Web UI にアクセスするための導線。
-  - 手順は確立済み（WSL: `install.sh`→`tailscale up`→`tailscale serve --bg 8000` / Windows: GUIアプリ+`tailscale serve --bg 8001`）。HTTPS は `tailscale serve`（`*.ts.net` 正規証明書）で取得。tailnet内限定（Funnel不使用）。
+  - 手順は確立済み（→ **[docs/tailscale-setup.md](tailscale-setup.md)**）。HTTPS は `tailscale serve`（`*.ts.net` 正規証明書）で取得。tailnet内限定（Funnel不使用）。
   - 未実装: `setup.sh tailscale` サブコマンドでの導入自動化、`/setup` 画面に接続ステータス/アクセスURL/QR表示（クロスプラットフォーム対応）。
 
 ---

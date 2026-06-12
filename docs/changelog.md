@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-06-12（セッション47）ファイルビューアのバグ修正＋スマホアクセス検討（v1.15.2）
+
+### v1.15.2 日本語PNGが開かない不具合修正＋PDFをブラウザ表示
+
+- **症状1（日本語PNG）**: テキストエディタのファイルツリーから**日本語ファイル名のPNG**を開くと表示されない（`/workspace/image` が **HTTP 400**）。原因は `Content-Disposition` ヘッダーにファイル名を生で埋めていたこと。HTTPヘッダーは latin-1 のみのため、日本語名でエンコード失敗していた。
+  - **修正**: `server.py` の `workspace_image_serve` で RFC 5987 形式（`filename*=UTF-8''<percent-encoded>`）にエンコード。実ファイルで `400→200 (image/png)` を確認。
+- **症状2（PDF文字化け）**: PDFをクリックするとテキスト扱いで読み込まれ文字化け表示。
+  - **修正**: `index.html` の `editorOpen` に `_VIEW_EXTS = {'pdf'}` を追加し、PDFは画像と同じくバイナリ配信エンドポイント経由で**ブラウザのネイティブPDFビューア**で開くように。`200 (application/pdf)` を確認。
+
+### スマホアクセス（Tailscale）検討 — 手順確立・実装は次回以降
+
+- Tailscale 連携でスマホから Web UI にアクセスする方針を確立（実装はせず手順のみ）。`tailscale serve --bg <port>` で `*.ts.net` の正規HTTPSを取得、tailnet内限定（Funnel不使用）。WSL/Windows は別ノード扱い。
+- ロードマップの **LINE Bot連携を削除**し、代わりに **Tailscale連携の自動化** と **スマホ対応（レスポンシブUI）** を中優先度に追加。
+- スマホUIが使いにくい件は **[イシュー #62](https://gitlab.com/yuichi.matsuo/AI-Codeagent/-/work_items/62)** として起票（次セッションで対応）。
+
+---
+
 ## 2026-06-12（セッション46）上部ヘッダーのデザイン刷新＋アイコンテーマ選択（v1.15.0〜1.15.1）
 
 ### v1.15.1 右/左ペインがヘッダーに被る不具合を修正

@@ -36,7 +36,7 @@
   #tts-btn.speaking { background: #a6e3a1; color: #1e1e2e; animation: tts-pulse 1s ease-in-out infinite; }
   @keyframes tts-pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
   #gitlab-btn { display: none; }
-  #gitlab-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
+  #gitlab-panel { position: fixed; top: var(--pane-top, 84px); right: 0; width: 340px; height: calc(100vh - var(--pane-top, 84px)); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #gitlab-panel.open { transform: translateX(0); }
   #gitlab-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   #gitlab-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
@@ -330,7 +330,7 @@
   #token-info span.tok-in  { color: #89dceb; }
   #token-info span.tok-out { color: #a6e3a1; }
   #token-info span.tok-total { color: #f9e2af; }
-  #provider-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
+  #provider-panel { position: fixed; top: var(--pane-top, 84px); right: 0; width: 340px; height: calc(100vh - var(--pane-top, 84px)); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; overflow-y: auto; }
   #provider-panel.open { transform: translateX(0); }
   #provider-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   #provider-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
@@ -357,7 +357,7 @@
   .pv-err { color: #f38ba8; }
   /* ---- タスクパネル ---- */
   #todo-badge { position: absolute; top: -4px; right: -4px; background: #fab387; color: #1e1e2e; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; font-weight: bold; display: none; align-items: center; justify-content: center; }
-  #todo-panel { position: fixed; top: 44px; right: 0; width: 300px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
+  #todo-panel { position: fixed; top: var(--pane-top, 84px); right: 0; width: 300px; height: calc(100vh - var(--pane-top, 84px)); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #todo-panel.open { transform: translateX(0); }
   #todo-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   #todo-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
@@ -499,7 +499,7 @@
   .ansible-force-btn { margin-top: 12px; margin-left: 8px; padding: 7px 20px; background: #f9e2af; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
   .ansible-force-btn:hover { background: #fab387; }
   /* ---- シェル実行パネル ---- */
-  #shell-panel { position: fixed; top: 44px; right: 0; width: 480px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
+  #shell-panel { position: fixed; top: var(--pane-top, 84px); right: 0; width: 480px; height: calc(100vh - var(--pane-top, 84px)); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #shell-panel.open { transform: translateX(0); }
   #shell-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   #shell-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; }
@@ -650,7 +650,7 @@
   #editor-eol-btn:hover:not(:disabled) { background: #45475a; color: #fab387; border-color: #fab387; }
   #editor-eol-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   /* ---- セッション履歴パネル ---- */
-  #sessions-panel { position: fixed; top: 44px; left: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(-100%); transition: transform 0.2s ease; }
+  #sessions-panel { position: fixed; top: var(--pane-top, 84px); left: 0; width: 340px; height: calc(100vh - var(--pane-top, 84px)); background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(-100%); transition: transform 0.2s ease; }
   #sessions-panel.open { transform: translateX(0); }
   #sessions-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   #sessions-panel-close { background: none; border: none; color: #6c7086; cursor: pointer; font-size: 18px; padding: 0 4px; line-height: 1; }
@@ -1291,6 +1291,17 @@
       if (!el.getAttribute('aria-label')) el.setAttribute('aria-label', el.getAttribute('data-tip'));
     });
   })();
+  // 左右ペインの開始位置を「上部バー＋ヘッダー」の実測高さに合わせる
+  // （アイコン化等でヘッダー高さが変わってもパネルがヘッダーに被らない）
+  function syncPaneTop() {
+    const sb = document.getElementById('workspace-scope-bar');
+    const hd = document.getElementById('header');
+    const h = (sb ? sb.offsetHeight : 0) + (hd ? hd.offsetHeight : 0);
+    if (h > 0) document.documentElement.style.setProperty('--pane-top', h + 'px');
+  }
+  window.addEventListener('resize', syncPaneTop);
+  window.addEventListener('load', syncPaneTop);
+  syncPaneTop();
 
   // ---- marked + highlight.js 設定 ----
   // marked v5+ では highlight オプション廃止 → hljs.highlightElement を手動適用

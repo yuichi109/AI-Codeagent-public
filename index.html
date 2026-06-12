@@ -2,7 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AI Code Agent</title>
+<script>/* ホーム画面アプリ（スタンドアロン）判定。Safariのバーが無く更新ボタンが出せないため、専用更新ボタン表示の目印にする */
+try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches))document.documentElement.classList.add('standalone');}catch(e){}</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚛️</text></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -782,6 +785,77 @@
   #dr-confirm-ok:hover { background:#74c7ec; }
   #dr-confirm-cancel { padding:7px 14px; background:#313244; color:#cdd6f4; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
   #dr-confirm-cancel:hover { background:#45475a; }
+
+  /* モバイル用ボタン（ハンバーガー・入力欄の＋・更新）：PC（>768px）では常に非表示 */
+  #mobile-menu-btn, #input-more-btn, #reload-btn { display: none; }
+
+  /* ===================================================================
+     スマホ対応（レスポンシブ）— v1.16.0 / issue #62
+     このブロック内のCSSは max-width:768px の狭い画面でのみ適用される。
+     上で定義済みのPC向けCSSは一行も書き換えていない（追加のみ）。
+     したがってデスクトップ表示には一切影響しない。
+     =================================================================== */
+  @media (max-width: 768px) {
+    /* --- 二重スクロール解消：100vh はモバイルのツールバー裏まで含み外側スクロールを生むため、
+           実表示高の 100dvh にし、外側スクロールを止めてスクロールは #chat の1つだけにする --- */
+    html { height: 100dvh; overflow: hidden; }
+    body { height: 100dvh; overflow: hidden; }
+
+    /* --- ヘッダー：操作アイコン群はハンバーガーに格納。通常時はタイトル＋モデル選択のみのコンパクト表示 --- */
+    #header { padding: 8px 52px 8px 12px; font-size: 14px; flex-wrap: wrap; row-gap: 8px; position: relative; }
+    #app-title { white-space: nowrap; }            /* タイトルの3行折返しを防止 */
+    /* ハンバーガーは常に右上に固定（展開しても位置が動かない） */
+    #mobile-menu-btn { display: inline-flex; position: absolute; top: 8px; right: 12px; }
+    /* ホーム画面アプリ（スタンドアロン）はSafariの更新ボタンが無いので、専用の更新ボタンを右上に出す */
+    html.standalone #header { padding-right: 92px; }
+    html.standalone #reload-btn { display: inline-flex; position: absolute; top: 8px; right: 52px; }
+    #header-right { gap: 6px; }
+    /* 通常時：操作アイコン群と区切り線を畳む（モデル選択・トークン表示は残す） */
+    #header-right .hgrp, #header-right .cbar-div { display: none; }
+    /* メニューを開いたとき：アイコン群を改行して全表示（ヘッダーが下に伸びる） */
+    #header.menu-open #header-right { flex-basis: 100%; flex-wrap: wrap; margin-left: 0;
+                                      justify-content: flex-start; }
+    #header.menu-open #header-right .hgrp { display: inline-flex; }
+
+    /* --- メインチャット領域：余白を圧縮し横幅いっぱいに --- */
+    #chat { padding: 14px 12px; }
+    .turn, .folded-turns { max-width: 100%; }
+
+    /* --- 右ドロワー類：画面幅に収める（全幅化） --- */
+    #gitlab-panel, #provider-panel, #todo-panel, #shell-panel,
+    #sessions-panel { width: 100%; max-width: 100vw; min-width: 0; }
+
+    /* --- BGサイドペイン：右カラムでなく下に縦積み＋全幅 --- */
+    #chat-wrapper { flex-direction: column; }
+    #bg-side-pane { width: 100%; max-width: none; min-width: 0;
+                    border-left: none; border-top: 1px solid #313244; max-height: 50vh; }
+    #bg-side-resize-handle { display: none; }
+
+    /* --- BGフローティング：画面内に収める --- */
+    #bg-float-pane { right: 12px; width: calc(100vw - 24px); max-width: 360px; }
+
+    /* --- 入力欄：横幅いっぱい＋タップ領域確保 --- */
+    #input-area { padding: 8px 10px 12px; }
+    #input-box { max-width: 100%; }
+    #input { font-size: 16px; min-height: 52px; }  /* 16px=iOSオートズーム防止／min-height=約2行（大きすぎ防止・入力で自動的に伸びる） */
+    .cbtn { width: 38px; height: 38px; } /* タップ領域を拡大 */
+    #input-bottom { flex-wrap: wrap; gap: 6px; }
+    #input-left { flex-wrap: wrap; gap: 4px; }
+    #input-right { flex-wrap: nowrap; flex-shrink: 0; } /* mic/送信は1グループで保ち改行させない */
+    #input-left .cbar-div { display: none; }            /* 区切り線は不要 */
+
+    /* 入力欄は通常 [＋][🎤マイク][送信] の1行だけ。残りは＋ボタンで開閉する */
+    #input-more-btn { display: grid; }
+    /* スマホで常に隠す（PC専用機能・ヘッダーと重複する表示） */
+    #codeblock-btn, #rawwrite-btn, .ma-group, #gen-status { display: none; }
+    /* 折りたたみ対象（添付・生成元画像・モード・BG）：通常時は隠す */
+    #attach-btn, #srcimg-btn, #mode-dd, #bg-btn { display: none; }
+    /* ＋を押したとき（.more-open）だけ展開。元のdisplay値で戻す（.cbtn=grid / .dd・#bg-btn=inline-flex） */
+    #input-bottom.more-open #attach-btn,
+    #input-bottom.more-open #srcimg-btn { display: grid; }
+    #input-bottom.more-open #mode-dd,
+    #input-bottom.more-open #bg-btn { display: inline-flex; }
+  }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -804,7 +878,7 @@
   <a id="app-version" href="https://gitlab.com/yuichi.matsuo/AI-Codeagent-public" target="_blank" title="AI Code Agent パブリックミラー"></a>
 </div>
 <div id="header">
-  ⚛️ AI Code Agent
+  <span id="app-title">⚛️ AI Code Agent</span>
   <div id="header-right">
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
@@ -832,6 +906,8 @@
       <button id="clear-btn" class="cbtn" data-tip="履歴をクリア" onclick="clearHistory()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
     </span>
   </div>
+  <button id="reload-btn" class="cbtn" data-tip="更新（再読み込み）" onclick="location.reload()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+  <button id="mobile-menu-btn" class="cbtn" data-tip="メニュー" onclick="document.getElementById('header').classList.toggle('menu-open')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
 </div>
 
 <!-- LLMプロバイダー設定パネル -->
@@ -1234,6 +1310,7 @@
     <div id="image-preview-area"></div>
     <div id="input-bottom">
       <div id="input-left">
+        <button id="input-more-btn" class="cbtn" data-tip="その他のツール（添付・画像・モード・BG）" onclick="document.getElementById('input-bottom').classList.toggle('more-open')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         <button id="attach-btn" class="cbtn" onclick="document.getElementById('file-input').click()" data-tip="ファイルを添付（画像・YAML・JSON・テキスト等）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="file-input" type="file" accept="image/*,.yml,.yaml,.json,.toml,.ini,.conf,.txt,.md,.py,.sh,.bash,.js,.ts,.html,.css,.xml,.env" multiple style="display:none" onchange="handleFileSelect(event)">
         <button id="codeblock-btn" class="cbtn" onclick="insertCodeBlock()" data-tip="コードブロックを挿入（選択テキストを囲む）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>

@@ -4226,15 +4226,18 @@ async def workspace_file_read(path: str):
 
 @app.get("/workspace/image")
 async def workspace_image_serve(path: str):
-    """ワークスペースの画像ファイルをバイナリで返す（PNG/JPG等）"""
+    """ワークスペースのバイナリファイルを inline 配信する（PNG/JPG/PDF等）"""
     import mimetypes
+    from urllib.parse import quote
     from tools.file_tools import _resolve_safe_path
     try:
         resolved = _resolve_safe_path(path)
         if not resolved.exists() or not resolved.is_file():
             return JSONResponse({"error": "File not found"}, status_code=404)
         mt = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
-        headers = {"Content-Disposition": f'inline; filename="{resolved.name}"'}
+        # 日本語等の非ASCIIファイル名はRFC5987でエンコード（latin-1ヘッダー制約を回避）
+        fname = quote(resolved.name)
+        headers = {"Content-Disposition": f"inline; filename*=UTF-8''{fname}"}
         return FileResponse(str(resolved), media_type=mt, headers=headers)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)

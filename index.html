@@ -6290,9 +6290,11 @@
   const langMap = { py:'python', js:'javascript', ts:'typescript', json:'json', yaml:'yaml', yml:'yaml', sh:'shell', md:'markdown', html:'html', css:'css', xml:'xml', toml:'ini', ini:'ini' };
 
   const _IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','bmp','svg','ico']);
+  // ブラウザがネイティブ表示できる（テキストとして開くと文字化けする）形式
+  const _VIEW_EXTS = new Set(['pdf']);
   async function editorOpen(path, el) {
     const ext = path.split('.').pop().toLowerCase();
-    if (_IMAGE_EXTS.has(ext)) {
+    if (_IMAGE_EXTS.has(ext) || _VIEW_EXTS.has(ext)) {
       window.open('/workspace/image?path=' + encodeURIComponent(path), '_blank');
       return;
     }

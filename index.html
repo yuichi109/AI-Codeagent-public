@@ -446,6 +446,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .sched-field label { display:block; font-size:12px; color:#9399b2; margin-bottom:4px; }
   .sched-field input, .sched-field select, .sched-field textarea { width:100%; box-sizing:border-box; background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:7px 9px; font-size:13px; font-family:inherit; }
   .sched-field textarea { resize:vertical; min-height:70px; }
+  .sched-days { display:flex; flex-wrap:wrap; gap:6px; }
+  .sched-days label { display:inline-flex; align-items:center; gap:4px; width:auto; margin:0; padding:5px 9px; background:#11111b; border:1px solid #313244; border-radius:6px; cursor:pointer; color:#cdd6f4; font-size:13px; }
+  .sched-days input { width:auto; }
+  .sched-days-presets { display:flex; gap:6px; margin-top:6px; }
   .sched-inline { display:flex; gap:10px; } .sched-inline > * { flex:1; }
   .sched-toggle { font-size:12px; }
   .sched-empty { color:#6c7086; font-size:13px; text-align:center; padding:18px; }
@@ -1215,6 +1219,22 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             <input id="snew-runat" type="datetime-local">
           </div>
         </div>
+        <div class="sched-field" id="snew-days-wrap">
+          <label>実行する曜日（未選択 or 全選択＝毎日）</label>
+          <div id="snew-days" class="sched-days">
+            <label><input type="checkbox" value="0" checked>月</label>
+            <label><input type="checkbox" value="1" checked>火</label>
+            <label><input type="checkbox" value="2" checked>水</label>
+            <label><input type="checkbox" value="3" checked>木</label>
+            <label><input type="checkbox" value="4" checked>金</label>
+            <label><input type="checkbox" value="5" checked>土</label>
+            <label><input type="checkbox" value="6" checked>日</label>
+          </div>
+          <div class="sched-days-presets">
+            <button type="button" class="sched-btn" onclick="schedSetDays([0,1,2,3,4])">平日のみ</button>
+            <button type="button" class="sched-btn" onclick="schedSetDays([0,1,2,3,4,5,6])">毎日</button>
+          </div>
+        </div>
         <div class="sched-field">
           <label>作業スコープ</label>
           <select id="snew-scope"><option value="">workspace 全体</option></select>
@@ -1226,14 +1246,15 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       <!-- テンプレ管理 -->
       <div class="sched-page" id="sched-page-templates">
         <div class="sched-field">
-          <label>新しいテンプレート名</label>
+          <label id="stpl-form-label">新しいテンプレート名</label>
           <input id="stpl-name" placeholder="例: 死活監視-本番サイト">
         </div>
         <div class="sched-field">
           <label>実行内容（エージェントへの指示文）</label>
           <textarea id="stpl-prompt" placeholder="例: https://example.com にアクセスして応答ステータスを確認し、異常があれば報告して"></textarea>
         </div>
-        <button class="sched-btn primary" onclick="schedCreateTemplate()">テンプレを保存</button>
+        <button class="sched-btn primary" id="stpl-submit" onclick="schedCreateTemplate()">テンプレを保存</button>
+        <button class="sched-btn" id="stpl-cancel" onclick="schedCancelTemplateEdit()" style="display:none;">編集をやめる</button>
         <span id="stpl-msg" style="margin-left:10px;font-size:12px;"></span>
         <div id="sched-template-list" style="margin-top:16px;"></div>
       </div>
@@ -7851,6 +7872,7 @@ const _RECUR_LABEL = { daily:'毎日', weekly:'毎週', hourly:'毎時', interva
 const _DOW_LABEL = ['月','火','水','木','金','土','日'];
 let _schedTemplates = [];
 let _schedEditId = null;  // null=新規 / 数値=編集中のタスクID
+let _schedTplEditId = null;  // null=新規 / 数値=編集中のテンプレートID
 // スケジューラー由来の job_id 集合（BG復元側が二重描画しないよう除外するため）
 let _schedJobIds = new Set();
 async function _schedRefreshJobIds() {
@@ -7911,6 +7933,7 @@ function schedCancelEdit() {
   _schedEditId = null;
   schedSetEditMode(false);
   ['snew-name', 'snew-scope'].forEach(id => document.getElementById(id).value = '');
+  schedSetDays([0, 1, 2, 3, 4, 5, 6]);  // 曜日チェックを毎日に戻す
   document.getElementById('snew-msg').textContent = '';
 }
 
@@ -7918,8 +7941,23 @@ function schedOnRecurrenceChange() {
   const r = document.getElementById('snew-recurrence').value;
   document.getElementById('snew-time-wrap').style.display     = (r === 'daily' || r === 'weekly') ? '' : 'none';
   document.getElementById('snew-dow-wrap').style.display      = (r === 'weekly') ? '' : 'none';
+  document.getElementById('snew-days-wrap').style.display     = (r === 'daily') ? '' : 'none';
   document.getElementById('snew-interval-wrap').style.display = (r === 'interval') ? '' : 'none';
   document.getElementById('snew-runat-wrap').style.display    = (r === 'once') ? '' : 'none';
+}
+
+// 毎日の曜日チェックボックスをまとめてセット（プリセット用）
+function schedSetDays(arr) {
+  const set = new Set(arr.map(Number));
+  document.querySelectorAll('#snew-days input[type=checkbox]').forEach(cb => {
+    cb.checked = set.has(Number(cb.value));
+  });
+}
+
+// チェック中の曜日を昇順配列で返す
+function schedGetDays() {
+  return Array.from(document.querySelectorAll('#snew-days input[type=checkbox]:checked'))
+    .map(cb => Number(cb.value)).sort((a, b) => a - b);
 }
 
 async function schedLoadAll() {
@@ -7959,6 +7997,7 @@ async function schedLoadTemplates() {
     <div class="sched-row">
       <div class="r-top">
         <span class="r-name">${_bgEsc(t.name)}</span>
+        <button class="sched-btn" onclick="schedEditTemplate(${t.id})">編集</button>
         <button class="sched-btn danger" onclick="schedDeleteTemplate(${t.id})">削除</button>
       </div>
       <div class="r-meta">${_bgEsc(t.prompt)}</div>
@@ -7969,16 +8008,39 @@ async function schedCreateTemplate() {
   const prompt = document.getElementById('stpl-prompt').value.trim();
   const msg = document.getElementById('stpl-msg');
   if (!name || !prompt) { msg.style.color = '#f38ba8'; msg.textContent = '名前と内容は必須です'; return; }
-  const r = await fetch('/schedule/templates', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const editing = _schedTplEditId != null;
+  const r = await fetch(editing ? '/schedule/templates/' + _schedTplEditId : '/schedule/templates', {
+    method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, prompt }),
   });
   const d = await r.json();
   if (d.error) { msg.style.color = '#f38ba8'; msg.textContent = d.error; return; }
-  msg.style.color = '#a6e3a1'; msg.textContent = '保存しました';
+  msg.style.color = '#a6e3a1'; msg.textContent = editing ? '変更を保存しました' : '保存しました';
+  schedCancelTemplateEdit();
+  schedLoadTemplates();
+  schedFillTemplateSelect();  // タスク登録フォームの選択肢にも反映
+}
+// テンプレートをフォームに展開して編集モードに入る
+function schedEditTemplate(id) {
+  const tpl = _schedTemplates.find(t => t.id === id);
+  if (!tpl) { alert('テンプレートが取得できませんでした'); return; }
+  _schedTplEditId = id;
+  document.getElementById('stpl-name').value = tpl.name || '';
+  document.getElementById('stpl-prompt').value = tpl.prompt || '';
+  document.getElementById('stpl-form-label').textContent = 'テンプレート名（編集中）';
+  document.getElementById('stpl-submit').textContent = '変更を保存';
+  document.getElementById('stpl-cancel').style.display = '';
+  document.getElementById('stpl-msg').textContent = '';
+  document.getElementById('stpl-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+// 編集モードを抜けてフォームを新規状態に戻す
+function schedCancelTemplateEdit() {
+  _schedTplEditId = null;
   document.getElementById('stpl-name').value = '';
   document.getElementById('stpl-prompt').value = '';
-  schedLoadTemplates();
+  document.getElementById('stpl-form-label').textContent = '新しいテンプレート名';
+  document.getElementById('stpl-submit').textContent = 'テンプレを保存';
+  document.getElementById('stpl-cancel').style.display = 'none';
 }
 async function schedDeleteTemplate(id) {
   if (!confirm('このテンプレートを削除しますか？')) return;
@@ -8016,7 +8078,13 @@ async function schedLoadTasks() {
       }).join('');
     } catch (e) {}
     let recurDesc = _RECUR_LABEL[t.recurrence_type] || t.recurrence_type;
-    if (t.recurrence_type === 'daily') recurDesc += ` ${t.time_of_day || ''}`;
+    if (t.recurrence_type === 'daily') {
+      recurDesc += ` ${t.time_of_day || ''}`;
+      if (t.days_of_week) {
+        const lbls = String(t.days_of_week).split(',').map(n => _DOW_LABEL[Number(n)] || '?').join('・');
+        recurDesc += `（${lbls}）`;
+      }
+    }
     else if (t.recurrence_type === 'weekly') recurDesc += ` ${_DOW_LABEL[t.day_of_week] || '?'}曜 ${t.time_of_day || ''}`;
     else if (t.recurrence_type === 'interval') recurDesc += `（${t.interval_hours}h）`;
     else if (t.recurrence_type === 'once') recurDesc += ` ${(t.run_at || '').replace('T', ' ')}`;
@@ -8054,6 +8122,11 @@ async function schedEditTask(id) {
   schedOnRecurrenceChange();
   if (task.time_of_day) document.getElementById('snew-time').value = task.time_of_day;
   if (task.day_of_week != null) document.getElementById('snew-dow').value = task.day_of_week;
+  // 毎日の曜日フィルタ: 値があればその曜日、空/未設定なら全曜日（＝毎日）
+  if (task.days_of_week)
+    schedSetDays(String(task.days_of_week).split(',').map(Number));
+  else
+    schedSetDays([0, 1, 2, 3, 4, 5, 6]);
   if (task.interval_hours != null) document.getElementById('snew-interval').value = task.interval_hours;
   if (task.run_at) document.getElementById('snew-runat').value = task.run_at.slice(0, 16);
   await schedFillScopeSelect(task.workspace_scope || '');
@@ -8071,6 +8144,11 @@ async function schedSubmitTask() {
     workspace_scope: document.getElementById('snew-scope').value.trim() };
   if (recurrence_type === 'daily' || recurrence_type === 'weekly')
     payload.time_of_day = document.getElementById('snew-time').value;
+  if (recurrence_type === 'daily') {
+    const days = schedGetDays();
+    // 0個 or 7個（全選択）は「毎日」とみなし空文字で送る（フィルタ無し）
+    payload.days_of_week = (days.length === 0 || days.length === 7) ? '' : days.join(',');
+  }
   if (recurrence_type === 'weekly')
     payload.day_of_week = parseInt(document.getElementById('snew-dow').value);
   if (recurrence_type === 'interval')

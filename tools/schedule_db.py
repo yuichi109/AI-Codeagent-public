@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     recurrence_type TEXT NOT NULL,
     time_of_day     TEXT,
     day_of_week     INTEGER,
+    days_of_week    TEXT,
     interval_hours  INTEGER,
     run_at          TEXT,
     anchor_at       TEXT,
@@ -72,6 +73,16 @@ def _connect() -> sqlite3.Connection:
 def init_db():
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection):
+    """既存DBへの後方互換マイグレーション（不足カラムを追加）。"""
+    cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(scheduled_tasks)"
+    ).fetchall()}
+    if "days_of_week" not in cols:
+        conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN days_of_week TEXT")
 
 
 def _now() -> str:
@@ -156,12 +167,14 @@ def template_in_use(template_id: int) -> int:
 
 _TASK_FIELDS = (
     "name", "template_id", "recurrence_type", "time_of_day", "day_of_week",
-    "interval_hours", "run_at", "anchor_at", "workspace_scope", "enabled",
+    "days_of_week", "interval_hours", "run_at", "anchor_at", "workspace_scope",
+    "enabled",
 )
 
 
 def create_task(name: str, template_id: int, recurrence_type: str,
                 time_of_day: str | None = None, day_of_week: int | None = None,
+                days_of_week: str | None = None,
                 interval_hours: int | None = None, run_at: str | None = None,
                 anchor_at: str | None = None, workspace_scope: str = "",
                 enabled: bool = True) -> int:
@@ -175,11 +188,11 @@ def create_task(name: str, template_id: int, recurrence_type: str,
         cur = conn.execute(
             """INSERT INTO scheduled_tasks
                (name, template_id, recurrence_type, time_of_day, day_of_week,
-                interval_hours, run_at, anchor_at, workspace_scope, enabled,
-                created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                days_of_week, interval_hours, run_at, anchor_at, workspace_scope,
+                enabled, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, template_id, recurrence_type, time_of_day, day_of_week,
-             interval_hours, run_at, anchor_at, workspace_scope,
+             days_of_week, interval_hours, run_at, anchor_at, workspace_scope,
              1 if enabled else 0, ts, ts),
         )
         return cur.lastrowid

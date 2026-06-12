@@ -35,3 +35,35 @@ def send_email_notification(subject: str, body: str) -> bool:
     except Exception as e:
         print(f"[notify] メール送信失敗: {e}")
         return False
+
+
+def send_email(subject: str, body: str, to: str | None = None) -> dict:
+    """
+    エージェントが明示的に呼ぶメール送信ツール。
+
+    send_email_notification と違い「クールダウンなし・成否を辞書で返す」。
+    条件分岐（例: アクセス不可のときだけ通知）で使うことを想定し、
+    送れなかった場合は理由を返してエージェントが気付けるようにする。
+    """
+    if not NOTIFY_EMAIL_ENABLED:
+        return {"ok": False, "error": "メール通知が無効です（.env の NOTIFY_EMAIL_ENABLED=true が必要）"}
+    if not NOTIFY_EMAIL or not NOTIFY_EMAIL_PASSWORD:
+        return {"ok": False, "error": "送信元が未設定です（.env の NOTIFY_EMAIL / NOTIFY_EMAIL_PASSWORD）"}
+
+    to_addr = (to or NOTIFY_EMAIL_TO or NOTIFY_EMAIL).strip()
+    if not to_addr:
+        return {"ok": False, "error": "宛先が未設定です（.env の NOTIFY_EMAIL_TO か to 引数）"}
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = NOTIFY_EMAIL
+        msg["To"] = to_addr
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
+            smtp.login(NOTIFY_EMAIL, NOTIFY_EMAIL_PASSWORD)
+            smtp.sendmail(NOTIFY_EMAIL, to_addr, msg.as_string())
+        return {"ok": True, "to": to_addr, "subject": subject}
+    except Exception as e:
+        print(f"[notify] メール送信失敗: {e}")
+        return {"ok": False, "error": f"送信失敗: {e}"}

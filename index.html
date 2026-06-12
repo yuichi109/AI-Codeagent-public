@@ -6,21 +6,36 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚛️</text></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; overflow-x: clip; }
   #header { padding: 10px 20px; background: #181825; border-bottom: 1px solid #313244; font-weight: bold; font-size: 16px; display: flex; align-items: center; gap: 8px; }
   #header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  /* ===== ヘッダーアイコンのテーマ（data-htheme で切替・localStorage保存） ===== */
+  .hgrp { display: inline-flex; align-items: center; gap: 6px; }
+  #header[data-htheme="group"] .hgrp { gap: 2px; background: #1e1e2e; border-radius: 9px; padding: 2px; }
+  #header[data-htheme="group"] .cbar-div { display: none; }
+  #header[data-htheme="outline"] .cbtn { border: 1px solid #313244; background: #1e1e2e; }
+  #header[data-htheme="outline"] .cbtn:hover { background: #45475a; border-color: #45475a; }
+  #header[data-htheme="color"] #shell-btn,
+  #header[data-htheme="color"] #editor-btn { color: #a6e3a1; }
+  #header[data-htheme="color"] #drawio-btn,
+  #header[data-htheme="color"] #tts-btn:not(.active):not(.speaking) { color: #89b4fa; }
+  #header[data-htheme="color"] #sessions-btn { color: #89dceb; }
+  #header[data-htheme="color"] #provider-btn { color: #cba6f7; }
+  #header[data-htheme="color"] #gitlab-btn { color: #fab387; }
+  #header[data-htheme="color"] #todo-btn,
+  #header[data-htheme="color"] #schedule-btn { color: #f9e2af; }
+  #header[data-htheme="color"] #cleanup-btn { color: #f5c2e7; }
+  #header[data-htheme="color"] #clear-btn { color: #f38ba8; }
+  /* テーマ選択ボタン（LLM設定パネル内） */
+  .htheme-opt { padding: 5px 10px; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .htheme-opt:hover { background: #45475a; }
+  .htheme-opt.sel { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; font-weight: bold; }
   #turn-count { font-size: 11px; color: #6c7086; font-weight: normal; }
-  #clear-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #clear-btn:hover { background: #f38ba8; color: #1e1e2e; }
-  #tts-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  #tts-btn:hover { background: #89b4fa; color: #1e1e2e; }
   #tts-btn.active { background: #89b4fa; color: #1e1e2e; }
   #tts-btn.speaking { background: #a6e3a1; color: #1e1e2e; animation: tts-pulse 1s ease-in-out infinite; }
   @keyframes tts-pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
-  #cleanup-btn { padding: 4px 8px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  #cleanup-btn:hover { background: #a6e3a1; color: #1e1e2e; }
-  #gitlab-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; display: none; }
-  #gitlab-btn:hover { background: #fab387; color: #1e1e2e; }
+  #gitlab-btn { display: none; }
   #gitlab-panel { position: fixed; top: 44px; right: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #gitlab-panel.open { transform: translateX(0); }
   #gitlab-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
@@ -111,6 +126,31 @@
   .cbtn { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; background: transparent; color: #a6adc8; border: none; border-radius: 8px; cursor: pointer; transition: background 0.15s, color 0.15s; flex-shrink: 0; }
   .cbtn:hover { background: #45475a; color: #cdd6f4; }
   .cbtn svg { width: 18px; height: 18px; display: block; }
+  /* 自前ツールチップ（data-tip属性・ホバーで即時表示・Catppuccin配色） */
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(100% + 8px); background: #11111b; color: #cdd6f4; border: 1px solid #45475a;
+    padding: 4px 9px; border-radius: 6px; font-size: 11px; font-weight: normal; line-height: 1.3;
+    white-space: nowrap; z-index: 10000; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.35);
+  }
+  [data-tip]:hover::before {
+    content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(100% + 3px); border: 5px solid transparent; border-top-color: #45475a;
+    z-index: 10000; pointer-events: none;
+  }
+  /* ヘッダー内は画面最上部なので下向きに出す */
+  #header [data-tip]:hover::after { bottom: auto; top: calc(100% + 8px); }
+  #header [data-tip]:hover::before { bottom: auto; top: calc(100% + 3px); border-top-color: transparent; border-bottom-color: #45475a; }
+  /* 右端付近のボタンはツールチップが画面外にはみ出す→横スクロール＆ちらつきを防ぐため右寄せ */
+  #header #schedule-btn[data-tip]:hover::after,
+  #header #tts-btn[data-tip]:hover::after,
+  #header #cleanup-btn[data-tip]:hover::after,
+  #header #clear-btn[data-tip]:hover::after { left: auto; right: 0; transform: none; }
+  #header #schedule-btn[data-tip]:hover::before,
+  #header #tts-btn[data-tip]:hover::before,
+  #header #cleanup-btn[data-tip]:hover::before,
+  #header #clear-btn[data-tip]:hover::before { left: auto; right: 11px; transform: none; }
   #srcimg-btn.active { background: rgba(137,180,250,0.18); color: #89b4fa; }
   #mic-btn.recording { background: #f38ba8; color: #1e1e2e; animation: mic-pulse 1s ease-in-out infinite; }
   #mic-btn.unsupported { opacity: 0.4; cursor: not-allowed; }
@@ -279,8 +319,6 @@
   .file-chip.uploaded { border-color: #a6e3a1; }
   body.drag-over::after { content: 'ファイルをドロップして添付'; position: fixed; inset: 0; background: rgba(30,30,46,0.85); color: #cba6f7; font-size: 24px; display: flex; align-items: center; justify-content: center; z-index: 9999; pointer-events: none; }
   /* ---- プロバイダー設定 ---- */
-  #provider-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  #provider-btn:hover { background: #cba6f7; color: #1e1e2e; }
   #provider-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #89b4fa; font-weight: normal; max-width: 180px; overflow: hidden; flex-shrink: 0; }
   #provider-label svg { width: 18px; height: 18px; flex-shrink: 0; }
   .pv-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -318,8 +356,6 @@
   .pv-ok  { color: #a6e3a1; }
   .pv-err { color: #f38ba8; }
   /* ---- タスクパネル ---- */
-  #todo-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; position: relative; }
-  #todo-btn:hover { background: #a6e3a1; color: #1e1e2e; }
   #todo-badge { position: absolute; top: -4px; right: -4px; background: #fab387; color: #1e1e2e; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; font-weight: bold; display: none; align-items: center; justify-content: center; }
   #todo-panel { position: fixed; top: 44px; right: 0; width: 300px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #todo-panel.open { transform: translateX(0); }
@@ -371,7 +407,7 @@
   #cleanup-exec-btn:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
   #cleanup-confirm-msg { font-size: 12px; color: #f38ba8; display: none; }
   /* ---- 定時実行スケジューラー ---- */
-  #schedule-badge { display:none; margin-left:4px; background:#f9e2af; color:#1e1e2e; border-radius:8px; padding:0 6px; font-size:11px; font-weight:bold; }
+  #schedule-badge { display:none; position:absolute; top:-4px; right:-4px; background:#f9e2af; color:#1e1e2e; border-radius:8px; min-width:16px; height:16px; padding:0 4px; box-sizing:border-box; font-size:10px; font-weight:bold; line-height:16px; text-align:center; }
   #schedule-badge.show { display:inline-block; }
   #sched-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:210; align-items:center; justify-content:center; }
   #sched-overlay.open { display:flex; }
@@ -463,8 +499,6 @@
   .ansible-force-btn { margin-top: 12px; margin-left: 8px; padding: 7px 20px; background: #f9e2af; color: #1e1e2e; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; }
   .ansible-force-btn:hover { background: #fab387; }
   /* ---- シェル実行パネル ---- */
-  #shell-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  #shell-btn:hover { background: #a6e3a1; color: #1e1e2e; }
   #shell-panel { position: fixed; top: 44px; right: 0; width: 480px; height: calc(100vh - 44px); background: #181825; border-left: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(100%); transition: transform 0.2s ease; }
   #shell-panel.open { transform: translateX(0); }
   #shell-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
@@ -616,8 +650,6 @@
   #editor-eol-btn:hover:not(:disabled) { background: #45475a; color: #fab387; border-color: #fab387; }
   #editor-eol-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   /* ---- セッション履歴パネル ---- */
-  #sessions-btn { padding: 4px 12px; background: #45475a; color: #cdd6f4; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  #sessions-btn:hover { background: #89dceb; color: #1e1e2e; }
   #sessions-panel { position: fixed; top: 44px; left: 0; width: 340px; height: calc(100vh - 44px); background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; z-index: 100; transform: translateX(-100%); transition: transform 0.2s ease; }
   #sessions-panel.open { transform: translateX(0); }
   #sessions-panel-header { padding: 12px 16px; border-bottom: 1px solid #313244; font-size: 14px; font-weight: bold; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
@@ -778,17 +810,27 @@
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
     <span id="provider-label"></span>
     <select id="model-select" title="Azureデプロイを切り替え" onchange="switchDeployment(this.value)" style="display:none"></select>
-    <button id="shell-btn" onclick="toggleShellPanel()" title="シェル実行">🖥 シェル</button>
-    <button id="editor-btn" onclick="window.open('?editor=1','_blank')" title="テキストエディタ">📝 エディタ</button>
-    <button id="sessions-btn" onclick="toggleSessionsPanel()">🕐 履歴</button>
-    <button id="provider-btn" onclick="toggleProviderPanel()">⚙️ LLM</button>
-    <button id="gitlab-btn" onclick="toggleGitLabPanel()">🦊 GitLab</button>
-    <button id="todo-btn" onclick="toggleTodoPanel()">📋 タスク<span id="todo-badge"></span></button>
-    <button id="tts-btn" onclick="toggleTTS()" title="AIの返答を読み上げ">🔊 読み上げ</button>
-    <button id="drawio-btn" onclick="toggleDrawioPanel()" title="Draw.io 作図エディタ">✏️ Draw.io</button>
-    <button id="cleanup-btn" onclick="openCleanupDirect()" title="ワークスペース掃除・保護リスト編集">🧹</button>
-    <button id="schedule-btn" onclick="openScheduleModal()" title="定時実行スケジューラー">⏰ 定時<span id="schedule-badge"></span></button>
-    <button id="clear-btn" onclick="clearHistory()">履歴クリア</button>
+    <span class="cbar-div"></span>
+    <span class="hgrp">
+      <button id="shell-btn" class="cbtn" data-tip="シェル実行" onclick="toggleShellPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+      <button id="editor-btn" class="cbtn" data-tip="テキストエディタ" onclick="window.open('?editor=1','_blank')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></button>
+      <button id="drawio-btn" class="cbtn" data-tip="Draw.io 作図エディタ" onclick="toggleDrawioPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+    </span>
+    <span class="hgrp">
+      <button id="sessions-btn" class="cbtn" data-tip="過去のセッション履歴" onclick="toggleSessionsPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/><polyline points="12 7 12 12 15 14"/></svg></button>
+      <button id="provider-btn" class="cbtn" data-tip="LLMプロバイダー設定" onclick="toggleProviderPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></button>
+      <button id="gitlab-btn" class="cbtn" data-tip="GitLab プロジェクト" onclick="toggleGitLabPanel()"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M22.65 14.39 12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0 1 18.6 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.51 1.22 3.78a.84.84 0 0 1-.31.94z"/></svg></button>
+    </span>
+    <span class="hgrp">
+      <button id="todo-btn" class="cbtn" data-tip="タスクリスト" onclick="toggleTodoPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span id="todo-badge"></span></button>
+      <button id="schedule-btn" class="cbtn" data-tip="定時実行スケジューラー" onclick="openScheduleModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span id="schedule-badge"></span></button>
+      <button id="tts-btn" class="cbtn" data-tip="AIの返答を読み上げ" onclick="toggleTTS()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
+      <button id="cleanup-btn" class="cbtn" data-tip="ワークスペース掃除・保護リスト編集" onclick="openCleanupDirect()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12.6 9 23l-5-1-1-5L13.4 6.6"/><path d="M13.4 6.6 17 3l4 4-3.6 3.6z"/><line x1="6" y1="14" x2="10" y2="18"/></svg></button>
+    </span>
+    <span class="cbar-div"></span>
+    <span class="hgrp">
+      <button id="clear-btn" class="cbtn" data-tip="履歴をクリア" onclick="clearHistory()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+    </span>
   </div>
 </div>
 
@@ -842,6 +884,15 @@
       <button id="pv-azure-btn" class="pv-btn" onclick="resetToAzure()">Azureに戻す</button>
     </div>
     <div id="pv-current"></div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #313244;">
+      <label style="display:block;font-size:12px;color:#a6adc8;margin-bottom:6px;">ヘッダーの見た目</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="htheme-opt" data-theme="mono" onclick="applyHeaderTheme('mono')">モノクロ</button>
+        <button class="htheme-opt" data-theme="color" onclick="applyHeaderTheme('color')">色分け</button>
+        <button class="htheme-opt" data-theme="group" onclick="applyHeaderTheme('group')">グループ</button>
+        <button class="htheme-opt" data-theme="outline" onclick="applyHeaderTheme('outline')">枠つき</button>
+      </div>
+    </div>
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #313244;">
       <a href="/setup" target="_blank" class="pv-advanced-link">🔧 詳細設定（.env 編集）</a>
     </div>
@@ -1183,16 +1234,16 @@
     <div id="image-preview-area"></div>
     <div id="input-bottom">
       <div id="input-left">
-        <button id="attach-btn" class="cbtn" onclick="document.getElementById('file-input').click()" title="ファイルを添付（画像・YAML・JSON・テキスト等）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+        <button id="attach-btn" class="cbtn" onclick="document.getElementById('file-input').click()" data-tip="ファイルを添付（画像・YAML・JSON・テキスト等）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <input id="file-input" type="file" accept="image/*,.yml,.yaml,.json,.toml,.ini,.conf,.txt,.md,.py,.sh,.bash,.js,.ts,.html,.css,.xml,.env" multiple style="display:none" onchange="handleFileSelect(event)">
-        <button id="codeblock-btn" class="cbtn" onclick="insertCodeBlock()" title="コードブロックを挿入（選択テキストを囲む）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
-        <button id="rawwrite-btn" class="cbtn" onclick="toggleRawWriteBar()" title="コードをLLMを通さず直接ファイルに保存（直接保存）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
+        <button id="codeblock-btn" class="cbtn" onclick="insertCodeBlock()" data-tip="コードブロックを挿入（選択テキストを囲む）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+        <button id="rawwrite-btn" class="cbtn" onclick="toggleRawWriteBar()" data-tip="コードをLLMを通さず直接ファイルに保存（直接保存）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button>
         <div id="rawwrite-bar" style="display:none;align-items:center;gap:6px;margin-top:4px;">
           <input id="rawwrite-path" placeholder="保存先 (例: check.yml)" style="flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--surface2);background:var(--base);color:var(--text);font-size:13px;">
           <button onclick="doRawWrite()" style="padding:4px 10px;border-radius:6px;background:var(--blue);color:#fff;border:none;cursor:pointer;font-size:13px;">保存</button>
           <button onclick="toggleRawWriteBar()" style="padding:4px 8px;border-radius:6px;background:var(--surface1);color:var(--text);border:none;cursor:pointer;font-size:13px;">✕</button>
         </div>
-        <button id="srcimg-btn" class="cbtn" onclick="openSrcImgModal()" title="edit_image の元ネタ画像を指定（生成元画像）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button><button id="srcimg-clear-btn" onclick="clearSrcImg()" title="生成元画像の参照を解除" style="display:none">×</button>
+        <button id="srcimg-btn" class="cbtn" onclick="openSrcImgModal()" data-tip="edit_image の元ネタ画像を指定（生成元画像）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button><button id="srcimg-clear-btn" onclick="clearSrcImg()" title="生成元画像の参照を解除" style="display:none">×</button>
         <span class="cbar-div"></span>
         <div class="dd" id="mode-dd" title="実行モード: 許可を確認 / プランモード（読み取り専用） / 自動（確認なし）">
           <button type="button" class="dd-btn" id="mode-dd-btn"><span class="dd-label">許可を確認</span><span class="dd-caret"></span></button>
@@ -1206,7 +1257,7 @@
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
-        <button id="mic-btn" class="cbtn" onclick="toggleMic()" title="音声入力（日本語）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
+        <button id="mic-btn" class="cbtn" onclick="toggleMic()" data-tip="音声入力（日本語）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
         <button id="bg-btn" onclick="bgBtnClick()" title="テキストあり→BGジョブ投入 / テキストなし→BG結果エリア開閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>BG<span id="bg-badge"></span></button>
         <button id="send" onclick="sendMessage()">送信<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
         <button id="stop" onclick="stopGeneration()">■ 停止</button>
@@ -1217,6 +1268,30 @@
 
 
 <script>
+  // ---- ヘッダーアイコンのテーマ切替（mono / color / group / outline） ----
+  function applyHeaderTheme(name) {
+    const valid = ['mono', 'color', 'group', 'outline'];
+    if (!valid.includes(name)) name = 'color';
+    const hdr = document.getElementById('header');
+    if (hdr) hdr.setAttribute('data-htheme', name);
+    try { localStorage.setItem('headerTheme', name); } catch (e) {}
+    document.querySelectorAll('.htheme-opt').forEach(b => {
+      b.classList.toggle('sel', b.dataset.theme === name);
+    });
+  }
+  // 起動時に保存済みテーマを復元（未設定は色分けを既定に）
+  (function () {
+    let saved = 'color';
+    try { saved = localStorage.getItem('headerTheme') || 'color'; } catch (e) {}
+    applyHeaderTheme(saved);
+  })();
+  // アイコンのみボタンの data-tip を aria-label にも反映（支援技術がボタン名を読めるように）
+  (function () {
+    document.querySelectorAll('[data-tip]').forEach(el => {
+      if (!el.getAttribute('aria-label')) el.setAttribute('aria-label', el.getAttribute('data-tip'));
+    });
+  })();
+
   // ---- marked + highlight.js 設定 ----
   // marked v5+ では highlight オプション廃止 → hljs.highlightElement を手動適用
   marked.setOptions({ breaks: true, gfm: true });

@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-12（セッション48）スマホ対応・レスポンシブUI（v1.16.0・issue #62）
+
+Tailscale でスマホアクセスは可能になったが UI が PC 向けで使いにくい件（[イシュー #62](https://gitlab.com/yuichi.matsuo/AI-Codeagent/-/work_items/62)）に対応。**方針は「追加のみ」**: `index.html` の PC 向け CSS は一行も書き換えず、`@media (max-width:768px)` ブロックとスタンドアロン用ルールを足すだけにし、**PC 表示は完全に据え置き**（各変更ごとに preview で PC幅=従来同一を実測確認）。
+
+### v1.16.0 主な変更（すべてスマホ幅 or スタンドアロン限定）
+
+- **viewport meta 追加**: `width=device-width, initial-scale=1, viewport-fit=cover`。PC は無視するため無影響。
+- **二重スクロール解消**: `html/body` を `100vh` → `100dvh` ＋ `overflow:hidden`（スマホのみ）。100vh がモバイルのツールバー裏まで含み外側スクロールを生んでいたのを解消し、スクロールを `#chat` 1つに限定。実測で外側スクロール無し（body高=画面高）を確認。
+- **ヘッダーのアイコンをハンバーガー(☰)に格納**: スマホでは操作アイコン群（`.hgrp`）を畳み、タイトル1行＋右上☰のみのコンパクト表示。☰は `position:absolute` で右上固定し、`#header.menu-open` で下に展開。タイトルは `<span id="app-title">` 化し `white-space:nowrap` で3行折返しを防止。
+- **入力欄を `＋` 折りたたみ式に**: スマホ通常時は `[＋] … [🎤マイク] [送信]` の1行のみ。`#input-more-btn`（＋）が `#input-bottom.more-open` をトグルし、添付・🖼️生成元画像・実行モード・BG を開閉。
+- **入力欄のすっきり化**: スマホでは コードブロック挿入・直接保存(rawwrite)・マルチAI・秒数/トークン表示(`#gen-status`) を非表示（機能は PC に残る・トークンはヘッダーにも表示）。**生成元画像指定(srcimg)は残す**（ユーザー要望）。textarea `min-height` を 52px に（大きすぎ防止・入力で自動伸長）。font-size 16px で iOS オートズーム防止。送信ボタンの孤立改行も `#input-right { flex-wrap:nowrap }` で解消。
+- **ドロワー全幅化**: gitlab/provider/todo/shell/sessions パネルをスマホ幅で `width:100%`。BG サイドペインは右カラム→下に縦積み＋全幅。
+- **ホーム画面アプリ用🔄更新ボタン**: `<head>` のスクリプトで `navigator.standalone` / `display-mode:standalone` を判定し `<html>` に `standalone` クラス付与。スタンドアロン時のみヘッダー右上（☰の左）に更新ボタン（`location.reload()`）を表示。通常 Safari・PC では非表示。
+  - 背景: ホーム画面に追加すると Safari のバー（＝標準の更新ボタン）が消えるため。**既存のホーム画面アプリに反映するには一度アプリを完全終了→再起動が必要**。
+
+### 設計上の学び
+
+- レスポンシブ化は「PC の CSS を書き換える」のではなく「**狭い画面でだけ効く `@media` を後ろに足す**」に徹すれば PC 無影響を構造的に保証できる。検証も「mobile幅で意図通り」＋「PC幅で computed style が従来同一」の2点を毎回 preview で実測した。
+- 検証は本番 systemd（ポート8000）を邪魔しないよう、別ポートの `python3 -m http.server` を一時的な launch.json 構成で立てて行い、確認後に構成を撤去（リポジトリには含めない）。
+
+---
+
 ## 2026-06-12（セッション47）ファイルビューアのバグ修正＋スマホアクセス検討（v1.15.2）
 
 ### v1.15.2 日本語PNGが開かない不具合修正＋PDFをブラウザ表示

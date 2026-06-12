@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-06-12（セッション49）定時スケジューラに曜日指定を追加（v1.17.0）
+
+「毎日実行で曜日を指定したい（土日は実行不要）」という要望に対応。**新しい繰り返し種別を増やさず**、既存の `daily`（毎日）に「実行する曜日」フィルタ `days_of_week` を足す方式にした（後方互換）。
+
+### v1.17.0 主な変更
+
+- **DB**: `scheduled_tasks` に `days_of_week TEXT` カラムを追加。`schedule_db.init_db()` に `_migrate()` を追加し、既存DBには `ALTER TABLE ... ADD COLUMN` で後付け（既存タスクは値NULL＝従来通り毎日）。
+- **スケジューラー本体** (`tools/scheduler.py`): `_parse_dow_set('0,1,2,3,4')→{0..4}` を追加。`compute_due` / `next_run` の `daily` 分岐で、`days_of_week` があればその曜日のみ発火するよう判定。空/NULL は従来通り毎日。`weekly` の単一 `day_of_week` ロジックは不変。
+- **API** (`server.py`): `TaskRequest` / `TaskUpdateRequest` に `days_of_week` を追加。作成エンドポイントで透過。エージェント用ツール `schedule_task_create` に `days_of_week` 引数（`'月,火,..'` / `'0,1,..'` / リストを受ける `_coerce_dow_list`）と schema 説明を追加。`schedule_task_list` の戻りにも追加。
+- **UI** (`index.html`): 「毎日」選択時のみ曜日チェックボックス（月〜日）＋「平日のみ / 毎日」プリセットボタンを表示。送信時、0個 or 7個（全選択）は空文字＝毎日として送る。編集ロード・一覧表示（`毎日 09:00（月・火・水・木・金）`）・キャンセル時リセットも対応。
+- **テスト** (`tests/test_scheduler.py`): 平日フィルタで土日スキップ・該当日発火・空＝毎日・`next_run` が金→月に飛ぶ・`_parse_dow_set` を追加。全18件パス。DBマイグレーションと DB→next_run のE2Eも実機確認（金10:00 → 次回は月 06-15 09:00）。
+
+### テンプレート編集機能も追加
+
+保存済みの実行内容テンプレートをUIから編集できるようにした（従来は作成と削除のみ）。
+
+- **UI** (`index.html`): テンプレ一覧の各行に「編集」ボタンを追加。押すとフォームに名前・指示文が展開され編集モードに入る（ラベル「テンプレート名（編集中）」・ボタン「変更を保存」・「編集をやめる」表示）。保存後はタスク登録フォームの選択肢も再取得して反映。
+- **API** (`server.py`): 編集は既存の `PUT /schedule/templates/{id}` を利用。別テンプレと同名へのリネームが UNIQUE 制約で500になるのを防ぐため、事前に重複名チェック（→400「同名のテンプレートが既に存在します」）を追加。HTTPレベルのE2Eで 更新成功・重複ガード400 を実機確認。
+
+### `send_email` ツールを追加（条件付きメール通知）
+
+従来のメール通知は「指示文に通知キーワードがあれば完了時に無条件送信」で、**結果による分岐ができなかった**。監視用途（「アクセスできるはずのサイトが落ちていたら通知」「アクセス不可が正常なのに到達できたら通知」など）に応えるため、エージェントが自分で判断して呼べるメール送信ツールを追加。
+
+- **`tools/notify_tools.py`**: `send_email(subject, body, to=None)` を追加。既存の `send_email_notification` と違い **クールダウンなし・成否を辞書で返す**（送信不可なら理由つき）。SMTP は既存同様 Gmail（`smtp.gmail.com:465`）。
+- **`server.py`**: `send_email` を `TOOL_REGISTRY` と `TOOLS`（schema）に登録。schema 説明で「状況を評価し、条件に該当するときだけ呼ぶ／正常時は呼ばない／失敗時は ok=false と理由を最終回答に記載」を明示。宛先は引数 `to` 省略時 `NOTIFY_EMAIL_TO`（未設定なら送信元自身）にフォールバック。
+- これにより、**テンプレートに自然言語で条件を書けば LLM が結果を読んで送る/送らないを判断**できる。メール設定（`NOTIFY_EMAIL_ENABLED` 等）が有効なことを実機確認済み。
+- **重要な落とし穴**: バックグラウンド/定時タスクは `server.py` ではなく **`agent_core.py` の別の `TOOL_REGISTRY`/`TOOLS`** を使う。最初 server.py 側だけに登録したため定時タスクでメールが飛ばなかった。`agent_core.py` にも `send_email` を import・registry・schema 登録して解消。**今後ツールを追加するときは server.py と agent_core.py の両方に入れること**。実際に Gmail SMTP 疎通（自分宛にテスト送信→ok=true）を確認。
+
+---
+
 ## 2026-06-12（セッション48）スマホ対応・レスポンシブUI（v1.16.0・issue #62）
 
 Tailscale でスマホアクセスは可能になったが UI が PC 向けで使いにくい件（[イシュー #62](https://gitlab.com/yuichi.matsuo/AI-Codeagent/-/work_items/62)）に対応。**方針は「追加のみ」**: `index.html` の PC 向け CSS は一行も書き換えず、`@media (max-width:768px)` ブロックとスタンドアロン用ルールを足すだけにし、**PC 表示は完全に据え置き**（各変更ごとに preview で PC幅=従来同一を実測確認）。

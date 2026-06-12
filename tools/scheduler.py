@@ -38,13 +38,30 @@ def _parse_hhmm(s: str) -> tuple[int, int] | None:
         return None
 
 
+def _parse_dow_set(s) -> set[int] | None:
+    """
+    '0,1,2,3,4' のようなカンマ区切りを {0,1,2,3,4} に変換する（0=月..6=日）。
+    空 / None / 不正なら None（＝曜日フィルタなし＝毎日）を返す。
+    """
+    if not s:
+        return None
+    out: set[int] = set()
+    for part in str(s).split(","):
+        part = part.strip()
+        if part.isdigit():
+            n = int(part)
+            if 0 <= n <= 6:
+                out.add(n)
+    return out or None
+
+
 def compute_due(task: dict, since: datetime, now: datetime) -> list[datetime]:
     """
     task の予定発火時刻のうち、(since, now] の範囲に入るものを昇順で返す純関数。
 
     recurrence_type:
       once     - run_at に1回
-      daily    - 毎日 time_of_day
+      daily    - 毎日 time_of_day。days_of_week('0,1,..'）があればその曜日のみ
       weekly   - 毎週 day_of_week 曜日の time_of_day（0=月..6=日）
       hourly   - anchor_at を起点に毎時
       interval - anchor_at を起点に interval_hours 時間ごと
@@ -64,12 +81,16 @@ def compute_due(task: dict, since: datetime, now: datetime) -> list[datetime]:
             return result
         hh, mm = hhmm
         dow = task.get("day_of_week")
+        dset = _parse_dow_set(task.get("days_of_week"))  # daily の曜日フィルタ
         # since の日付から now の日付まで日単位で候補を作る
         day = since.date()
         end_day = now.date()
         while day <= end_day:
             cand = datetime(day.year, day.month, day.day, hh, mm)
-            ok_dow = (rtype == "daily") or (dow is not None and cand.weekday() == dow)
+            if rtype == "daily":
+                ok_dow = (dset is None) or (cand.weekday() in dset)
+            else:  # weekly
+                ok_dow = (dow is not None and cand.weekday() == dow)
             if ok_dow and since < cand <= now:
                 result.append(cand)
             day += timedelta(days=1)
@@ -117,12 +138,16 @@ def next_run(task: dict, now: datetime | None = None) -> datetime | None:
             return None
         hh, mm = hhmm
         dow = task.get("day_of_week")
+        dset = _parse_dow_set(task.get("days_of_week"))  # daily の曜日フィルタ
         for i in range(0, 8):  # 今日から1週間先まで探索
             d = (now + timedelta(days=i)).date()
             cand = datetime(d.year, d.month, d.day, hh, mm)
             if cand <= now:
                 continue
-            if rtype == "daily" or (dow is not None and cand.weekday() == dow):
+            if rtype == "daily":
+                if dset is None or cand.weekday() in dset:
+                    return cand
+            elif dow is not None and cand.weekday() == dow:
                 return cand
         return None
 

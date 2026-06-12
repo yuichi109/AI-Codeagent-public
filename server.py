@@ -70,7 +70,7 @@ from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 # 詳細: docs/changelog.md「コードベースRAG 一時無効化」参照
 from tools.image_tools import generate_image, edit_image, watermark_image, apply_auto_watermark, IMAGE_MODELS_BY_PROVIDER
 from tools.mcp_client import MCPClientManager
-from tools.notify_tools import send_email_notification
+from tools.notify_tools import send_email_notification, send_email
 from pydantic import BaseModel
 
 mcp_manager = MCPClientManager()
@@ -430,6 +430,26 @@ def _coerce_dow(value) -> int | None:
         return None
 
 
+def _coerce_dow_list(value) -> str | None:
+    """
+    '月,火' / 'mon,tue' / [0,1] / '0,1,2,3,4' などを正規化して
+    '0,1' のようなカンマ区切り文字列にする。空/不正なら None。
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, (list, tuple, set)):
+        parts = list(value)
+    else:
+        parts = str(value).split(",")
+    out: list[int] = []
+    for p in parts:
+        n = _coerce_dow(p)
+        if n is not None and n not in out:
+            out.append(n)
+    out.sort()
+    return ",".join(str(n) for n in out) if out else None
+
+
 def schedule_template_create(name: str, prompt: str) -> dict:
     """実行内容テンプレート（エージェントへの指示文）を登録する。"""
     if schedule_db.get_template_by_name(name):
@@ -448,12 +468,15 @@ def schedule_template_list() -> dict:
 
 def schedule_task_create(name: str, template_name: str, recurrence_type: str,
                          time_of_day: str = None, day_of_week=None,
+                         days_of_week=None,
                          interval_hours: int = None, run_at: str = None,
                          workspace_scope: str = "") -> dict:
     """
     定時タスクを登録する。template_name で実行内容テンプレートを指定する。
     recurrence_type: daily(毎日) / weekly(毎週) / once(1回) / hourly(毎時) / interval(N時間ごと)
     daily/weekly は time_of_day='HH:MM'、weekly は day_of_week(0=月..6=日 か 曜日名)も必要。
+    daily で特定曜日のみ実行したい場合は days_of_week に '月,火,水,木,金' や '0,1,2,3,4'
+    を渡す（未指定なら毎日）。土日を除くなら平日5日を指定する。
     once は run_at='YYYY-MM-DDTHH:MM:SS'。interval は interval_hours が必要。
     """
     tpl = schedule_db.get_template_by_name(template_name)
@@ -463,6 +486,7 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
         tid = schedule_db.create_task(
             name=name, template_id=tpl["id"], recurrence_type=recurrence_type,
             time_of_day=time_of_day, day_of_week=_coerce_dow(day_of_week),
+            days_of_week=_coerce_dow_list(days_of_week),
             interval_hours=interval_hours, run_at=run_at,
             workspace_scope=workspace_scope or "",
         )
@@ -483,6 +507,7 @@ def schedule_task_list() -> dict:
             "id": t["id"], "name": t["name"], "template": t.get("template_name"),
             "recurrence_type": t["recurrence_type"],
             "time_of_day": t.get("time_of_day"), "day_of_week": t.get("day_of_week"),
+            "days_of_week": t.get("days_of_week"),
             "interval_hours": t.get("interval_hours"), "run_at": t.get("run_at"),
             "enabled": bool(t["enabled"]),
             "next_run": nr.isoformat(timespec="seconds") if nr else None,
@@ -564,6 +589,7 @@ TOOL_REGISTRY = {
     "schedule_task_list": schedule_task_list,
     "schedule_task_delete": schedule_task_delete,
     "schedule_task_set_enabled": schedule_task_set_enabled,
+    "send_email": send_email,
 }
 
 if RESPONSES_API_ENABLED:
@@ -1436,6 +1462,7 @@ TOOLS = [
                     "recurrence_type": {"type": "string", "enum": ["daily", "weekly", "once", "hourly", "interval"], "description": "繰り返し種別"},
                     "time_of_day": {"type": "string", "description": "daily/weekly の実行時刻 'HH:MM'（24時間表記）"},
                     "day_of_week": {"type": "string", "description": "weekly の曜日。0=月..6=日、または '月'〜'日' / 'mon'〜'sun'"},
+                    "days_of_week": {"type": "string", "description": "daily で特定曜日のみ実行する場合に指定（カンマ区切り）。例 '月,火,水,木,金' または '0,1,2,3,4'（土日を除く）。未指定なら毎日。"},
                     "interval_hours": {"type": "integer", "description": "interval の間隔（時間）"},
                     "run_at": {"type": "string", "description": "once の実行日時 'YYYY-MM-DDTHH:MM:SS'"},
                     "workspace_scope": {"type": "string", "description": "作業スコープ（省略可）"},
@@ -1476,6 +1503,22 @@ TOOLS = [
                     "enabled": {"type": "boolean", "description": "true=有効 / false=無効"},
                 },
                 "required": ["task_id", "enabled"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email",
+            "description": "メールを送信する。監視や定時タスクで、結果を判断したうえで条件付きに通知したいときに使う。例: 『アクセスできるはずのサイトが落ちていたら』『アクセスできないはずなのに到達できてしまったら』など、自分で状況を評価してから、条件に該当するときだけ呼ぶこと（正常時は呼ばない）。送れなかった場合は ok=false と理由が返るので、その旨を最終回答に記載する。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string", "description": "メールの件名（何が起きたか一目で分かる短い文）"},
+                    "body": {"type": "string", "description": "本文。確認したURL・実際の結果（ステータスコード/エラー）・判定理由を具体的に書く"},
+                    "to": {"type": "string", "description": "宛先メールアドレス（省略時は .env の NOTIFY_EMAIL_TO に送信）"},
+                },
+                "required": ["subject", "body"],
             },
         },
     },
@@ -3124,6 +3167,7 @@ class TaskRequest(BaseModel):
     recurrence_type: str
     time_of_day: str | None = None
     day_of_week: int | None = None
+    days_of_week: str | None = None
     interval_hours: int | None = None
     run_at: str | None = None
     workspace_scope: str = ""
@@ -3136,6 +3180,7 @@ class TaskUpdateRequest(BaseModel):
     recurrence_type: str | None = None
     time_of_day: str | None = None
     day_of_week: int | None = None
+    days_of_week: str | None = None
     interval_hours: int | None = None
     run_at: str | None = None
     workspace_scope: str | None = None
@@ -3164,6 +3209,10 @@ async def schedule_template_create_ep(req: TemplateRequest):
 async def schedule_template_update_ep(template_id: int, req: TemplateRequest):
     if schedule_db.get_template(template_id) is None:
         return JSONResponse({"error": "テンプレートが見つかりません"}, status_code=404)
+    # 別テンプレと同名へのリネームは UNIQUE 制約違反になるので事前に弾く
+    dup = schedule_db.get_template_by_name(req.name)
+    if dup and dup["id"] != template_id:
+        return JSONResponse({"error": "同名のテンプレートが既に存在します"}, status_code=400)
     schedule_db.update_template(template_id, name=req.name, prompt=req.prompt)
     return JSONResponse({"id": template_id, "updated": True})
 
@@ -3195,7 +3244,8 @@ async def schedule_task_create_ep(req: TaskRequest):
         tid = schedule_db.create_task(
             name=req.name, template_id=req.template_id,
             recurrence_type=req.recurrence_type, time_of_day=req.time_of_day,
-            day_of_week=req.day_of_week, interval_hours=req.interval_hours,
+            day_of_week=req.day_of_week, days_of_week=req.days_of_week,
+            interval_hours=req.interval_hours,
             run_at=req.run_at, workspace_scope=req.workspace_scope,
             enabled=req.enabled,
         )

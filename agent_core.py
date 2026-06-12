@@ -54,6 +54,7 @@ from tools.host_info_tools import gather_host_info
 from tools.background_tools import run_background, check_background, kill_background
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 from tools.image_tools import generate_image, edit_image, watermark_image
+from tools.notify_tools import send_email
 
 # -----------------------------------------------------------------------
 # Tool registry (no show_mermaid_batch_refine_dialog — server-only UI tool)
@@ -108,6 +109,7 @@ TOOL_REGISTRY: dict = {
     "generate_image": generate_image,
     "edit_image": edit_image,
     "watermark_image": watermark_image,
+    "send_email": send_email,
 }
 
 # -----------------------------------------------------------------------
@@ -858,6 +860,22 @@ TOOLS: list = [
                     "opacity": {"type": "number"},
                 },
                 "required": ["image_path", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email",
+            "description": "メールを送信する。監視や定時タスクで、結果を判断したうえで条件付きに通知したいときに使う。例: 『アクセスできるはずのサイトが落ちていたら』『アクセスできないはずなのに到達できてしまったら』など、自分で状況を評価してから、条件に該当するときだけ呼ぶこと（正常時は呼ばない）。送れなかった場合は ok=false と理由が返るので、その旨を最終回答に記載する。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string", "description": "メールの件名（何が起きたか一目で分かる短い文）"},
+                    "body": {"type": "string", "description": "本文。確認したURL・実際の結果（ステータスコード/エラー）・判定理由を具体的に書く"},
+                    "to": {"type": "string", "description": "宛先メールアドレス（省略時は .env の NOTIFY_EMAIL_TO に送信）"},
+                },
+                "required": ["subject", "body"],
             },
         },
     },

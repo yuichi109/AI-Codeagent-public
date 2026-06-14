@@ -950,7 +950,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       <select id="pv-model" class="pv-input"></select>
     </div>
     <label class="pv-check">
-      <input type="checkbox" id="pv-tools-enabled"> ツールを渡す（Function Calling）
+      <input type="checkbox" id="pv-tools-enabled" onchange="onToolsToggle()"> ツールを渡す（Function Calling）
     </label>
     <label class="pv-check">
       <input type="checkbox" id="pv-no-think" onchange="saveNoThink()"> /no_think をプロンプトに付加
@@ -2568,6 +2568,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     foundry: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" fill="none"><path fill="#c4b5fd" d="M11.958 11.683c.037 0 .074-.1.074-.238V7.577c0-.853.66-1.76 1.585-2.034-.057-.188-.645-2.112-.81-2.646C12.631 2.335 12.131 1 11.52 1l-.014.001q-.07.013-.135.129c-.32.583-.463 3.015-.463 4.837V8.23c.275.97.912 3.217.961 3.353 0 0 .05.1.088.1"/><path fill="#7c3aed" d="M16.015 5.456h-1.807c-1.214 0-2.175 1.085-2.175 2.109v3.867c0 .139-.037.239-.074.239-.038 0-.088-.1-.088-.1s.075.212.175.212h1.98c.616 0 2.475-.611 2.475-2.52V6.006c0-.414-.237-.551-.486-.551"/><path fill="#4c1d95" d="M2.336 17h5.38c2.346 0 3.194-2.034 3.194-3.807V5.967c0-2.084.188-4.967.612-4.967H8.296c-.768 0-1.43.824-2.178 2.484-.75 1.66-4.357 11.872-4.518 12.355-.262.787-.025 1.161.736 1.161"/></svg>`,
     gemini: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#4285f4" d="M50 3C48.5 33 37 47 3 50C37 53 48.5 67 50 97C51.5 67 63 53 97 50C63 47 51.5 33 50 3Z"/></svg>`,
     openai: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path fill="#10a37f" d="M22.28 9.42a5.93 5.93 0 0 0-.51-4.87 6.0 6.0 0 0 0-6.44-2.88A5.93 5.93 0 0 0 10.85 0a6.0 6.0 0 0 0-5.72 4.16 5.93 5.93 0 0 0-3.96 2.87 6.0 6.0 0 0 0 .74 7.04 5.93 5.93 0 0 0 .51 4.87 6.0 6.0 0 0 0 6.44 2.88A5.93 5.93 0 0 0 13.14 24a6.0 6.0 0 0 0 5.73-4.16 5.93 5.93 0 0 0 3.96-2.87 6.0 6.0 0 0 0-.74-7.04zM13.14 22.5a4.45 4.45 0 0 1-2.85-1.03l.14-.08 4.74-2.74a.78.78 0 0 0 .39-.68v-6.68l2.0 1.16a.07.07 0 0 1 .04.06v5.54a4.5 4.5 0 0 1-4.46 4.45zM3.62 18.37a4.45 4.45 0 0 1-.53-2.99l.14.08 4.74 2.74a.78.78 0 0 0 .78 0l5.79-3.34v2.31a.07.07 0 0 1-.03.06L9.7 20.0a4.5 4.5 0 0 1-6.08-1.63zm-1.16-9.8A4.45 4.45 0 0 1 4.78 6.4v5.64a.78.78 0 0 0 .39.68l5.79 3.34-2.0 1.16a.07.07 0 0 1-.07 0L4.2 14.6a4.5 4.5 0 0 1-1.74-6.04zm16.45 3.86-5.79-3.34 2.0-1.15a.07.07 0 0 1 .07 0l4.69 2.71a4.5 4.5 0 0 1-.7 8.12V13.1a.78.78 0 0 0-.39-.68zm1.99-3.02-.14-.08-4.74-2.73a.78.78 0 0 0-.78 0L9.45 9.93V7.62a.07.07 0 0 1 .03-.06l4.69-2.71a4.5 4.5 0 0 1 6.73 4.66zm-12.54 4.13-2.0-1.15a.07.07 0 0 1-.04-.06V6.8a4.5 4.5 0 0 1 7.38-3.46l-.14.08-4.74 2.74a.78.78 0 0 0-.39.68zm1.09-2.35 2.58-1.49 2.58 1.49v2.97l-2.58 1.49-2.58-1.49z"/></svg>`,
+    groq: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="#f55036"/><path fill="#fff" d="M12 5.5a4.6 4.6 0 0 0 0 9.2h1.5v-2.1H12a2.5 2.5 0 1 1 2.5-2.5v4.7a2.4 2.4 0 0 1-4.06 1.72l-1.49 1.5A4.5 4.5 0 0 0 16.6 14.8V10.1A4.6 4.6 0 0 0 12 5.5z"/></svg>`,
+    openrouter: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path stroke="#6566f1" stroke-width="2.2" fill="none" d="M3 8h5l4 4 4-4h5M3 16h5l4-4"/><path fill="#6566f1" d="M18 4l4 4-4 4zM18 12l4 4-4 4z"/></svg>`,
     openai_compatible: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="15" rx="2" stroke="#6b7280" stroke-width="1.5"/><path d="M6 8l4 3.5L6 15" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="13" y1="15" x2="18" y2="15" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round"/><line x1="8" y1="21" x2="16" y2="21" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round"/><line x1="12" y1="18" x2="12" y2="21" stroke="#6b7280" stroke-width="1.5"/></svg>`,
   };
 
@@ -4162,11 +4164,15 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         .join('');
       const geminiOpt = presets.gemini ? `<option value="gemini">Google Gemini</option>` : '';
       const openaiOpt = presets.openai ? `<option value="openai">OpenAI</option>` : '';
+      const groqOpt = presets.groq ? `<option value="groq">Groq</option>` : '';
+      const openrouterOpt = presets.openrouter ? `<option value="openrouter">OpenRouter</option>` : '';
       sel.innerHTML =
         `<option value="azure">Azure OpenAI</option>` +
         foundryOpts +
         geminiOpt +
         openaiOpt +
+        groqOpt +
+        openrouterOpt +
         `<option value="local">ローカルLLM（カスタム）</option>`;
       // 以前の選択を復元（存在する場合のみ）
       if (prev && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) sel.value = prev;
@@ -4177,10 +4183,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     try {
       const res = await fetch('/providers/current');
       const data = await res.json();
-      if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini' || data.type === 'openai') {
+      if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini' || data.type === 'openai' || data.type === 'groq' || data.type === 'openrouter') {
         document.getElementById('pv-url').value = '';
         document.getElementById('pv-apikey').value = '';
-        // preset_id を使う（foundry→foundry_1, gemini→gemini, openai→openai, azure→azure）
+        // preset_id を使う（foundry→foundry_1, gemini→gemini, openai→openai, groq→groq, openrouter→openrouter, azure→azure）
         syncPresetUI(data.type === 'foundry' ? (data.preset_id || 'foundry_1') : data.type);
       } else {
         // openai_compatible: URLは /v1 を除いて表示
@@ -4200,6 +4206,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     if (preset === 'azure') return 'azure';
     if (preset === 'gemini') return 'gemini';
     if (preset === 'openai') return 'openai';
+    if (preset === 'groq') return 'groq';
+    if (preset === 'openrouter') return 'openrouter';
     if (preset.startsWith('foundry')) return 'foundry';
     return 'openai_compatible';
   }
@@ -4216,7 +4224,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const azureBtn = document.getElementById('pv-azure-btn');
     const urlInput = document.getElementById('pv-url');
     const isFoundry = preset === 'foundry' || preset.startsWith('foundry_');
-    const isPreset = preset === 'azure' || isFoundry || preset === 'gemini' || preset === 'openai';
+    const isPreset = preset === 'azure' || isFoundry || preset === 'gemini' || preset === 'openai' || preset === 'groq' || preset === 'openrouter';
     if (isPreset) {
       // .env 設定を使うプリセット — URL/キー欄は不要
       urlGroup.style.display = 'none';
@@ -4246,6 +4254,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       await switchToGeminiPreset();
     } else if (preset === 'openai') {
       await switchToOpenAIPreset();
+    } else if (preset === 'groq') {
+      await switchToGroqPreset();
+    } else if (preset === 'openrouter') {
+      await switchToOpenRouterPreset();
     } else {
       syncPresetUI(preset);
       document.getElementById('pv-url').value = '';
@@ -4342,6 +4354,64 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     }
   }
 
+  async function switchToGroqPreset() {
+    syncPresetUI('groq');
+    setPvStatus('切り替え中...', null);
+    try {
+      const presets = await fetch('/providers/presets').then(r => r.json());
+      if (!presets.groq) {
+        setPvStatus('⚠️ .env に GROQ_API_KEY が未設定です（/setup で設定）', false);
+        return;
+      }
+      const res = await fetch('/providers/preset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: 'groq' }),
+      });
+      const data = await res.json();
+      if (data.error) { setPvStatus('⚠️ ' + data.error, false); return; }
+      updatePvCurrent(data.provider);
+      await loadDeployments();
+      setPvStatus(`✓ Groq に切り替えました (${data.provider.model})`, true);
+      if (document.getElementById('pv-reset-history').checked) {
+        history = []; turns = []; localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SESSION_ID_KEY);
+        chat.innerHTML = ''; updateTurnCount();
+      }
+      setTimeout(() => toggleProviderPanel(), 800);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
+  async function switchToOpenRouterPreset() {
+    syncPresetUI('openrouter');
+    setPvStatus('切り替え中...', null);
+    try {
+      const presets = await fetch('/providers/presets').then(r => r.json());
+      if (!presets.openrouter) {
+        setPvStatus('⚠️ .env に OPENROUTER_API_KEY が未設定です（/setup で設定）', false);
+        return;
+      }
+      const res = await fetch('/providers/preset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: 'openrouter' }),
+      });
+      const data = await res.json();
+      if (data.error) { setPvStatus('⚠️ ' + data.error, false); return; }
+      updatePvCurrent(data.provider);
+      await loadDeployments();
+      setPvStatus(`✓ OpenRouter に切り替えました (${data.provider.model})`, true);
+      if (document.getElementById('pv-reset-history').checked) {
+        history = []; turns = []; localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SESSION_ID_KEY);
+        chat.innerHTML = ''; updateTurnCount();
+      }
+      setTimeout(() => toggleProviderPanel(), 800);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
   let _currentProviderType = 'azure';
   let _currentProviderName = 'Azure OpenAI';
   let _currentModel = '';
@@ -4355,6 +4425,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
                 : data.type === 'azure'   ? 'Azure OpenAI'
                 : data.type === 'gemini'  ? 'Google Gemini'
                 : data.type === 'openai'  ? 'OpenAI'
+                : data.type === 'groq'    ? 'Groq'
+                : data.type === 'openrouter' ? 'OpenRouter'
                 : 'OpenAI互換';
     _currentProviderName = label;
     _currentModel = data.model || '';
@@ -4362,12 +4434,28 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     document.getElementById('pv-current').textContent = `現在: ${label} / ${data.model || '(未設定)'}`;
     const labelEl = document.getElementById('provider-label');
     labelEl.innerHTML = (PROVIDER_SVG[data.type] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>`;
-    // Azure / Foundry / Gemini はデプロイ選択ドロップダウンを表示
+    // Azure / Foundry / Gemini / OpenAI / Groq はデプロイ選択ドロップダウンを表示
     const sel = document.getElementById('model-select');
-    if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini' || data.type === 'openai') {
+    if (data.type === 'azure' || data.type === 'foundry' || data.type === 'gemini' || data.type === 'openai' || data.type === 'groq' || data.type === 'openrouter') {
       if (sel.options.length > 1) sel.value = data.model;
     } else {
       sel.style.display = 'none';
+    }
+    // ツールON/OFFの記憶を反映（プリセット系は切替時にサーバーが True 固定で書くため、
+    // ユーザーが以前そのプロバイダーで選んだ設定をここで復元する）
+    const pref = localStorage.getItem('pv_tools_' + _currentPreset);
+    let toolsEnabled = data.tools_enabled !== false;
+    if (pref !== null) {
+      toolsEnabled = (pref === 'true');
+      const box = document.getElementById('pv-tools-enabled');
+      if (box) box.checked = toolsEnabled;
+      // サーバーの現状と食い違う場合は記憶した設定を押し戻す
+      if (toolsEnabled !== (data.tools_enabled !== false)) {
+        fetch('/providers/tools', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: toolsEnabled }),
+        }).catch(() => {});
+      }
     }
     refreshRerunModels();   // プロバイダー/モデルが変わったら再実行リストも更新
   }
@@ -4375,7 +4463,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   async function loadDeployments() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai') return; // ローカルはデプロイ選択不要
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai' && pv.type !== 'groq' && pv.type !== 'openrouter') return; // ローカルはデプロイ選択不要
       const res = await fetch('/providers/deployments');
       const data = await res.json();
       const sel = document.getElementById('model-select');
@@ -4459,6 +4547,26 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         chat.innerHTML = ''; updateTurnCount();
       }
       setTimeout(() => toggleProviderPanel(), 800);
+    } catch(e) {
+      setPvStatus('⚠️ ' + e.message, false);
+    }
+  }
+
+  async function onToolsToggle() {
+    // チェックボックスを即サーバーに反映・保存（プリセット系でもON/OFFが戻らないように）
+    const enabled = document.getElementById('pv-tools-enabled').checked;
+    // プロバイダーごとに選択を記憶（次回そのプロバイダーに切り替えても維持される）
+    localStorage.setItem('pv_tools_' + _currentPreset, enabled);
+    try {
+      const res = await fetch('/providers/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        setPvStatus(enabled ? '✓ ツールを有効化しました' : '✓ ツールを無効化しました（チャット専用）', true);
+      }
     } catch(e) {
       setPvStatus('⚠️ ' + e.message, false);
     }
@@ -5493,7 +5601,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   async function loadEditorCompleteModels() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai') return;
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai' && pv.type !== 'groq' && pv.type !== 'openrouter') return;
       const data = await fetch('/providers/deployments').then(r => r.json());
       const sel = document.getElementById('editor-complete-model');
       if (!sel) return;
@@ -5544,7 +5652,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   async function loadInlineChatModels() {
     try {
       const pv = await fetch('/providers/current').then(r => r.json());
-      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai') return;
+      if (pv.type !== 'azure' && pv.type !== 'foundry' && pv.type !== 'gemini' && pv.type !== 'openai' && pv.type !== 'groq' && pv.type !== 'openrouter') return;
       const data = await fetch('/providers/deployments').then(r => r.json());
       _icDeployments = data.deployments;
       const defSel = document.getElementById('ic-default-model');

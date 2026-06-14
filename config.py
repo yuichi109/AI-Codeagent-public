@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.17.0"
+APP_VERSION = "1.18.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -154,6 +154,22 @@ _gemini_models_raw = os.getenv("GEMINI_MODELS", "")
 GEMINI_MODELS: list[str] = (
     [m.strip() for m in _gemini_models_raw.split(",") if m.strip()]
     if _gemini_models_raw else []
+)
+
+# Groq (省略可・OpenAI互換・無料枠あり・LPUで高速推論)
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+_groq_models_raw = os.getenv("GROQ_MODELS", "")
+GROQ_MODELS: list[str] = (
+    [m.strip() for m in _groq_models_raw.split(",") if m.strip()]
+    if _groq_models_raw else []
+)
+
+# OpenRouter (省略可・OpenAI互換・300+モデル集約・無料モデルあり・前払いクレジット制)
+OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+_openrouter_models_raw = os.getenv("OPENROUTER_MODELS", "")
+OPENROUTER_MODELS: list[str] = (
+    [m.strip() for m in _openrouter_models_raw.split(",") if m.strip()]
+    if _openrouter_models_raw else []
 )
 
 # GitLab 連携 (省略可)

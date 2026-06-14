@@ -15,10 +15,10 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION, ASYNC_MAX_JOBS
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, GROQ_API_KEY, GROQ_MODELS, OPENROUTER_API_KEY, OPENROUTER_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION, ASYNC_MAX_JOBS
 from tools.async_job_db import init_db as _init_async_db, create_job as _create_async_job, get_job as _get_async_job, get_chunks as _get_async_chunks, list_jobs as _list_async_jobs, update_job as _update_async_job, delete_job as _delete_async_job
 from tools.inbox_worker import start_worker, stop_worker, get_status as inbox_get_status, scan_inbox as inbox_scan_now, ensure_inbox_dirs, get_stale_drafts
-from prompts import get_system_prompt
+from prompts import get_system_prompt, get_chat_system_prompt
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
 _GEMINI_DEFAULT_MODELS = [
@@ -40,6 +40,28 @@ _OPENAI_DEFAULT_MODELS = [
     "gpt-4o-mini",
     "o3",
     "o4-mini",
+]
+
+# Groq デフォルトモデル一覧（GROQ_MODELS 未設定時のフォールバック）
+# いずれもツール呼び出し対応モデル
+_GROQ_DEFAULT_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "moonshotai/kimi-k2-instruct",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "qwen/qwen3-32b",
+]
+
+# OpenRouter デフォルトモデル一覧（OPENROUTER_MODELS 未設定時のフォールバック）
+# :free 付きは無料モデル（リクエスト数制限のみ）。🔍 で最新の利用可能モデルを取得可能。
+_OPENROUTER_DEFAULT_MODELS = [
+    "openai/gpt-oss-120b:free",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-chat-v3-0324:free",
+    "qwen/qwen3-32b",
 ]
 from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, delete_file, list_files, glob_files, grep
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
@@ -139,6 +161,20 @@ def _make_client():
             api_key=_provider_config["api_key"],
             http_client=httpx.Client(trust_env=False),
         )
+    elif _provider_config["type"] == "groq":
+        # Groq (OpenAI互換エンドポイント)
+        return OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=_provider_config["api_key"],
+            http_client=httpx.Client(trust_env=False),
+        )
+    elif _provider_config["type"] == "openrouter":
+        # OpenRouter (OpenAI互換・モデル集約)
+        return OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=_provider_config["api_key"],
+            http_client=httpx.Client(trust_env=False),
+        )
     else:
         # "openai_compatible" (ローカルLLM等) は OpenAI互換クライアント
         return OpenAI(
@@ -166,6 +202,18 @@ def _make_async_client():
         )
     elif _provider_config["type"] == "openai":
         return AsyncOpenAI(
+            api_key=_provider_config["api_key"],
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    elif _provider_config["type"] == "groq":
+        return AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=_provider_config["api_key"],
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    elif _provider_config["type"] == "openrouter":
+        return AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
             api_key=_provider_config["api_key"],
             http_client=httpx.AsyncClient(trust_env=False),
         )
@@ -2297,25 +2345,34 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         user_content = f"[プランモードON: 読み取り専用。変更系ツールは使わず、調査して実装計画だけを提示すること]\n{user_content}"
     elif bypass_approval and isinstance(user_content, str):
         user_content = f"[承認バイパスON: 確認・提案なしで即実行すること]\n{user_content}"
-    # 自動コンテキスト収集（Claude Code方式: git status/diff/log をユーザーメッセージ先頭に注入）
-    auto_ctx = _gather_auto_context(workspace_scope)
-    if auto_ctx:
-        if isinstance(user_content, list):
-            user_content = [{"type": "text", "text": auto_ctx}] + user_content
-        else:
-            user_content = f"{auto_ctx}\n\n{user_content}"
-    system_prompt = get_system_prompt(bypass_approval, plan_mode)
-    if workspace_scope:
-        system_prompt += (
-            f"\n\n## 作業ディレクトリ制限\n"
-            f"現在のセッションの作業スコープは **workspace/{workspace_scope}/** です。\n"
-            f"- ユーザーが指定したパスは**絶対に書き換えず**そのまま使うこと。パスの変換・リダイレクト禁止。\n"
-            f"- スコープ外のパスを操作しようとするとツールがエラーを返すので、そのエラー内容をユーザーに伝えること。\n"
-            f"- **copy_file / move_file の src・dst は常に workspace/ ルート相対パスで指定する**\n"
-            f"  例: src=\"{workspace_scope}/file.txt\", dst=\"OTHER/file.txt\" （スコープをまたぐコピー/移動OK）\n"
-            f"  NG例: dst=\"{workspace_scope}/OTHER/file.txt\" （スコープ名を二重に付けてはいけない）\n"
-            f"- run_command の work_dir は workspace/{workspace_scope}/ 以下を使うこと"
-        )
+    is_local = _provider_config["type"] not in ("azure", "foundry", "gemini", "groq", "openrouter")
+    tools_enabled = _provider_config.get("tools_enabled", not is_local)
+
+    if tools_enabled:
+        # 自動コンテキスト収集（Claude Code方式: git status/diff/log をユーザーメッセージ先頭に注入）
+        auto_ctx = _gather_auto_context(workspace_scope)
+        if auto_ctx:
+            if isinstance(user_content, list):
+                user_content = [{"type": "text", "text": auto_ctx}] + user_content
+            else:
+                user_content = f"{auto_ctx}\n\n{user_content}"
+        system_prompt = get_system_prompt(bypass_approval, plan_mode)
+        if workspace_scope:
+            system_prompt += (
+                f"\n\n## 作業ディレクトリ制限\n"
+                f"現在のセッションの作業スコープは **workspace/{workspace_scope}/** です。\n"
+                f"- ユーザーが指定したパスは**絶対に書き換えず**そのまま使うこと。パスの変換・リダイレクト禁止。\n"
+                f"- スコープ外のパスを操作しようとするとツールがエラーを返すので、そのエラー内容をユーザーに伝えること。\n"
+                f"- **copy_file / move_file の src・dst は常に workspace/ ルート相対パスで指定する**\n"
+                f"  例: src=\"{workspace_scope}/file.txt\", dst=\"OTHER/file.txt\" （スコープをまたぐコピー/移動OK）\n"
+                f"  NG例: dst=\"{workspace_scope}/OTHER/file.txt\" （スコープ名を二重に付けてはいけない）\n"
+                f"- run_command の work_dir は workspace/{workspace_scope}/ 以下を使うこと"
+            )
+    else:
+        # チャット専用モード（ツール無効）: 軽量プロンプト。自律エージェント用の長大な
+        # 行動原則・ツール説明・git自動コンテキストを送らないことでトークンを大幅削減する
+        # （Groq 無料枠など TPM 上限の厳しいプロバイダーでも会話できるように）。
+        system_prompt = get_chat_system_prompt()
     if "5.4-mini" in _provider_config.get("model", ""):
         system_prompt += "\n\n絶対に同じ文章・段落を繰り返すな。一度出力した内容は再出力禁止。"
     messages = [{"role": "system", "content": system_prompt}] + trimmed + [{"role": "user", "content": user_content}]
@@ -2324,9 +2381,6 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     # サマリー圧縮が発生した場合はクライアントに通知（localStorage 更新のため）
     if compressed_history is not None:
         yield f"data: {json.dumps({'type': 'history_compressed', 'messages': compressed_history})}\n\n"
-
-    is_local = _provider_config["type"] not in ("azure", "foundry", "gemini")
-    tools_enabled = _provider_config.get("tools_enabled", not is_local)
 
     # 自律ループ上限: 通常60、bypass（非同期/マルチAI経由）は確認UIを出せないため120固定
     max_iterations = 120 if bypass_approval else 60
@@ -2349,6 +2403,13 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         create_kwargs["stream_options"] = {"include_usage": True}
         if _provider_config.get("model", "") == "gpt-5-mini":
             create_kwargs["reasoning_effort"] = "low"
+        # OpenRouter: 最速の提供元（Cerebras→Groq）を優先指定。指定がないと
+        # 遅い/混雑した提供元に回されることがあるため。allow_fallbacks=True で
+        # 指定先が不可のときは他社へ自動フォールバックする（停止しない）。
+        if _provider_config["type"] == "openrouter":
+            create_kwargs["extra_body"] = {
+                "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": True}
+            }
         stream = await _make_async_client().chat.completions.create(**create_kwargs)
 
         content_parts = []
@@ -3776,6 +3837,10 @@ async def providers_deployments():
         deployments = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
     elif _provider_config["type"] == "openai":
         deployments = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
+    elif _provider_config["type"] == "groq":
+        deployments = GROQ_MODELS or _GROQ_DEFAULT_MODELS
+    elif _provider_config["type"] == "openrouter":
+        deployments = OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS
     else:
         deployments = AZURE_OPENAI_DEPLOYMENTS
     return JSONResponse({
@@ -3799,6 +3864,10 @@ async def providers_set_deployment(req: DeploymentRequest):
         allowed = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
     elif _provider_config["type"] == "openai":
         allowed = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
+    elif _provider_config["type"] == "groq":
+        allowed = GROQ_MODELS or _GROQ_DEFAULT_MODELS
+    elif _provider_config["type"] == "openrouter":
+        allowed = OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS
     else:
         allowed = AZURE_OPENAI_DEPLOYMENTS
     if req.model not in allowed:
@@ -3823,6 +3892,17 @@ async def providers_snapshot():
         for k in list(_provider_snapshots)[:-50]:
             _provider_snapshots.pop(k, None)
     return JSONResponse({"token": token})
+
+
+@app.post("/providers/tools")
+async def providers_set_tools(body: dict):
+    """現在アクティブなプロバイダーの tools_enabled だけを切り替えて保存する。
+    プリセット系（Azure/Gemini/Groq等）でもツールON/OFFを永続化できるようにする。"""
+    global _provider_config
+    enabled = bool(body.get("enabled", True))
+    _provider_config = {**_provider_config, "tools_enabled": enabled}
+    _save_provider_config(_provider_config)
+    return JSONResponse({"status": "ok", "tools_enabled": enabled})
 
 
 @app.post("/providers/restore")
@@ -3906,6 +3986,10 @@ async def providers_presets():
         "gemini_models": GEMINI_MODELS or _GEMINI_DEFAULT_MODELS,
         "openai": bool(OPENAI_API_KEY),
         "openai_models": OPENAI_MODELS or _OPENAI_DEFAULT_MODELS,
+        "groq": bool(GROQ_API_KEY),
+        "groq_models": GROQ_MODELS or _GROQ_DEFAULT_MODELS,
+        "openrouter": bool(OPENROUTER_API_KEY),
+        "openrouter_models": OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS,
     })
 
 
@@ -3955,6 +4039,34 @@ async def providers_set_preset(req: PresetRequest):
             "name": "OpenAI",
             "url": "https://api.openai.com/v1",
             "api_key": OPENAI_API_KEY,
+            "model": default_model,
+            "api_version": "",
+            "tools_enabled": True,
+        }
+    elif req.preset == "groq":
+        if not GROQ_API_KEY:
+            return JSONResponse({"error": ".env に GROQ_API_KEY が未設定です"}, status_code=400)
+        default_model = (GROQ_MODELS[0] if GROQ_MODELS else _GROQ_DEFAULT_MODELS[0])
+        _provider_config = {
+            "type": "groq",
+            "preset_id": "groq",
+            "name": "Groq",
+            "url": "https://api.groq.com/openai/v1",
+            "api_key": GROQ_API_KEY,
+            "model": default_model,
+            "api_version": "",
+            "tools_enabled": True,
+        }
+    elif req.preset == "openrouter":
+        if not OPENROUTER_API_KEY:
+            return JSONResponse({"error": ".env に OPENROUTER_API_KEY が未設定です"}, status_code=400)
+        default_model = (OPENROUTER_MODELS[0] if OPENROUTER_MODELS else _OPENROUTER_DEFAULT_MODELS[0])
+        _provider_config = {
+            "type": "openrouter",
+            "preset_id": "openrouter",
+            "name": "OpenRouter",
+            "url": "https://openrouter.ai/api/v1",
+            "api_key": OPENROUTER_API_KEY,
             "model": default_model,
             "api_version": "",
             "tools_enabled": True,
@@ -4069,6 +4181,18 @@ def _make_async_client_for(preset_id: str):
             api_key=OPENAI_API_KEY,
             http_client=httpx.AsyncClient(trust_env=False),
         )
+    if preset_id == "groq":
+        return AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_API_KEY,
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    if preset_id == "openrouter":
+        return AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
     # フォールバック: 現在のアクティブプロバイダー
     return _make_async_client()
 
@@ -4085,6 +4209,10 @@ async def ma_providers():
         providers.append({"preset_id": "gemini", "name": "Google Gemini", "models": list(GEMINI_MODELS or _GEMINI_DEFAULT_MODELS)})
     if OPENAI_API_KEY:
         providers.append({"preset_id": "openai", "name": "OpenAI", "models": list(OPENAI_MODELS or _OPENAI_DEFAULT_MODELS)})
+    if GROQ_API_KEY:
+        providers.append({"preset_id": "groq", "name": "Groq", "models": list(GROQ_MODELS or _GROQ_DEFAULT_MODELS)})
+    if OPENROUTER_API_KEY:
+        providers.append({"preset_id": "openrouter", "name": "OpenRouter", "models": list(OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS)})
     return JSONResponse({"providers": providers})
 
 
@@ -4102,6 +4230,10 @@ async def rerun_models():
         name_by_preset["gemini"] = "Google Gemini"
     if OPENAI_API_KEY:
         name_by_preset["openai"] = "OpenAI"
+    if GROQ_API_KEY:
+        name_by_preset["groq"] = "Groq"
+    if OPENROUTER_API_KEY:
+        name_by_preset["openrouter"] = "OpenRouter"
 
     items, seen = [], set()
     if _MA_CONFIG_FILE.exists():
@@ -4123,6 +4255,10 @@ async def rerun_models():
             deps = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
         elif _provider_config["type"] == "openai":
             deps = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
+        elif _provider_config["type"] == "groq":
+            deps = GROQ_MODELS or _GROQ_DEFAULT_MODELS
+        elif _provider_config["type"] == "openrouter":
+            deps = OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS
         elif _provider_config["type"] == "azure":
             deps = AZURE_OPENAI_DEPLOYMENTS
         else:
@@ -5270,6 +5406,26 @@ async def setup_current():
             "models":      raw.get("OPENAI_MODELS", ""),
         })
 
+    # Groq
+    if raw.get("GROQ_API_KEY"):
+        providers.append({
+            "type":        "groq",
+            "api_key":     mask(raw.get("GROQ_API_KEY", "")),
+            "api_key_set": bool(raw.get("GROQ_API_KEY")),
+            "model":       raw.get("GROQ_MODELS", "").split(",")[0].strip() if raw.get("GROQ_MODELS") else "",
+            "models":      raw.get("GROQ_MODELS", ""),
+        })
+
+    # OpenRouter
+    if raw.get("OPENROUTER_API_KEY"):
+        providers.append({
+            "type":        "openrouter",
+            "api_key":     mask(raw.get("OPENROUTER_API_KEY", "")),
+            "api_key_set": bool(raw.get("OPENROUTER_API_KEY")),
+            "model":       raw.get("OPENROUTER_MODELS", "").split(",")[0].strip() if raw.get("OPENROUTER_MODELS") else "",
+            "models":      raw.get("OPENROUTER_MODELS", ""),
+        })
+
     return JSONResponse({
         "providers": providers,
         "agent": {
@@ -5426,6 +5582,43 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
             data = resp.json()
             models = sorted([m["id"] for m in data.get("data", []) if "gpt" in m["id"] or m["id"].startswith("o")])
 
+        elif type == "groq":
+            api_key = raw.get("GROQ_API_KEY", "")
+            if not api_key:
+                return JSONResponse({"error": "GROQ_API_KEY が未設定です"}, status_code=400)
+            resp = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # whisper / TTS / guard 等の非チャットモデルを除外
+            _exclude = ("whisper", "tts", "guard", "distil-whisper", "playai")
+            models = sorted([
+                m["id"] for m in data.get("data", [])
+                if not any(x in m["id"].lower() for x in _exclude)
+            ])
+
+        elif type == "openrouter":
+            api_key = raw.get("OPENROUTER_API_KEY", "")
+            if not api_key:
+                return JSONResponse({"error": "OPENROUTER_API_KEY が未設定です"}, status_code=400)
+            resp = requests.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10,
+                proxies={"http": None, "https": None},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # 300+モデルあるため、無料モデル（:free）を先頭にまとめて見やすくする
+            ids = [m["id"] for m in data.get("data", [])]
+            free = sorted([m for m in ids if m.endswith(":free")])
+            paid = sorted([m for m in ids if not m.endswith(":free")])
+            models = free + paid
+
         else:
             return JSONResponse({"error": f"未対応のtype: {type}"}, status_code=400)
 
@@ -5469,7 +5662,7 @@ async def setup_save(req: SetupSaveRequest):
     # existing_lines に集め、最後に必ず書き戻す。
     existing_lines = []
     known_prefixes = (
-        "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "OPENAI_", "AGENT_NAME", "ALLOWED_WORK_DIR",
+        "AZURE_OPENAI_", "FOUNDRY", "GEMINI_", "OPENAI_", "GROQ_", "OPENROUTER_", "AGENT_NAME", "ALLOWED_WORK_DIR",
         "COMMAND_TIMEOUT_SECONDS", "GITLAB_", "SEARXNG_", "TAVILY_", "RESPONSES_API_",
         "RAG_ENABLED", "RAG_EMBED_",
         "IMAGE_",
@@ -5560,6 +5753,36 @@ async def setup_save(req: SetupSaveRequest):
                 f"OPENAI_API_KEY={api_key_val(prov.get('api_key',''), 'OPENAI_API_KEY')}",
                 f"OPENAI_MODEL={sel_model}",
                 f"OPENAI_MODELS={models_str}",
+                "",
+            ]
+        elif ptype == "groq":
+            sel_model = prov.get('model', '')
+            models_str = prov.get('models', '')
+            if sel_model and models_str:
+                parts = [m.strip() for m in models_str.split(',') if m.strip()]
+                ordered = [sel_model] + [m for m in parts if m != sel_model]
+                models_str = ','.join(ordered)
+            elif sel_model:
+                models_str = sel_model
+            lines += [
+                "# Groq (OpenAI互換・無料枠あり)",
+                f"GROQ_API_KEY={api_key_val(prov.get('api_key',''), 'GROQ_API_KEY')}",
+                f"GROQ_MODELS={models_str}",
+                "",
+            ]
+        elif ptype == "openrouter":
+            sel_model = prov.get('model', '')
+            models_str = prov.get('models', '')
+            if sel_model and models_str:
+                parts = [m.strip() for m in models_str.split(',') if m.strip()]
+                ordered = [sel_model] + [m for m in parts if m != sel_model]
+                models_str = ','.join(ordered)
+            elif sel_model:
+                models_str = sel_model
+            lines += [
+                "# OpenRouter (OpenAI互換・モデル集約・無料モデルあり)",
+                f"OPENROUTER_API_KEY={api_key_val(prov.get('api_key',''), 'OPENROUTER_API_KEY')}",
+                f"OPENROUTER_MODELS={models_str}",
                 "",
             ]
 

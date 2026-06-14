@@ -935,6 +935,18 @@ def _make_async_client(provider_config: dict):
             api_key=provider_config["api_key"],
             http_client=httpx.AsyncClient(trust_env=False),
         )
+    elif ptype == "groq":
+        return AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=provider_config["api_key"],
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
+    elif ptype == "openrouter":
+        return AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=provider_config["api_key"],
+            http_client=httpx.AsyncClient(trust_env=False),
+        )
     else:
         return AsyncOpenAI(
             base_url=provider_config["url"].rstrip("/") + "/v1",
@@ -1124,7 +1136,7 @@ async def run_agent(
     messages.append({"role": "user", "content": user_content})
 
     tools_enabled = provider_config.get("tools_enabled", True)
-    is_local = provider_config.get("type") not in ("azure", "foundry", "gemini", "openai")
+    is_local = provider_config.get("type") not in ("azure", "foundry", "gemini", "openai", "groq", "openrouter")
     if is_local:
         tools_enabled = provider_config.get("tools_enabled", False)
 

@@ -195,6 +195,23 @@ def get_system_prompt(bypass_approval: bool = False, plan_mode: bool = False) ->
     claude_mds_section = _load_workspace_agent_mds()
     return _build_prompt(bypass_section, skills_section, claude_mds_section)
 
+
+def get_chat_system_prompt() -> str:
+    """ツール無効（チャット専用）モード用の軽量システムプロンプト。
+    ツール定義も自律エージェント用の長大な行動原則も送らないため、
+    トークン上限の厳しいプロバイダー（例: Groq 無料枠）でも会話できる。"""
+    name_line = (
+        f"あなたの名前は {AGENT_NAME} です。名前を聞かれたらこの名前を名乗ること。"
+        if AGENT_NAME else ""
+    )
+    return (
+        "必ず日本語で回答すること。\n"
+        f"あなたは熟練したシニアエンジニアとして振る舞う AI アシスタントです。{name_line}\n"
+        "現在はチャット専用モードのため、ファイル操作・コマンド実行・Web検索などのツールは使えません。"
+        "コードの相談・説明・レビュー・設計・質問への回答を、簡潔で実用的に行ってください。"
+        "コードを示すときは適切な言語のコードブロックを使うこと。"
+    )
+
 _RAG_SECTION_ENABLED = """## RAG知見データベース（rag_* ツール）
 
 成功実績・禁止事項・注意事例を ChromaDB に蓄積・検索するツールが使えます。

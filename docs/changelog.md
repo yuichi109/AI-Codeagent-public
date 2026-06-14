@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-06-14（セッション50）Groq / OpenRouter プロバイダー対応＋チャット専用軽量モード（v1.18.0）
+
+高速・低価格な推論サービス **Groq** と、300+モデル集約の **OpenRouter** を正式プロバイダーとして追加。いずれも OpenAI 互換APIなので、既存の `gemini`/`openai` プリセットと同じパターンで実装（クライアント生成・プリセット切替・モデル一覧・マルチAI・再実行・/setup 各APIを横展開）。
+
+### v1.18.0 主な変更
+
+- **新プロバイダー `groq`**（`config.py` `GROQ_API_KEY`/`GROQ_MODELS`、base_url=`https://api.groq.com/openai/v1`）。デフォルトモデルは全てツール対応（`openai/gpt-oss-120b` 他）。
+- **新プロバイダー `openrouter`**（`OPENROUTER_API_KEY`/`OPENROUTER_MODELS`、base_url=`https://openrouter.ai/api/v1`）。デフォルトは `openai/gpt-oss-120b:free` 先頭（無料モデル）。🔍モデル取得は `:free` を先頭に並べ替え。
+- **両プロバイダーをツール有効化対象に**: `is_local` 判定（server.py 2か所＋agent_core.py）に `groq`/`openrouter` を追加。`agent_core.py` の `_make_async_client` にも両分岐を追加（BG/定時タスク用・[[project_dual_tool_registry]] のとおり両方必要）。
+- **UI** (`index.html`/`setup.html`): プロバイダー切替・セットアップ種別に Groq / OpenRouter を追加。アイコン・`switchToGroqPreset`/`switchToOpenRouterPreset` 追加。setupカードに無料枠の説明・キー取得リンク（別タブ）・注意書きを表示。
+
+### ツールトグルの永続化（プリセット系でも効くように）
+
+「ツールを渡す（Function Calling）」のチェックがプリセット系（Azure/Gemini/Groq等）では戻ってしまう問題を修正。
+
+- **`POST /providers/tools`** を追加（`tools_enabled` だけを切替・保存）。チェックボックスに `onchange` を付け即サーバー反映。プロバイダーごとに選択を localStorage に記憶し、切替時に再適用（プリセット切替がサーバー側で `tools_enabled=True` 固定で書くのを上書き）。
+
+### チャット専用（ツールOFF）モードの軽量プロンプト
+
+ツールOFF時でも巨大なシステムプロンプト（SYSTEM_PROMPT 約29,500文字）が送られ、Groq無料枠の 8,000 TPM を超えて 413 エラーになる問題を修正。
+
+- **`prompts.get_chat_system_prompt()`**（216文字）を追加。`server.py` で `tools_enabled` を先に判定し、OFF時はこの軽量プロンプトに差し替え＋git自動コンテキスト注入もスキップ。送信トークンが 〜27k → 〜数百に激減し、無料枠でも会話可能に。
+
+### OpenRouter プロバイダールーティング
+
+- OpenRouter 使用時、リクエストに `extra_body={"provider":{"order":["Cerebras","Groq"],"allow_fallbacks":True}}` を付与（server.py チャット経路）。最速の提供元（Cerebras→Groq）優先＋フォールバック有効。**Groq Dev枠が受付停止中でも OpenRouter経由でGroq/Cerebrasの速度が使える**回避策。
+
+### setup.html の小修正
+
+- `addModelOption`: 既存モデル名を「＋」で追加したとき黙って入力を消すのではなく、その選択肢を選択状態にする。
+
+### 残課題・次回への申し送り
+
+- **OpenRouterのプロバイダー順（Cerebras→Groq）は server.py に直書き**。設定で切替可能にするか要検討（ユーザーは「直書きで問題ないか」を気にしていた）。Groq先頭にする選択肢も保留中。
+- BG/定時タスク（agent_core.py）側にはまだ provider routing 未適用（チャット経路のみ）。必要なら追加。
+- ユーザーの体感速度では OpenRouter 有料版でも「はっきり速いと分からない」状態。Cerebras固定の効果は次回要確認。
+
+---
+
 ## 2026-06-12（セッション49）定時スケジューラに曜日指定を追加（v1.17.0）
 
 「毎日実行で曜日を指定したい（土日は実行不要）」という要望に対応。**新しい繰り返し種別を増やさず**、既存の `daily`（毎日）に「実行する曜日」フィルタ `days_of_week` を足す方式にした（後方互換）。

@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-06-15（セッション51）OpenRouter モデル間フォールバック機能（v1.19.0）⚠️テスト未完了
+
+OpenRouter の「メインが失敗/レート制限時に別モデルへ自動切替する」フォールバック（`models` 配列＋`route:"fallback"`）を実装。無料モデルが頻繁に 429（共有プール混雑）になる問題を、別モデルへ逃がして吸収するのが狙い。**実装は完了しているが総合テストは未完了。次回セッションで検証必須**。
+
+### v1.19.0 主な変更
+
+- **設定**: `config.py` に `OPENROUTER_FALLBACK_MODELS`（カンマ区切り）を追加。`server.py` の `.env` 書き出し・`/setup/current` 読み戻しにも対応。
+- **セットアップUI** (`setup.html`): OpenRouter カードに「フォールバックモデル（最大2つ）」チェックボックス群を追加。スクロール枠（max-height 150px・2列グリッド）＋絞り込み検索（`filterFallback`）＋最大2つ制限（`limitFallback`）。`getCardData` にチェックボックスのカンマ連結処理を追加。
+- **runtime フォールバック** (`server.py` チャット経路 ＋ `agent_core.py` BG/定時経路): `extra_body` に `{"models":[メイン,*フォールバック][:3], "route":"fallback"}` を付与。**OpenRouter は models 配列を合計3個までに制限**するため `[:3]` で切り詰め必須（超えると 400 `'models' array must have 3 items or fewer.`）。既存の `provider.order`（Cerebras→Groq）とは共存。
+- **応答モデルの可視化**: 実応答モデル（`chunk.model`）がメインと違えば、チャットに `🔀 フォールバック: xxx で応答` バッジを1回表示（`server.py` の `fallback_model` SSE ＋ `index.html` の `fallbackBadge()`）。`answer_done` も実応答モデル（`_turn_served`）＋ `requested` を送るよう変更。
+- **誤検知防止**: `_norm_or_model()` で日付スナップショット（`-YYYYMMDD`）と `:free` 等のタグを除いて比較。`deepseek/deepseek-v4-flash` → `...-20260423` のような同一モデルのエイリアス解決をフォールバックと誤表示しないように。
+- **履歴保持**: フォールバック情報を localStorage（`turnFallbacks`）＋セッション保存（`turn_fallbacks`・`SessionSaveRequest`）に永続化。リロード後も🔀バッジと実応答モデルラベルを復元（`loadHistory`／`_renderSessionContent` 両経路）。
+
+### 関連バグ修正（同セッション）
+
+- **再実行リストに現プロバイダーが出ない**（`/rerun-models`）: マルチAI設定ファイルがあると割当モデルだけを返し、アクティブな OpenRouter が出ず再実行の既定が Azure になっていた。**現プロバイダーのモデルを常に先頭に含める**よう修正。ローカル/カスタム接続（モデル一覧が空）は従来通り何も足さない（再実行バー非表示を維持）。
+- **マルチターン/停止系の応答モデル誤帰属**: `_served_model` がリクエスト貼り付きだった問題を、ターン単位 `_turn_served` に変更。「同一操作10連続停止」「反復上限停止」の `answer_done` も実応答モデル＋requested を送るよう統一。
+
+### 残課題・次回への申し送り（重要）
+
+- **総合テスト未完了**。特に: ①フォールバック発火時のバッジ1回表示 ②リロード後の履歴保持 ③再実行ドロップダウン既定がOpenRouterになるか（要ハードリロード or 旧localStorage `rerun_model` が残っていると Azure のまま）。
+- **マルチエージェントモードには未適用**: フォールバック `extra_body` はメイン経路（`_agent_stream_inner`）のみ。multi_agent_stream には未配線。
+- **フォールバック対象は 429/5xx/拒否/コンテキスト超過のみ**。`gpt-oss-*` の harmony 由来「Unknown role: final」(4xx) や死んだモデルIDは退避せずエラー表示になる（OpenRouter仕様）。→ gpt-oss系はツールエージェントのメイン/フォールバックに入れない方針。
+- 無料運用の実測: 人気無料モデル（qwen3-coder:free・llama-3.3-70b:free）は時間帯により 429 頻発、gemma-4-31b-it:free は比較的空いていた（変動するので🔍同期推奨）。
+
+---
+
 ## 2026-06-14（セッション50）Groq / OpenRouter プロバイダー対応＋チャット専用軽量モード（v1.18.0）
 
 高速・低価格な推論サービス **Groq** と、300+モデル集約の **OpenRouter** を正式プロバイダーとして追加。いずれも OpenAI 互換APIなので、既存の `gemini`/`openai` プリセットと同じパターンで実装（クライアント生成・プリセット切替・モデル一覧・マルチAI・再実行・/setup 各APIを横展開）。

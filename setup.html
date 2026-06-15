@@ -759,6 +759,44 @@ function modelSelectBlock(selectName, current, list, addHint='') {
     ${addHint ? `<span class="hint">${addHint}</span>` : ''}`;
 }
 
+// フォールバックモデル選択UI（候補をチェックボックスで複数選択）
+function fallbackCheckboxes(name, candidatesCsv, selectedCsv) {
+  const cand = (candidatesCsv||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const sel  = new Set((selectedCsv||'').split(',').map(s=>s.trim()).filter(Boolean));
+  // 選択済みだが候補に無いモデルも表示対象に含める
+  sel.forEach(m => { if (!cand.includes(m)) cand.push(m); });
+  if (!cand.length) return `<span class="hint">先に上の使用モデルを取得すると候補が出ます</span>`;
+  return cand.map(m =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:normal;cursor:pointer;padding:2px 0;min-width:0">
+      <input type="checkbox" name="${name}" value="${esc(m)}"${sel.has(m)?' checked':''} onchange="limitFallback(this)" style="width:auto;margin:0;flex:none">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m)}</span>
+    </label>`
+  ).join('');
+}
+
+// フォールバックは最大2つまで（OpenRouter は models 配列がメイン含め合計3個まで）
+function limitFallback(cb) {
+  if (!cb.checked) return;
+  const box = cb.closest('.fb-box');
+  if (!box) return;
+  const checked = box.querySelectorAll('input[type=checkbox]:checked');
+  if (checked.length > 2) {
+    cb.checked = false;
+    alert('フォールバックは最大2つまでです（メイン＋フォールバックでOpenRouterの上限3モデル）。');
+  }
+}
+
+// フォールバック候補の絞り込み（入力文字を含むモデルだけ表示）
+function filterFallback(input) {
+  const q = input.value.trim().toLowerCase();
+  const box = input.parentElement.querySelector('.fb-box');
+  if (!box) return;
+  box.querySelectorAll('label').forEach(lb => {
+    const txt = (lb.querySelector('span')?.textContent || '').toLowerCase();
+    lb.style.display = (!q || txt.includes(q)) ? '' : 'none';
+  });
+}
+
 function renderFields(type, data = {}) {
   const hint = data.api_key_set ? '現在: 設定済み' : '未設定';
   const keyPlaceholder = data.api_key_set ? '' : '（未設定）';
@@ -864,8 +902,16 @@ function renderFields(type, data = {}) {
         有料モデル（例 gpt-oss-120b $0.039/$0.18・Groqより安い）は前払いクレジット制で、<a href="https://openrouter.ai/settings/credits" target="_blank" rel="noopener" style="color:#89b4fa">$5〜チャージ</a>すると使えます（購入時5.5%手数料）。</span>
     </div>
     <div class="field">
-      <label>使用モデル</label>
+      <label>使用モデル（メイン）</label>
       ${modelSelectBlock('model', data.model||data.models?.split(',')[0], data.models || 'openai/gpt-oss-120b:free,openai/gpt-oss-120b,openai/gpt-oss-20b:free,meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-chat-v3-0324:free,qwen/qwen3-32b', '🔍 で利用可能モデルを取得（:free が無料モデル）')}
+    </div>
+    <div class="field">
+      <label>フォールバックモデル（任意・最大2つ）</label>
+      <input type="text" class="fb-filter" oninput="filterFallback(this)" placeholder="🔍 絞り込み（例: free, llama, deepseek）" style="margin-bottom:5px;background:#313244;border:1px solid #45475a;border-radius:6px;color:#cdd6f4;padding:6px 10px;font-size:13px;outline:none">
+      <div class="fb-box" style="max-height:150px;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:0 14px;background:#181825;border:1px solid #45475a;border-radius:6px;padding:6px 10px">
+        ${fallbackCheckboxes('fallback_models', data.models || 'openai/gpt-oss-120b:free,openai/gpt-oss-20b:free,meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-chat-v3-0324:free', data.fallback_models)}
+      </div>
+      <span class="hint">メインが失敗・レート制限のとき、チェックしたモデルへ上から順に自動切替（無料運用なら :free を選択）。OpenRouterの上限によりメイン＋フォールバックで最大3モデルのため、フォールバックは最大2つまで。別モデルで応答したらチャット画面に通知されます。</span>
     </div>`;
 
   return '';
@@ -915,6 +961,12 @@ function getCardData(card) {
   const type = card.querySelector('.provider-type-select').value;
   const data = { type };
   card.querySelectorAll('.provider-fields [name]').forEach(el => {
+    if (el.type === 'checkbox') {
+      // 同名チェックボックス群（例 fallback_models）をカンマ連結
+      if (el.checked) data[el.name] = data[el.name] ? data[el.name] + ',' + el.value : el.value;
+      else if (!(el.name in data)) data[el.name] = '';
+      return;
+    }
     if (el.classList.contains('model-select')) {
       // 選択値 = デフォルト、全オプション = 一覧（選択値を先頭に）
       data[el.name] = el.value;

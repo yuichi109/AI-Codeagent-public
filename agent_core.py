@@ -28,6 +28,7 @@ from config import (
     FOUNDRY_API_VERSION,
     VERIFY_ON_WRITE_ENABLED,
     ASYNC_MAX_TURNS,
+    OPENROUTER_FALLBACK_MODELS,
 )
 from tools.verify_tools import augment_tool_result_with_verify
 from prompts import get_system_prompt
@@ -1153,6 +1154,15 @@ async def run_agent(
         if tools_enabled:
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
+
+        # OpenRouter: メインが失敗/レート制限時に別モデルへ自動フォールバック。
+        # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
+        if provider_config.get("type") == "openrouter" and OPENROUTER_FALLBACK_MODELS:
+            _main = provider_config.get("model", "")
+            create_kwargs["extra_body"] = {
+                "models": ([_main] + [m for m in OPENROUTER_FALLBACK_MODELS if m != _main])[:3],
+                "route": "fallback",
+            }
 
         try:
             stream = await client.chat.completions.create(**create_kwargs)

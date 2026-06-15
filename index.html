@@ -2608,6 +2608,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           session_id: sessionId,
           history,
           turn_models: turns.map(t => t.modelName || null),
+          turn_fallbacks: turns.map(t => t.fallbackFrom || null),
         }),
       });
     } catch(e) { console.warn('session save failed:', e); }
@@ -2619,10 +2620,19 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         history,
         turnModels: turns.map(t => t.modelName || null),
+        turnFallbacks: turns.map(t => t.fallbackFrom || null),
         saved: new Date().toISOString(),
       }));
     } catch(e) { console.warn('localStorage 保存失敗:', e); }
     autoSaveSession();
+  }
+
+  // OpenRouter フォールバックバッジ（ライブ表示・履歴復元で共用）
+  function fallbackBadge(served, requested) {
+    const fb = document.createElement('div');
+    fb.style.cssText = 'margin:6px 0;font-size:11px;color:var(--peach,#fab387);background:var(--surface0,#313244);border:1px solid var(--surface1,#45475a);border-radius:6px;padding:4px 8px;display:inline-block;';
+    fb.textContent = `🔀 フォールバック: ${served} で応答（指定: ${requested}）`;
+    return fb;
   }
 
   function loadHistory() {
@@ -2633,6 +2643,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       if (!Array.isArray(data.history) || data.history.length === 0) return;
       history = data.history;
       const savedModels = Array.isArray(data.turnModels) ? data.turnModels : [];
+      const savedFallbacks = Array.isArray(data.turnFallbacks) ? data.turnFallbacks : [];
       // UI再構築: user を起点に、次の user までの間で最後の assistant(content付き) を探す
       // ツール呼び出しがあると [user, assistant(tool_calls), tool, ..., assistant(最終)] になるため
       // i += 2 のペア方式では最終回答が取れない
@@ -2666,8 +2677,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           j++;
         }
         const modelName = savedModels[turnIdx] || null;
+        const fallbackFrom = savedFallbacks[turnIdx] || null;
         const turnEl = createTurnEl();
         appendMsg(turnEl, 'user', u.content);
+        if (fallbackFrom && modelName) turnEl.appendChild(fallbackBadge(modelName, fallbackFrom));
         _restoreToolBlocks(turnEl, history, i + 1, j);
         if (aiText) {
           const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
@@ -2675,7 +2688,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
           }
         }
-        turns.push({ el: turnEl, userText: u.content, aiText, modelName });
+        turns.push({ el: turnEl, userText: u.content, aiText, modelName, fallbackFrom });
         _attachRerunBar(turnEl, u.content);
         turnIdx++;
         i = j;
@@ -3051,6 +3064,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     tokenSession = { prompt: 0, completion: 0, total: 0 };
     chat.innerHTML = '';
     const savedModels = Array.isArray(data.turn_models) ? data.turn_models : [];
+    const savedFallbacks = Array.isArray(data.turn_fallbacks) ? data.turn_fallbacks : [];
     let i = 0, turnIdx = 0;
     while (i < history.length) {
       const u = history[i];
@@ -3072,14 +3086,16 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         j++;
       }
       const modelName = savedModels[turnIdx] || null;
+      const fallbackFrom = savedFallbacks[turnIdx] || null;
       const turnEl = createTurnEl();
       appendMsg(turnEl, 'user', u.content);
+      if (fallbackFrom && modelName) turnEl.appendChild(fallbackBadge(modelName, fallbackFrom));
       _restoreToolBlocks(turnEl, data.history, i + 1, j);
       if (aiText) {
         const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
         if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
       }
-      turns.push({ el: turnEl, userText: u.content, aiText, modelName });
+      turns.push({ el: turnEl, userText: u.content, aiText, modelName, fallbackFrom });
       _attachRerunBar(turnEl, u.content);
       turnIdx++;
       i = j;
@@ -4729,6 +4745,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     let finalAnswer = '';
     let turnMessages = [];  // tool含む完全なメッセージリスト
     let currentModelName = null;
+    let currentFallbackFrom = null;  // フォールバック発動時の「指定モデル」（履歴保存用）
     let pendingAnsibleChooser = null;
 
     // API履歴は最新 MAX_API_MESSAGES 件のみ送信（BG結果エントリは除外）
@@ -4915,6 +4932,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             pendingAnsibleChooser = { playbooks: data.playbooks, credsExists: data.creds_exists, credsFilled: data.creds_filled };
           } else if (data.type === 'mermaid_batch_refine') {
             showMermaidBatchModal(data.file_path, data.workspace_scope, data.blocks, data.count);
+          } else if (data.type === 'fallback_model') {
+            // OpenRouter フォールバック発動: 別モデルが応答したことを通知＋履歴に残す
+            currentFallbackFrom = data.requested;
+            turnEl.appendChild(fallbackBadge(data.model, data.requested));
           } else if (data.type === 'image_generated') {
             const imgWrap = document.createElement('div');
             imgWrap.style.cssText = 'margin: 8px 0 4px 0;';
@@ -5025,9 +5046,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             if (!_maPendingJobId) _updatePlanConfirmUI(false);
             // 読み上げ
             ttsSpeak(finalAnswer);
-            // モデル名をラベルに表示
+            // モデル名をラベルに表示（data.model は実際に応答したモデル）
             if (data.model) {
               currentModelName = data.model;
+              if (data.requested && data.requested !== data.model) currentFallbackFrom = data.requested;
               if (aiMsg?._labelEl) aiMsg._labelEl.textContent = `${_rerunProviderName || _currentProviderName} (${data.model})`;
             }
             // ツールグループを折りたたみ、サマリーを完了表示に更新
@@ -5073,7 +5095,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     } else {
       history.push({ role: 'assistant', content: finalAnswer });
     }
-    turns.push({ el: turnEl, userText: text, aiText: finalAnswer, modelName: currentModelName });
+    turns.push({ el: turnEl, userText: text, aiText: finalAnswer, modelName: currentModelName, fallbackFrom: currentFallbackFrom });
     _attachRerunBar(turnEl, text);
 
     foldOldTurns();

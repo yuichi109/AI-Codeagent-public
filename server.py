@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 
-from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, GROQ_API_KEY, GROQ_MODELS, OPENROUTER_API_KEY, OPENROUTER_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION, ASYNC_MAX_JOBS
+from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, GROQ_API_KEY, GROQ_MODELS, OPENROUTER_API_KEY, OPENROUTER_MODELS, OPENROUTER_FALLBACK_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION, ASYNC_MAX_JOBS
 from tools.async_job_db import init_db as _init_async_db, create_job as _create_async_job, get_job as _get_async_job, get_chunks as _get_async_chunks, list_jobs as _list_async_jobs, update_job as _update_async_job, delete_job as _delete_async_job
 from tools.inbox_worker import start_worker, stop_worker, get_status as inbox_get_status, scan_inbox as inbox_scan_now, ensure_inbox_dirs, get_stale_drafts
 from prompts import get_system_prompt, get_chat_system_prompt
@@ -63,6 +63,17 @@ _OPENROUTER_DEFAULT_MODELS = [
     "deepseek/deepseek-chat-v3-0324:free",
     "qwen/qwen3-32b",
 ]
+
+
+def _norm_or_model(mid: str) -> str:
+    """OpenRouter モデルIDを正規化（フォールバック誤検知防止用）。
+    日付スナップショット（-YYYYMMDD）と :free 等のバリアントタグを除いた基底IDを返す。
+    例: deepseek/deepseek-v4-flash-20260423 → deepseek/deepseek-v4-flash
+        google/gemma-4-31b-it-20260402:free → google/gemma-4-31b-it"""
+    import re as _re
+    base = (mid or "").split(":", 1)[0]            # :free / :nitro 等のタグを除去
+    base = _re.sub(r"-\d{8}$", "", base)            # 末尾の -YYYYMMDD 日付を除去
+    return base
 from tools.file_tools import read_file, write_file, edit_file, copy_file, move_file, delete_file, list_files, glob_files, grep
 from tools.command_tools import run_command, BLOCKED_COMMANDS, LONG_RUNNING_CMDS, _split_shell_chain, _truncate_output, _run_bash_sandboxed, _is_permission_error
 from tools.web_tools import web_search, web_fetch, web_research
@@ -2389,6 +2400,9 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
     _last_call_sig = None
     _repeat_count = 0
     _spinning = False
+    # OpenRouter フォールバック追跡（バッジ通知はリクエストで1回・実応答モデルはターン毎に記録）
+    _served_notified = False
+    _turn_served = _provider_config.get("model", "")   # 直近ターンの実応答モデル（answer_done 用）
     while iteration < max_iterations:
         iteration += 1
         # ローカルモデルは role:tool を Jinja テンプレートで処理できない場合があるため変換
@@ -2407,15 +2421,33 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         # 遅い/混雑した提供元に回されることがあるため。allow_fallbacks=True で
         # 指定先が不可のときは他社へ自動フォールバックする（停止しない）。
         if _provider_config["type"] == "openrouter":
-            create_kwargs["extra_body"] = {
+            _extra = {
                 "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": True}
             }
+            # モデル間フォールバック: メインが失敗/レート制限時に順に別モデルへ。
+            # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
+            if OPENROUTER_FALLBACK_MODELS:
+                _main = _provider_config.get("model", "")
+                _extra["models"] = ([_main] + [m for m in OPENROUTER_FALLBACK_MODELS if m != _main])[:3]
+                _extra["route"] = "fallback"
+            create_kwargs["extra_body"] = _extra
         stream = await _make_async_client().chat.completions.create(**create_kwargs)
 
         content_parts = []
         tool_calls_map = {}  # index -> {id, name, arguments}
+        _turn_served = _provider_config.get("model", "")  # このターンの実応答モデル（既定=指定モデル）
 
         async for chunk in stream:
+            # OpenRouter フォールバック検知（別モデルが応答したら記録＋1回だけ通知）
+            if _provider_config["type"] == "openrouter":
+                _served = getattr(chunk, "model", "") or ""
+                _main = _provider_config.get("model", "")
+                # 同一モデルの日付スナップショット等は正規化して比較し、誤検知を防ぐ
+                if _served and _main and _norm_or_model(_served) != _norm_or_model(_main):
+                    _turn_served = _served
+                    if not _served_notified:
+                        _served_notified = True
+                        yield f"data: {json.dumps({'type': 'fallback_model', 'model': _served, 'requested': _main})}\n\n"
             # トークン使用量（最終chunk）
             if chunk.usage:
                 yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens})}\n\n"
@@ -2452,7 +2484,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             final_answer = "".join(content_parts)
             turn_messages.append({"role": "assistant", "content": final_answer})
             yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
-            yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done', 'model': _turn_served, 'requested': _provider_config['model']})}\n\n"
             if _notify_on_done:
                 send_email_notification("✅ エージェント処理完了", final_answer[:500])
             break
@@ -3027,7 +3059,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             turn_messages.append({"role": "assistant", "content": msg})
             yield f"data: {json.dumps({'type': 'answer_chunk', 'content': msg})}\n\n"
             yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
-            yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done', 'model': _turn_served, 'requested': _provider_config['model']})}\n\n"
             break
 
         # 上限到達 → 延長確認（bypass時は確認UIを出せないため上限でそのまま打ち止め）
@@ -3059,7 +3091,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         turn_messages.append({"role": "assistant", "content": msg})
         yield f"data: {json.dumps({'type': 'answer_chunk', 'content': msg})}\n\n"
         yield f"data: {json.dumps({'type': 'history_messages', 'messages': turn_messages})}\n\n"
-        yield f"data: {json.dumps({'type': 'answer_done', 'model': _provider_config['model']})}\n\n"
+        yield f"data: {json.dumps({'type': 'answer_done', 'model': _turn_served, 'requested': _provider_config['model']})}\n\n"
 
 
 @app.post("/chat")
@@ -4236,35 +4268,47 @@ async def rerun_models():
         name_by_preset["openrouter"] = "OpenRouter"
 
     items, seen = [], set()
-    if _MA_CONFIG_FILE.exists():
-        # マルチAI設定の割当モデルだけ（横断・重複排除）
-        for _role, rc in _load_ma_config().items():
-            pid, model = rc.get("preset_id"), rc.get("model")
-            if not pid or not model or (pid, model) in seen:
-                continue
-            seen.add((pid, model))
-            items.append({"preset_id": pid, "provider": name_by_preset.get(pid, pid), "model": model})
+
+    def _add(pid, provider, model):
+        if not pid or not model or (pid, model) in seen:
+            return
+        seen.add((pid, model))
+        items.append({"preset_id": pid, "provider": provider, "model": model})
+
+    # 現在アクティブなプロバイダーのモデル一覧（再実行候補に必ず含める）。
+    # マルチAI設定の有無に関わらず先頭に置き、既定選択が実プロバイダーと一致するようにする。
+    cur_pid = _provider_config.get("preset_id", _provider_config["type"])
+    cur_name = _provider_config.get("name") or name_by_preset.get(cur_pid, cur_pid)
+    if _provider_config["type"] == "foundry":
+        inst = _active_foundry_instance()
+        cur_deps = inst["models"] if inst else FOUNDRY_MODELS
+    elif _provider_config["type"] == "gemini":
+        cur_deps = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
+    elif _provider_config["type"] == "openai":
+        cur_deps = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
+    elif _provider_config["type"] == "groq":
+        cur_deps = GROQ_MODELS or _GROQ_DEFAULT_MODELS
+    elif _provider_config["type"] == "openrouter":
+        cur_deps = OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS
+    elif _provider_config["type"] == "azure":
+        cur_deps = AZURE_OPENAI_DEPLOYMENTS
     else:
-        # フォールバック: 現在プロバイダーのモデル一覧
-        cur_pid = _provider_config.get("preset_id", _provider_config["type"])
-        cur_name = _provider_config.get("name") or name_by_preset.get(cur_pid, cur_pid)
-        if _provider_config["type"] == "foundry":
-            inst = _active_foundry_instance()
-            deps = inst["models"] if inst else FOUNDRY_MODELS
-        elif _provider_config["type"] == "gemini":
-            deps = GEMINI_MODELS or _GEMINI_DEFAULT_MODELS
-        elif _provider_config["type"] == "openai":
-            deps = OPENAI_MODELS or _OPENAI_DEFAULT_MODELS
-        elif _provider_config["type"] == "groq":
-            deps = GROQ_MODELS or _GROQ_DEFAULT_MODELS
-        elif _provider_config["type"] == "openrouter":
-            deps = OPENROUTER_MODELS or _OPENROUTER_DEFAULT_MODELS
-        elif _provider_config["type"] == "azure":
-            deps = AZURE_OPENAI_DEPLOYMENTS
-        else:
-            deps = []   # ローカル/カスタム接続は preset 切替不可なので対象外
-        for m in deps:
-            items.append({"preset_id": cur_pid, "provider": cur_name, "model": m})
+        cur_deps = []   # ローカル/カスタム接続は preset 切替不可なので対象外
+    # アクティブモデルを先頭へ（再実行の既定 = 今の構成になるように）。
+    # cur_deps が空（ローカル/カスタム接続）の場合は preset 切替不可なので何も足さない。
+    active_model = _provider_config.get("model", "")
+    cur_deps = list(cur_deps)
+    if active_model and cur_deps:
+        cur_deps = [active_model] + [m for m in cur_deps if m != active_model]
+    for m in cur_deps:
+        _add(cur_pid, cur_name, m)
+
+    # マルチAI設定があれば、その割当モデルも横断候補として追加（重複排除）
+    if _MA_CONFIG_FILE.exists():
+        for _role, rc in _load_ma_config().items():
+            pid = rc.get("preset_id")
+            _add(pid, name_by_preset.get(pid, pid), rc.get("model"))
+
     return JSONResponse({"models": items})
 
 
@@ -4954,6 +4998,7 @@ class SessionSaveRequest(BaseModel):
     session_id: str
     history: list
     turn_models: list = []
+    turn_fallbacks: list = []
 
 
 class CompactRequest(BaseModel):
@@ -5158,6 +5203,7 @@ async def save_session(req: SessionSaveRequest):
         "updated_at": now,
         "history": req.history,
         "turn_models": req.turn_models,
+        "turn_fallbacks": req.turn_fallbacks,
     }
     session_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     _archive_old_sessions()
@@ -5424,6 +5470,7 @@ async def setup_current():
             "api_key_set": bool(raw.get("OPENROUTER_API_KEY")),
             "model":       raw.get("OPENROUTER_MODELS", "").split(",")[0].strip() if raw.get("OPENROUTER_MODELS") else "",
             "models":      raw.get("OPENROUTER_MODELS", ""),
+            "fallback_models": raw.get("OPENROUTER_FALLBACK_MODELS", ""),
         })
 
     return JSONResponse({
@@ -5779,10 +5826,13 @@ async def setup_save(req: SetupSaveRequest):
                 models_str = ','.join(ordered)
             elif sel_model:
                 models_str = sel_model
+            fb_raw = prov.get('fallback_models', '')
+            fb_str = ','.join(m.strip() for m in fb_raw.split(',') if m.strip()) if fb_raw else ''
             lines += [
                 "# OpenRouter (OpenAI互換・モデル集約・無料モデルあり)",
                 f"OPENROUTER_API_KEY={api_key_val(prov.get('api_key',''), 'OPENROUTER_API_KEY')}",
                 f"OPENROUTER_MODELS={models_str}",
+                f"OPENROUTER_FALLBACK_MODELS={fb_str}",
                 "",
             ]
 

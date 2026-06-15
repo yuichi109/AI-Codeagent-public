@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.18.0"
+APP_VERSION = "1.19.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -170,6 +170,13 @@ _openrouter_models_raw = os.getenv("OPENROUTER_MODELS", "")
 OPENROUTER_MODELS: list[str] = (
     [m.strip() for m in _openrouter_models_raw.split(",") if m.strip()]
     if _openrouter_models_raw else []
+)
+# OpenRouter フォールバックモデル（省略可・メインが失敗/レート制限時に順に試す）
+# 設定すると extra_body に {"models": [メイン, *これ], "route": "fallback"} を渡す。
+_openrouter_fallback_raw = os.getenv("OPENROUTER_FALLBACK_MODELS", "")
+OPENROUTER_FALLBACK_MODELS: list[str] = (
+    [m.strip() for m in _openrouter_fallback_raw.split(",") if m.strip()]
+    if _openrouter_fallback_raw else []
 )
 
 # GitLab 連携 (省略可)

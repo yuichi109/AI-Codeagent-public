@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-06-16（セッション52）推論エフォート制御＋フォールバック復元バグ修正（v1.20.0）
+
+v1.19.0 のフォールバック機能を **Chrome 実機で総合テスト（4項目すべて合格）**。その過程で見つけた復元バグの修正と、推論の深さ（reasoning effort）制御を追加。
+
+### v1.19.0 フォールバックの総合テスト結果（合格）
+
+- ①フォールバック発火時の `🔀` バッジ1回表示 ✅（qwen3-coder:free→deepseek-v4-flash の429フォールバックを実機発火）
+- ②リロード/セッション復元後のバッジ＋実応答モデル名保持 ✅（ただし下記プロバイダーラベル化けを発見→修正）
+- ③再実行ドロップダウン既定が OpenRouter ✅（optgroup 先頭=現アクティブ。旧 localStorage `agentRerunModel` が Azure 残存時のみ要クリア）
+- ④セットアップでフォールバック3つ目チェック不可（最大2つ）✅（alert 表示・`[:3]` 上限と整合）
+
+### バグ修正: 履歴復元時のプロバイダーラベル化け
+
+- **現象**: リロード/復元すると応答ヘッダーのプロバイダー名が実際の応答元（例 OPENROUTER）ではなく既定の「AZURE OPENAI」になる（モデル名・🔀バッジは正しい）。
+- **原因**: ターン単位でモデル名（`turnModels`）とフォールバック（`turnFallbacks`）は保存していたが**プロバイダー名は未保存**で、復元時にグローバル `_currentProviderName`（初期値 'Azure OpenAI'・loadHistory はプロバイダー状態の非同期取得より前に走る）を流用していた。
+- **修正**: `turnModels` と完全に並行する `turnProviders`/`turn_providers` を追加。`index.html` のライブ push（応答時の `_rerunProviderName || _currentProviderName` を保持）・保存2経路（autoSaveSession・saveHistory）・復元2経路（loadHistory・_renderSessionContent）に配線。`server.py` の `SessionSaveRequest` ＋ 保存 dict にも追加。レガシー履歴（修正前保存）は移行不可で Azure 表示のまま。
+
+### 新機能: 推論の深さ（reasoning effort）low/medium/high
+
+- **対話**: プロバイダー設定パネルに「推論の深さ」セレクタ（既定 Medium・localStorage `reasoningEffort`）。`/chat` ボディ → `agent_stream`/`_agent_stream_inner` に `reasoning_effort` を配線。
+- **適用は安全ゲート**: OpenRouter は `extra_body.reasoning.effort`（非対応モデルは OpenRouter 側で無視）。Azure/Foundry/OpenAI は `gpt-5` 系・`o1/o3/o4` 系のみ `reasoning_effort` を付与（gpt-4.1 等の非推論モデルに送ると 400 になるため）。旧 `gpt-5-mini` 固定 "low" はトグル値に統一。
+- **「省略=medium」ではない**ため、既定 medium を明示送信して挙動を決定的にした（deepseek は省略時に非推論で走る）。
+- **BG/定時タスク**: UI が無いため `config.py` の `REASONING_EFFORT_BG`（`.env`・low/medium/high 検証・既定 medium）を全体既定として `agent_core.py run_agent` で参照。`/setup` の「エージェント設定」に専用セレクタを追加（`/setup/current` の `agent.reasoning_effort_bg` ＋ `setup_save` で `.env` 書出）。BG ジョブ実機で done/正答＋保存→.env 書込（非破壊・追加1行のみ）→再起動で config 反映を確認。
+
+### 注意
+
+- **index.html はキャッシュバスターが無い**ため、JS 更新後は**ハードリロード（Ctrl+Shift+R）が必要**（通常リロードだと旧 JS キャッシュでハマる）。
+- ライブ応答のプロバイダーラベルは `_currentProviderName` 依存で、起動直後（`/providers/current` の非同期取得が解決する前）に送信すると一瞬 'Azure OpenAI' になりうる。通常操作では問題なし。
+
+---
+
 ## 2026-06-15（セッション51）OpenRouter モデル間フォールバック機能（v1.19.0）⚠️テスト未完了
 
 OpenRouter の「メインが失敗/レート制限時に別モデルへ自動切替する」フォールバック（`models` 配列＋`route:"fallback"`）を実装。無料モデルが頻繁に 429（共有プール混雑）になる問題を、別モデルへ逃がして吸収するのが狙い。**実装は完了しているが総合テストは未完了。次回セッションで検証必須**。

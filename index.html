@@ -955,6 +955,14 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     <label class="pv-check">
       <input type="checkbox" id="pv-no-think" onchange="saveNoThink()"> /no_think をプロンプトに付加
     </label>
+    <label class="pv-check" style="gap:6px">
+      推論の深さ
+      <select id="pv-reasoning-effort" onchange="saveReasoningEffort()" class="pv-input" style="width:auto;padding:2px 6px">
+        <option value="low">Low（速い・安い）</option>
+        <option value="medium" selected>Medium（既定）</option>
+        <option value="high">High（深い・高コスト）</option>
+      </select>
+    </label>
     <label class="pv-check">
       <input type="checkbox" id="pv-reset-history"> 切り替え時に履歴をリセット
     </label>
@@ -1990,6 +1998,18 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     document.getElementById('pv-no-think').checked = isNoThinkActive();
   }
 
+  // ---- 推論の深さ（reasoning effort: low/medium/high・既定 medium） ----
+  function getReasoningEffort() {
+    return localStorage.getItem('reasoningEffort') || 'medium';
+  }
+  function saveReasoningEffort() {
+    localStorage.setItem('reasoningEffort', document.getElementById('pv-reasoning-effort').value);
+  }
+  function loadReasoningEffort() {
+    const el = document.getElementById('pv-reasoning-effort');
+    if (el) el.value = getReasoningEffort();
+  }
+
   // ---- 実行モード（許可を確認 / プランモード / 自動） ----
   // 旧 bypassApproval キーから移行（true→auto）
   function getMode() {
@@ -2046,6 +2066,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   updateModeSelect();
   _initDropdown('mode-dd', (v) => setMode(v));
   loadNoThink();
+  loadReasoningEffort();
 
   // ---- マルチエージェント: 計画確認待ち状態 ----
   let _maPendingJobId = '';
@@ -2609,6 +2630,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           history,
           turn_models: turns.map(t => t.modelName || null),
           turn_fallbacks: turns.map(t => t.fallbackFrom || null),
+          turn_providers: turns.map(t => t.providerName || null),
         }),
       });
     } catch(e) { console.warn('session save failed:', e); }
@@ -2621,6 +2643,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         history,
         turnModels: turns.map(t => t.modelName || null),
         turnFallbacks: turns.map(t => t.fallbackFrom || null),
+        turnProviders: turns.map(t => t.providerName || null),
         saved: new Date().toISOString(),
       }));
     } catch(e) { console.warn('localStorage 保存失敗:', e); }
@@ -2644,6 +2667,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       history = data.history;
       const savedModels = Array.isArray(data.turnModels) ? data.turnModels : [];
       const savedFallbacks = Array.isArray(data.turnFallbacks) ? data.turnFallbacks : [];
+      const savedProviders = Array.isArray(data.turnProviders) ? data.turnProviders : [];
       // UI再構築: user を起点に、次の user までの間で最後の assistant(content付き) を探す
       // ツール呼び出しがあると [user, assistant(tool_calls), tool, ..., assistant(最終)] になるため
       // i += 2 のペア方式では最終回答が取れない
@@ -2678,6 +2702,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         }
         const modelName = savedModels[turnIdx] || null;
         const fallbackFrom = savedFallbacks[turnIdx] || null;
+        const providerName = savedProviders[turnIdx] || _currentProviderName;
         const turnEl = createTurnEl();
         appendMsg(turnEl, 'user', u.content);
         if (fallbackFrom && modelName) turnEl.appendChild(fallbackBadge(modelName, fallbackFrom));
@@ -2685,10 +2710,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         if (aiText) {
           const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
           if (modelName && aiMsgEl._labelEl) {
-            aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
+            aiMsgEl._labelEl.textContent = `${providerName} (${modelName})`;
           }
         }
-        turns.push({ el: turnEl, userText: u.content, aiText, modelName, fallbackFrom });
+        turns.push({ el: turnEl, userText: u.content, aiText, modelName, fallbackFrom, providerName });
         _attachRerunBar(turnEl, u.content);
         turnIdx++;
         i = j;
@@ -3065,6 +3090,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     chat.innerHTML = '';
     const savedModels = Array.isArray(data.turn_models) ? data.turn_models : [];
     const savedFallbacks = Array.isArray(data.turn_fallbacks) ? data.turn_fallbacks : [];
+    const savedProviders = Array.isArray(data.turn_providers) ? data.turn_providers : [];
     let i = 0, turnIdx = 0;
     while (i < history.length) {
       const u = history[i];
@@ -3087,15 +3113,16 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       }
       const modelName = savedModels[turnIdx] || null;
       const fallbackFrom = savedFallbacks[turnIdx] || null;
+      const providerName = savedProviders[turnIdx] || _currentProviderName;
       const turnEl = createTurnEl();
       appendMsg(turnEl, 'user', u.content);
       if (fallbackFrom && modelName) turnEl.appendChild(fallbackBadge(modelName, fallbackFrom));
       _restoreToolBlocks(turnEl, data.history, i + 1, j);
       if (aiText) {
         const aiMsgEl = appendMsg(turnEl, 'ai', stripThink(aiText));
-        if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${_currentProviderName} (${modelName})`;
+        if (modelName && aiMsgEl._labelEl) aiMsgEl._labelEl.textContent = `${providerName} (${modelName})`;
       }
-      turns.push({ el: turnEl, userText: u.content, aiText, modelName, fallbackFrom });
+      turns.push({ el: turnEl, userText: u.content, aiText, modelName, fallbackFrom, providerName });
       _attachRerunBar(turnEl, u.content);
       turnIdx++;
       i = j;
@@ -4765,6 +4792,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           mode: getMode(),
           bypass_approval: isBypassActive(),
           no_think: isNoThinkActive(),
+          reasoning_effort: getReasoningEffort(),
           workspace_scope: currentWorkspaceScope,
           multi_agent: isMultiAgentActive(),
           agent_mode: getAgentMode(),
@@ -5095,7 +5123,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     } else {
       history.push({ role: 'assistant', content: finalAnswer });
     }
-    turns.push({ el: turnEl, userText: text, aiText: finalAnswer, modelName: currentModelName, fallbackFrom: currentFallbackFrom });
+    turns.push({ el: turnEl, userText: text, aiText: finalAnswer, modelName: currentModelName, fallbackFrom: currentFallbackFrom, providerName: (_rerunProviderName || _currentProviderName) });
     _attachRerunBar(turnEl, text);
 
     foldOldTurns();

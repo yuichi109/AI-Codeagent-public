@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.19.0"
+APP_VERSION = "1.20.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -76,6 +76,11 @@ if OBSIDIAN_VAULT_PATH:
         ALLOWED_WORK_DIRS.append(_vault_path)
 
 COMMAND_TIMEOUT_SECONDS: int = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "30"))
+
+# BG/定時タスクの推論エフォート（low/medium/high）。対話は UI トグルで都度指定するが、
+# BG/定時は UI がないためここで全体既定を決める（既定 medium）。
+_eff_bg = os.getenv("REASONING_EFFORT_BG", "medium").strip().lower()
+REASONING_EFFORT_BG: str = _eff_bg if _eff_bg in ("low", "medium", "high") else "medium"
 
 # ---- サーバーポート（単一ソース）----
 # WSL版=systemd の ExecStart / Windows版=tray.py が参照する唯一の定義。

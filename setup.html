@@ -123,6 +123,15 @@
           <label>コマンドタイムアウト（秒）</label>
           <input id="agent-timeout" type="number" placeholder="30" min="5" max="300">
         </div>
+        <div class="field">
+          <label>BG・定時タスクの推論の深さ</label>
+          <select id="agent-reasoning-bg">
+            <option value="low">Low（速い・安い）</option>
+            <option value="medium" selected>Medium（既定）</option>
+            <option value="high">High（深い・高コスト）</option>
+          </select>
+          <div style="margin-top:4px;font-size:11px;color:#a6adc8;">対話の深さはチャット画面のトグルで都度指定。これは UI を持たない BG／定時タスク全体の既定です（推論対応モデルのみ反映）。</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1152,6 +1161,7 @@ async function loadConfig() {
     document.getElementById('agent-name').value    = d.agent.name;
     document.getElementById('agent-workdir').value  = d.agent.workdir;
     document.getElementById('agent-timeout').value  = d.agent.timeout;
+    document.getElementById('agent-reasoning-bg').value = d.agent.reasoning_effort_bg || 'medium';
 
     // GitLab
     document.getElementById('gl-user').value  = d.gitlab.user;
@@ -1283,6 +1293,7 @@ async function saveConfig() {
       name:    document.getElementById('agent-name').value,
       workdir: document.getElementById('agent-workdir').value,
       timeout: document.getElementById('agent-timeout').value,
+      reasoning_effort_bg: document.getElementById('agent-reasoning-bg').value,
     },
     gitlab: {
       user:  document.getElementById('gl-user').value,

@@ -1923,6 +1923,7 @@ class ChatRequest(BaseModel):
     bypass_approval: bool = False
     mode: str = "confirm"  # "confirm"（許可を確認）| "plan"（プランモード=読み取り専用）| "auto"（自動=承認バイパス）
     no_think: bool = False
+    reasoning_effort: str = "medium"  # "low" | "medium" | "high"（推論モデルのみ反映）
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
@@ -2069,9 +2070,9 @@ def _gather_auto_context(workspace_scope: str = "") -> str:
     return "<auto_context>\n" + "\n\n".join(parts) + "\n</auto_context>"
 
 
-async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False):
+async def agent_stream(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False, reasoning_effort: str = "medium"):
     try:
-        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think, workspace_scope, plan_mode):
+        async for chunk in _agent_stream_inner(user_message, history, images or [], bypass_approval, no_think, workspace_scope, plan_mode, reasoning_effort):
             yield chunk
     except Exception as e:
         import traceback
@@ -2318,7 +2319,7 @@ def _sanitize_history(history: list) -> list:
 
 _NOTIFY_KEYWORDS = ["メールして", "メールで教えて", "メールで知らせて", "メールで報告", "メールで通知", "終わったら知らせて", "終わったら教えて", "完了したらメール", "通知して"]
 
-async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False):
+async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False, reasoning_effort: str = "medium"):
     _notify_on_done = any(kw in user_message for kw in _NOTIFY_KEYWORDS)
     trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
     trimmed = _sanitize_history(trimmed)
@@ -2415,14 +2416,23 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
         create_kwargs["stream_options"] = {"include_usage": True}
-        if _provider_config.get("model", "") == "gpt-5-mini":
-            create_kwargs["reasoning_effort"] = "low"
+        # 推論エフォート（思考の深さ）: UI トグル low/medium/high を反映。
+        # reasoning 非対応モデルに送ると 400 になるため、対応モデルのみに適用する。
+        # - Azure/Foundry/OpenAI: gpt-5 系・o系（o1/o3/o4）のみ reasoning_effort を付与。
+        # - OpenRouter: extra_body.reasoning で渡す（非対応モデルは OpenRouter 側で無視される）。
+        _eff = reasoning_effort if reasoning_effort in ("low", "medium", "high") else "medium"
+        _model_lc = (_provider_config.get("model", "") or "").lower()
+        if _provider_config["type"] in ("azure", "foundry", "openai") and (
+            "gpt-5" in _model_lc or _model_lc.startswith(("o1", "o3", "o4"))
+        ):
+            create_kwargs["reasoning_effort"] = _eff
         # OpenRouter: 最速の提供元（Cerebras→Groq）を優先指定。指定がないと
         # 遅い/混雑した提供元に回されることがあるため。allow_fallbacks=True で
         # 指定先が不可のときは他社へ自動フォールバックする（停止しない）。
         if _provider_config["type"] == "openrouter":
             _extra = {
-                "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": True}
+                "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": True},
+                "reasoning": {"effort": _eff},
             }
             # モデル間フォールバック: メインが失敗/レート制限時に順に別モデルへ。
             # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
@@ -3102,7 +3112,7 @@ async def chat(req: ChatRequest):
         # mode を優先解釈（後方互換: 旧 bypass_approval フラグも auto 扱いで尊重）
         plan_mode = (req.mode == "plan")
         bypass = (req.mode == "auto") or req.bypass_approval
-        stream = agent_stream(req.message, req.history, req.images, bypass, req.no_think, req.workspace_scope, plan_mode)
+        stream = agent_stream(req.message, req.history, req.images, bypass, req.no_think, req.workspace_scope, plan_mode, req.reasoning_effort)
     return StreamingResponse(stream, media_type="text/event-stream")
 
 
@@ -4999,6 +5009,7 @@ class SessionSaveRequest(BaseModel):
     history: list
     turn_models: list = []
     turn_fallbacks: list = []
+    turn_providers: list = []
 
 
 class CompactRequest(BaseModel):
@@ -5204,6 +5215,7 @@ async def save_session(req: SessionSaveRequest):
         "history": req.history,
         "turn_models": req.turn_models,
         "turn_fallbacks": req.turn_fallbacks,
+        "turn_providers": req.turn_providers,
     }
     session_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     _archive_old_sessions()
@@ -5479,6 +5491,7 @@ async def setup_current():
             "name":    raw.get("AGENT_NAME", ""),
             "workdir": raw.get("ALLOWED_WORK_DIR", "./workspace"),
             "timeout": raw.get("COMMAND_TIMEOUT_SECONDS", "30"),
+            "reasoning_effort_bg": raw.get("REASONING_EFFORT_BG", "medium"),
         },
         "gitlab": {
             "user":    raw.get("GITLAB_USER", ""),
@@ -5843,6 +5856,7 @@ async def setup_save(req: SetupSaveRequest):
         f"AGENT_NAME={ag.get('name','')}",
         f"ALLOWED_WORK_DIR={ag.get('workdir','./workspace')}",
         f"COMMAND_TIMEOUT_SECONDS={ag.get('timeout','30')}",
+        f"REASONING_EFFORT_BG={ag.get('reasoning_effort_bg','medium')}",
         "",
     ]
 

@@ -29,6 +29,7 @@ from config import (
     VERIFY_ON_WRITE_ENABLED,
     ASYNC_MAX_TURNS,
     OPENROUTER_FALLBACK_MODELS,
+    REASONING_EFFORT_BG,
 )
 from tools.verify_tools import augment_tool_result_with_verify
 from prompts import get_system_prompt
@@ -1155,14 +1156,25 @@ async def run_agent(
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
 
+        # 推論エフォート（思考の深さ）: BG/定時は UI がないため .env の REASONING_EFFORT_BG で全体既定を決める（既定 medium）。
+        # reasoning 非対応モデルに送ると 400 になるため、対応モデルのみに適用する。
+        _eff = REASONING_EFFORT_BG
+        _model_lc = (provider_config.get("model", "") or "").lower()
+        if provider_config.get("type") in ("azure", "foundry", "openai") and (
+            "gpt-5" in _model_lc or _model_lc.startswith(("o1", "o3", "o4"))
+        ):
+            create_kwargs["reasoning_effort"] = _eff
+
         # OpenRouter: メインが失敗/レート制限時に別モデルへ自動フォールバック。
         # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
-        if provider_config.get("type") == "openrouter" and OPENROUTER_FALLBACK_MODELS:
+        # reasoning は対応モデルのみ OR 側で効き、非対応なら無視される。
+        if provider_config.get("type") == "openrouter":
             _main = provider_config.get("model", "")
-            create_kwargs["extra_body"] = {
-                "models": ([_main] + [m for m in OPENROUTER_FALLBACK_MODELS if m != _main])[:3],
-                "route": "fallback",
-            }
+            _extra = {"reasoning": {"effort": _eff}}
+            if OPENROUTER_FALLBACK_MODELS:
+                _extra["models"] = ([_main] + [m for m in OPENROUTER_FALLBACK_MODELS if m != _main])[:3]
+                _extra["route"] = "fallback"
+            create_kwargs["extra_body"] = _extra
 
         try:
             stream = await client.chat.completions.create(**create_kwargs)

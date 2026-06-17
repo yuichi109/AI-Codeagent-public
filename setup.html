@@ -1140,6 +1140,13 @@ async function fetchModelsBtn(btn) {
       if (!sel.value && data.models.length) sel.value = data.models[0];
     }
 
+    // フォールバックのチェックボックス候補も更新（既チェック分を保持）
+    const fbBox = card.querySelector('.fb-box');
+    if (fbBox) {
+      const checked = new Set([...fbBox.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value));
+      fbBox.innerHTML = fallbackCheckboxes('fallback_models', data.models.join(','), [...checked].join(','));
+    }
+
     btn.textContent = '✓';
   } catch(e) {
     btn.textContent = '✗';

@@ -43,6 +43,36 @@
 - 残ブランチ: **main / for_windows の 2 本のみ**（ローカル・全リモートで整合）
 - `git gc --prune=now` で不要オブジェクトも回収
 
+### Windows ログイン監視タスクの確立（定時スケジューラー活用）
+
+コード変更なし。既存ツール（`run_powershell` / `send_email` / スケジューラー）の組み合わせで実現。
+
+**要件**: ドメイン参加 Windows 11（iac-work / 10.49.89.36）に誰もログインしていない場合にメール通知。月〜金 8〜18 時の定時実行。
+
+**試行錯誤のまとめ**:
+- `qwinsta /server:IP` → Error 1707（IP指定不可・RPC要）
+- `Win32_ComputerSystem.UserName` → RDPセッションを拾えない
+- `Win32_LogonSession (LogonType 2/10)` → サインアウト後もゴーストセッションが残る
+- `Win32_TSSession` → クラスが存在しない環境
+- **`Win32_Process (explorer.exe)`** → ✅ **正解**。サインアウト済みなら空・ログイン中なら ProcessId と User が返る。コンソール・RDP 両対応
+
+**資格情報管理**:
+- Credential Manager の「Domain Password」型はパスワード読み出し不可
+- `cmdkey /generic:iac-work /user:spec-edu\administrator /pass:xxx` で Generic 型として登録し直すことで `Get-StoredCredential` での取得が可能に
+
+**確定したタスクプロンプト**:
+```
+Import-Module CredentialManager
+$cred = Get-StoredCredential -Target "iac-work"
+$result = Get-WmiObject -ComputerName 10.49.89.36 -Class Win32_Process -Credential $cred -Filter "Name='explorer.exe'"
+if ($result) { Write-Output "ログイン中" } else { Write-Output "誰もログインしていない" }
+結果が「誰もログインしていない」だったらメールで通知して。「ログイン中」なら何もしない。
+```
+
+スケジューラー登録・メール通知まで動作確認済み。
+
+---
+
 ### 発見: main と for_windows はコードが完全同一
 
 - 差分はドキュメントのみ（README.md / setup.md / changelog.md）

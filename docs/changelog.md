@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-06-17（セッション55）セットアップUI虫眼鏡・フォールバック修正・Xツイート投稿（v1.20.1）
+
+### セットアップUI: 保存前APIキー確認ボタン追加（#64）
+
+- `setup.html`: `apiKeyInput()` ヘルパー関数を追加
+  - APIキー入力欄を `<div>` でラップし、「🔍 確認」ボタンと結果スパンをインライン配置
+  - 全6プロバイダーのキー入力欄を `apiKeyInput()` に統一（`replace_all`）
+- `setup.html`: `verifyApiKey()` 非同期関数を追加
+  - `POST /setup/verify-key` を呼び出し、✅/❌ をボタン横に表示
+  - マスク済みキー（`***xxxx`）を受け取った場合は `.env` から実キーを解決してから検証
+- `server.py`: `VerifyKeyRequest` モデルと `POST /setup/verify-key` エンドポイントを追加
+  - 純粋な読み取り専用エンドポイント（`.env` 書き込みなし・キー削除リスクなし）
+  - Azure OpenAI / Azure Foundry: 401 → ❌、404 → ✅（認証OK・API非対応）、200 → ✅
+  - Gemini / OpenAI / Groq / OpenRouter: 各APIにリクエストして確認
+
+### OpenRouterフォールバック候補が🔍後に更新されない修正（#67）
+
+- `setup.html`: `fetchModelsBtn()` にフォールバックチェックボックス（`.fb-box`）更新処理を追加
+  - モデル一覧取得後、既存チェック状態を保持しつつ `.fb-box` を再生成
+  - 初回設定時にOpenRouterのフォールバック候補が表示されなかったバグを修正
+
+### GitLab Issue追加
+
+- **#66**: Azure OpenAI / Foundry を v1 API に移行（api-version 設定を全廃）
+  - 2025年8月 GA の v1 API 移行で `*_API_VERSION` 環境変数を全廃できる
+- **#67**: OpenRouter初回設定時フォールバック候補未表示バグ（上記修正でクローズ予定）
+
+### バージョン
+
+- `config.py`: `APP_VERSION = "1.20.1"`
+
+### X (Twitter) スレッド投稿
+
+- @yuichi109 にて GitHub 公開リポの紹介ツイートを2本投稿
+  - 1本目: 機能概要・マルチLLM・WSL版/Win版
+  - 2本目（スレッド返信）: インストール詳細（WSL版/Windows版の所要ディスク・依存パッケージ）
+
+---
+
 ## 2026-06-17（セッション54）GitHub公開・README刷新・ブランチ大掃除（コード変更なし）
 
 コード変更なし。公開インフラの整備・ドキュメント刷新・リポジトリ清掃を実施。

@@ -753,6 +753,15 @@ function buildModelOpts(current, list) {
   return opts.map(m => `<option value="${esc(m)}"${m===current?' selected':''}>${esc(m)}</option>`).join('');
 }
 
+// APIキー入力欄（input + 🔍確認ボタン + 結果表示）を生成
+function apiKeyInput(value, placeholder) {
+  return `<div style="display:flex;gap:6px;align-items:center">
+      <input type="text" name="api_key" value="${esc(value||'')}" placeholder="${esc(placeholder||'')}" style="flex:1">
+      <button type="button" class="fetch-models-btn" onclick="verifyApiKey(this)" title="保存前にAPIキーの疎通確認">🔍 確認</button>
+      <span class="verify-result" style="font-size:12px;white-space:nowrap"></span>
+    </div>`;
+}
+
 // モデル選択UI（select + 🔍 + 手動追加行）を生成
 function modelSelectBlock(selectName, current, list, addHint='') {
   const opts = buildModelOpts(current, list);
@@ -821,7 +830,7 @@ function renderFields(type, data = {}) {
     </div>
     <div class="field">
       <label>API キー</label>
-      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">${hint}</span>
     </div>
     <div class="row">
@@ -847,7 +856,7 @@ function renderFields(type, data = {}) {
     </div>
     <div class="field">
       <label>API キー</label>
-      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">${hint}</span>
     </div>
     <div class="row">
@@ -865,7 +874,7 @@ function renderFields(type, data = {}) {
   if (type === 'gemini') return `
     <div class="field">
       <label>API キー</label>
-      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">${hint}</span>
     </div>
     <div class="field">
@@ -876,7 +885,7 @@ function renderFields(type, data = {}) {
   if (type === 'openai') return `
     <div class="field">
       <label>API キー <span style="font-size:11px;color:#6c7086">（platform.openai.com/api-keys で取得）</span></label>
-      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">${hint}</span>
     </div>
     <div class="field">
@@ -887,7 +896,7 @@ function renderFields(type, data = {}) {
   if (type === 'groq') return `
     <div class="field">
       <label>API キー</label>
-      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">無料枠あり。Googleアカウントでサインアップでき、APIキーも無料で発行できます →
         <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color:#89b4fa">console.groq.com/keys でキーを取得</a></span>
     </div>
@@ -902,7 +911,7 @@ function renderFields(type, data = {}) {
   if (type === 'openrouter') return `
     <div class="field">
       <label>API キー</label>
-      <input type="text" name="api_key" value="${esc(data.api_key||'')}" placeholder="${keyPlaceholder}">
+      ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">無料モデルあり（カード不要）。Googleアカウントでサインアップでき、APIキーも無料で発行できます →
         <a href="https://openrouter.ai/keys" target="_blank" rel="noopener" style="color:#89b4fa">openrouter.ai/keys でキーを取得</a></span>
     </div>
@@ -1138,6 +1147,50 @@ async function fetchModelsBtn(btn) {
   } finally {
     btn.disabled = false;
     setTimeout(() => { btn.textContent = '🔍'; }, 2000);
+  }
+}
+
+async function verifyApiKey(btn) {
+  const card = btn.closest('.provider-card');
+  const type = card.querySelector('.provider-type-select').value;
+  const apiKey = card.querySelector('[name=api_key]').value.trim();
+  const endpoint = card.querySelector('[name=endpoint]')?.value.trim() || '';
+  const apiVersion = card.querySelector('[name=api_version]')?.value.trim() || '';
+  const resultEl = btn.nextElementSibling;
+
+  if (!apiKey) {
+    resultEl.textContent = '⚠ キーを入力してください';
+    resultEl.style.color = '#f9e2af';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  resultEl.textContent = '';
+
+  try {
+    const resp = await fetch('/setup/verify-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, api_key: apiKey, endpoint, api_version: apiVersion }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      resultEl.textContent = '✅ 有効';
+      resultEl.title = data.note || '';
+      resultEl.style.color = '#a6e3a1';
+    } else {
+      resultEl.textContent = '❌ 無効';
+      resultEl.title = data.error || '';
+      resultEl.style.color = '#f38ba8';
+    }
+  } catch (e) {
+    resultEl.textContent = '❌ エラー';
+    resultEl.title = e.message;
+    resultEl.style.color = '#f38ba8';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 確認';
   }
 }
 

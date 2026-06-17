@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-06-17（セッション54）GitHub公開・README刷新・ブランチ大掃除（コード変更なし）
+
+コード変更なし。公開インフラの整備・ドキュメント刷新・リポジトリ清掃を実施。
+
+### GitHub 公開リポジトリ設定
+
+- **`yuichi109/AI-Codeagent-public`** を GitHub に新規作成（Public）
+- ローカルに `github` リモートを追加（`git push github main for_windows` で即時 push 可能）
+- GitLab プッシュミラーに GitHub を追加（remote_mirror id 4060610）→ origin push だけで GitLab・GitHub 両方に自動反映
+- **発見: GitLab プッシュミラーはブランチ削除を GitHub に伝播しない**。ブランチ削除後は GitHub に直接 `git push github --delete <branch>` が必要（memory に記録済み）
+
+### README.md 全面刷新
+
+- デモ画像 3 枚を `docs/screenshots/` に追加・README 冒頭に配置
+  - `chat.png` — チャット＋Mermaid 自動清書
+  - `model.png` — 7プロバイダー切り替え＋設定パネル
+  - `editor.png` — Monaco エディタ＋ファイルツリー
+- 「チャットで指示するだけ」導入フック＋30年インフラエンジニア背景を追記
+- 「よくある AI チャット vs このエージェント」比較表を新設
+- 作り込んだポイント 8 項目（サンドボックス・3モード・別モデル再実行・スケジューラー・MCP・RAG・検証ループ・Windows操作）
+- 7プロバイダー一覧表（実コードで存在を検証済み）
+- clone URL を GitHub に更新・作者リンクに GitHub 追加
+
+### docs/setup.md 修正（公開リポジトリ向け）
+
+- 存在しないファイル名 `setup.bat` → `start.bat` に統一（6箇所）
+- clone URL を非公開 GitLab → GitHub 公開リポに変更（WSL/Windows 両方・HTTPS/SSH）
+- Windows Step 2 に Playwright セットアップ・タスクトレイ常駐の記述を追記（実挙動と整合）
+- 社内プロキシ `no_proxy` に `github.com` を追加
+
+### ブランチ・ワークツリー大掃除
+
+- `claude/*` ワークツリー 22 個を削除（git worktree remove --force）→ `.claude/worktrees` **353MB 解放**
+- `claude/*` ローカルブランチ 22 本を削除（全て `origin/main` に取り込み済み・独自コミット 0 件）
+- `feature/mcp-client` をローカル・origin・public・github から全削除（同じく取り込み済み）
+- 残ブランチ: **main / for_windows の 2 本のみ**（ローカル・全リモートで整合）
+- `git gc --prune=now` で不要オブジェクトも回収
+
+### 発見: main と for_windows はコードが完全同一
+
+- 差分はドキュメントのみ（README.md / setup.md / changelog.md）
+- `config.py` が `sys.platform == "win32"` でポートを自動切替（WSL=8000 / Windows=8001）
+- `start.bat` / `tray.py` は main にも存在する
+- Windows ユーザーは main をそのままダウンロードして `start.bat` を実行すれば動く（for_windows への切替は不要）
+- 現状は README が「for_windows に切り替えろ」と案内しているため不要な混乱を招いている → 次回 README を修正すれば解消（低リスク）
+
+---
+
 ## 2026-06-16（セッション53）issue整合・ドキュメント整理（コード変更なし）
 
 コード変更は一切なし。実コードを「正」として GitLab issue / roadmap / メモリの整合を取った。

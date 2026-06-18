@@ -379,10 +379,6 @@
         <div class="field">
           <label>API キー（画像生成専用）</label>
           <input id="img-azure-api-key" type="password" placeholder="（未設定）" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>API バージョン</label>
-          <input id="img-azure-api-version" type="text" placeholder="2025-04-01-preview">
           <span class="hint">画像生成専用のエンドポイントと API キーを指定します。Japan East は画像生成非対応のため、海外リージョンのエンドポイントを入力してください</span>
         </div>
       </div>
@@ -395,10 +391,6 @@
         <div class="field">
           <label>API キー（画像生成専用）</label>
           <input id="img-foundry-api-key" type="password" placeholder="（未設定）" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>API バージョン</label>
-          <input id="img-foundry-api-version" type="text" placeholder="2025-04-01-preview">
           <span class="hint">画像生成専用のエンドポイントと API キーを指定します。Japan East は画像生成非対応のため、海外リージョンのエンドポイントを入力してください</span>
         </div>
       </div>
@@ -833,16 +825,10 @@ function renderFields(type, data = {}) {
       ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">${hint}</span>
     </div>
-    <div class="row">
-      <div class="field">
-        <label>デプロイ名（カンマ区切りで複数可）</label>
-        <input type="text" name="deployments" value="${esc(data.deployments||data.deployment||'')}" placeholder="gpt-5-mini,gpt-4.1-mini">
-        <span class="hint">Azureポータルのデプロイ名を入力（例: gpt-5-mini）</span>
-      </div>
-      <div class="field">
-        <label>API バージョン</label>
-        <input type="text" name="api_version" value="${esc(data.api_version||'2025-01-01-preview')}" placeholder="2025-01-01-preview">
-      </div>
+    <div class="field">
+      <label>デプロイ名（カンマ区切りで複数可）</label>
+      <input type="text" name="deployments" value="${esc(data.deployments||data.deployment||'')}" placeholder="gpt-5-mini,gpt-4.1-mini">
+      <span class="hint">Azureポータルのデプロイ名を入力（例: gpt-5-mini）</span>
     </div>`;
 
   if (type === 'azure_foundry') return `
@@ -859,16 +845,10 @@ function renderFields(type, data = {}) {
       ${apiKeyInput(data.api_key, keyPlaceholder)}
       <span class="hint">${hint}</span>
     </div>
-    <div class="row">
-      <div class="field">
-        <label>使用モデル（カンマ区切りで複数可）</label>
-        <input type="text" name="models" value="${esc(data.models||data.model||'')}" placeholder="gpt-4.1-mini,gpt-5-mini">
-        <span class="hint">Azureポータルのデプロイ名を入力（例: gpt-4.1-mini）</span>
-      </div>
-      <div class="field">
-        <label>API バージョン</label>
-        <input type="text" name="api_version" value="${esc(data.api_version||'2024-12-01-preview')}" placeholder="2024-12-01-preview">
-      </div>
+    <div class="field">
+      <label>使用モデル（カンマ区切りで複数可）</label>
+      <input type="text" name="models" value="${esc(data.models||data.model||'')}" placeholder="gpt-4.1-mini,gpt-5-mini">
+      <span class="hint">Azureポータルのデプロイ名を入力（例: gpt-4.1-mini）</span>
     </div>`;
 
   if (type === 'gemini') return `
@@ -1305,9 +1285,7 @@ async function loadConfig() {
       setKey('img-azure-api-key',   ig.azure_api_key_set);
       setKey('img-foundry-api-key', ig.foundry_api_key_set);
       document.getElementById('img-azure-endpoint').value    = ig.azure_endpoint    || '';
-      document.getElementById('img-azure-api-version').value = ig.azure_api_version || '';
       document.getElementById('img-foundry-endpoint').value    = ig.foundry_endpoint    || '';
-      document.getElementById('img-foundry-api-version').value = ig.foundry_api_version || '';
       onImageInheritChange();
       // ウォーターマーク設定の復元
       document.getElementById('wm-enabled').checked = ig.watermark_enabled === 'true';
@@ -1403,10 +1381,8 @@ async function saveConfig() {
       gemini_api_key:    document.getElementById('img-gemini-api-key').value,
       azure_endpoint:    document.getElementById('img-azure-endpoint').value,
       azure_api_key:     document.getElementById('img-azure-api-key').value,
-      azure_api_version: document.getElementById('img-azure-api-version').value,
       foundry_endpoint:    document.getElementById('img-foundry-endpoint').value,
       foundry_api_key:     document.getElementById('img-foundry-api-key').value,
-      foundry_api_version: document.getElementById('img-foundry-api-version').value,
       watermark_enabled:   document.getElementById('wm-enabled').checked ? 'true' : 'false',
       watermark_text:      document.getElementById('wm-text').value || 'AI Generated',
       watermark_position:  document.getElementById('wm-position').value,

@@ -126,7 +126,7 @@ def _load_provider_config():
         try:
             saved = json.loads(_PROVIDER_CONFIG_FILE.read_text())
             # 必須キーが揃っているか確認
-            if all(k in saved for k in ("type", "url", "api_key", "model", "api_version")):
+            if all(k in saved for k in ("type", "url", "api_key", "model")):
                 # tools_enabled は旧ファイルにない場合でも補完（後方互換）
                 if "tools_enabled" not in saved:
                     saved["tools_enabled"] = saved["type"] == "azure"
@@ -153,10 +153,10 @@ def _make_client():
     if _provider_config["type"] == "gemini" and not _provider_config.get("api_key"):
         raise ValueError("Gemini APIキーが未設定です。/setup でセットアップを完了してください。")
     if _provider_config["type"] in ("azure", "foundry"):
-        return AzureOpenAI(
-            azure_endpoint=_provider_config["url"],
+        # v1 API（api-version 不要）: AzureOpenAI ではなく OpenAI + base_url で叩く（#66）
+        return OpenAI(
+            base_url=_provider_config["url"].rstrip("/") + "/openai/v1/",
             api_key=_provider_config["api_key"],
-            api_version=_provider_config["api_version"] or (FOUNDRY_API_VERSION if _provider_config["type"] == "foundry" else AZURE_OPENAI_API_VERSION),
             http_client=httpx.Client(trust_env=False),  # 社内プロキシをバイパス
         )
     elif _provider_config["type"] == "gemini":
@@ -199,10 +199,10 @@ def _make_async_client():
     if not _provider_config.get("url") and not _provider_config.get("api_key") and _provider_config["type"] in ("azure", "foundry"):
         raise ValueError("LLMプロバイダーが未設定です。")
     if _provider_config["type"] in ("azure", "foundry"):
-        return AsyncAzureOpenAI(
-            azure_endpoint=_provider_config["url"],
+        # v1 API（api-version 不要）: AsyncAzureOpenAI ではなく AsyncOpenAI + base_url で叩く（#66）
+        return AsyncOpenAI(
+            base_url=_provider_config["url"].rstrip("/") + "/openai/v1/",
             api_key=_provider_config["api_key"],
-            api_version=_provider_config["api_version"] or (FOUNDRY_API_VERSION if _provider_config["type"] == "foundry" else AZURE_OPENAI_API_VERSION),
             http_client=httpx.AsyncClient(trust_env=False),
         )
     elif _provider_config["type"] == "gemini":
@@ -4195,10 +4195,10 @@ def _save_ma_config(cfg: dict):
 def _make_async_client_for(preset_id: str):
     """任意のプロバイダーID から非同期クライアントを生成する"""
     if preset_id == "azure":
-        return AsyncAzureOpenAI(
-            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        # v1 API（api-version 不要）: OpenAI + base_url（#66）
+        return AsyncOpenAI(
+            base_url=AZURE_OPENAI_ENDPOINT.rstrip("/") + "/openai/v1/",
             api_key=AZURE_OPENAI_API_KEY,
-            api_version=AZURE_OPENAI_API_VERSION,
             http_client=httpx.AsyncClient(trust_env=False),
         )
     if preset_id.startswith("foundry"):
@@ -4206,10 +4206,10 @@ def _make_async_client_for(preset_id: str):
         if not inst and FOUNDRY_INSTANCES:
             inst = FOUNDRY_INSTANCES[0]
         if inst:
-            return AsyncAzureOpenAI(
-                azure_endpoint=inst["endpoint"],
+            # v1 API（api-version 不要）: OpenAI + base_url（#66）
+            return AsyncOpenAI(
+                base_url=inst["endpoint"].rstrip("/") + "/openai/v1/",
                 api_key=inst["api_key"],
-                api_version=inst["api_version"],
                 http_client=httpx.AsyncClient(trust_env=False),
             )
     if preset_id == "gemini":
@@ -5535,10 +5535,8 @@ async def setup_current():
             "gemini_api_key_set":   bool(raw.get("IMAGE_GEMINI_API_KEY")),
             "azure_endpoint":       raw.get("IMAGE_AZURE_ENDPOINT", ""),
             "azure_api_key_set":    bool(raw.get("IMAGE_AZURE_API_KEY")),
-            "azure_api_version":    raw.get("IMAGE_AZURE_API_VERSION", ""),
             "foundry_endpoint":     raw.get("IMAGE_FOUNDRY_ENDPOINT", ""),
             "foundry_api_key_set":  bool(raw.get("IMAGE_FOUNDRY_API_KEY")),
-            "foundry_api_version":  raw.get("IMAGE_FOUNDRY_API_VERSION", ""),
             "watermark_enabled":   raw.get("WATERMARK_ENABLED", "false"),
             "watermark_text":      raw.get("WATERMARK_TEXT", "AI Generated"),
             "watermark_position":  raw.get("WATERMARK_POSITION", "bottomright"),
@@ -5689,6 +5687,140 @@ async def setup_fetch_models(type: str, endpoint: str = ""):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+class VerifyKeyRequest(BaseModel):
+    type: str
+    api_key: str
+    endpoint: str = ""
+    api_version: str = ""
+
+@app.post("/setup/verify-key")
+async def setup_verify_key(req: VerifyKeyRequest):
+    """フォームのAPIキーを保存前に疎通確認する（.envへの書き込みなし）"""
+    # マスク済みキー（***xxxx 形式）の場合は .env から実キーを読み出す
+    api_key = req.api_key
+    if api_key.startswith("***"):
+        env_path = Path(__file__).parent / ".env"
+        raw: dict = {}
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, _, v = line.partition("=")
+                    raw[k.strip()] = v.strip().strip('"').strip("'")
+        if req.type == "azure_openai":
+            api_key = raw.get("AZURE_OPENAI_API_KEY", api_key)
+        elif req.type == "azure_foundry":
+            for prefix in ["FOUNDRY"] + [f"FOUNDRY_{n}" for n in range(2, 10)]:
+                ep = raw.get(f"{prefix}_ENDPOINT", "").rstrip("/")
+                if ep and (not req.endpoint or ep == req.endpoint.rstrip("/")):
+                    api_key = raw.get(f"{prefix}_API_KEY", api_key)
+                    break
+        elif req.type == "gemini":
+            api_key = raw.get("GEMINI_API_KEY", api_key)
+        elif req.type == "openai":
+            api_key = raw.get("OPENAI_API_KEY", api_key)
+        elif req.type == "groq":
+            api_key = raw.get("GROQ_API_KEY", api_key)
+        elif req.type == "openrouter":
+            api_key = raw.get("OPENROUTER_API_KEY", api_key)
+
+    try:
+        if req.type == "azure_openai":
+            if not req.endpoint or not api_key:
+                return JSONResponse({"ok": False, "error": "エンドポイントとAPIキーを入力してください"})
+            ep = req.endpoint.rstrip("/")
+            api_ver = req.api_version or "2025-01-01-preview"
+            url = f"{ep}/openai/deployments?api-version={api_ver}"
+            resp = requests.get(url, headers={"api-key": api_key}, timeout=8, proxies={"http": None, "https": None})
+            if resp.status_code == 401:
+                return JSONResponse({"ok": False, "error": "APIキーが無効（401 Unauthorized）"})
+            if resp.status_code == 404:
+                return JSONResponse({"ok": True, "note": "接続OK（deployments API非対応のリソース）"})
+            resp.raise_for_status()
+            models = [d["id"] for d in resp.json().get("value", [])]
+            return JSONResponse({"ok": True, "note": f"接続OK・デプロイ数: {len(models)}"})
+
+        elif req.type == "azure_foundry":
+            if not req.endpoint or not api_key:
+                return JSONResponse({"ok": False, "error": "エンドポイントとAPIキーを入力してください"})
+            ep = req.endpoint.rstrip("/")
+            api_ver = req.api_version or "2024-12-01-preview"
+            url = f"{ep}/openai/deployments?api-version={api_ver}"
+            resp = requests.get(url, headers={"api-key": api_key}, timeout=8, proxies={"http": None, "https": None})
+            if resp.status_code == 401:
+                return JSONResponse({"ok": False, "error": "APIキーが無効（401 Unauthorized）"})
+            if resp.status_code == 404:
+                return JSONResponse({"ok": True, "note": "接続OK（deployments API非対応のリソース）"})
+            resp.raise_for_status()
+            data = resp.json()
+            count = len(data.get("value", data.get("data", [])))
+            return JSONResponse({"ok": True, "note": f"接続OK・デプロイ数: {count}"})
+
+        elif req.type == "gemini":
+            if not api_key:
+                return JSONResponse({"ok": False, "error": "APIキーを入力してください"})
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
+            resp = requests.get(url, timeout=8, proxies={"http": None, "https": None})
+            if resp.status_code in (400, 403):
+                return JSONResponse({"ok": False, "error": f"APIキーが無効（{resp.status_code}）"})
+            resp.raise_for_status()
+            return JSONResponse({"ok": True, "note": "接続OK"})
+
+        elif req.type == "openai":
+            if not api_key:
+                return JSONResponse({"ok": False, "error": "APIキーを入力してください"})
+            resp = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+                proxies={"http": None, "https": None},
+            )
+            if resp.status_code == 401:
+                return JSONResponse({"ok": False, "error": "APIキーが無効（401 Unauthorized）"})
+            resp.raise_for_status()
+            return JSONResponse({"ok": True, "note": "接続OK"})
+
+        elif req.type == "groq":
+            if not api_key:
+                return JSONResponse({"ok": False, "error": "APIキーを入力してください"})
+            resp = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+                proxies={"http": None, "https": None},
+            )
+            if resp.status_code == 401:
+                return JSONResponse({"ok": False, "error": "APIキーが無効（401 Unauthorized）"})
+            resp.raise_for_status()
+            return JSONResponse({"ok": True, "note": "接続OK"})
+
+        elif req.type == "openrouter":
+            if not api_key:
+                return JSONResponse({"ok": False, "error": "APIキーを入力してください"})
+            resp = requests.get(
+                "https://openrouter.ai/api/v1/auth/key",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+                proxies={"http": None, "https": None},
+            )
+            if resp.status_code == 401:
+                return JSONResponse({"ok": False, "error": "APIキーが無効（401 Unauthorized）"})
+            resp.raise_for_status()
+            usage = resp.json().get("data", {})
+            limit = usage.get("limit")
+            used = usage.get("usage", 0)
+            note = f"残高: ${(limit - used):.3f}" if limit else "接続OK（:free プラン）"
+            return JSONResponse({"ok": True, "note": note})
+
+        else:
+            return JSONResponse({"ok": False, "error": f"未対応のtype: {req.type}"})
+
+    except requests.HTTPError as e:
+        return JSONResponse({"ok": False, "error": f"HTTP {e.response.status_code}"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:100]})
+
+
 class SetupSaveRequest(BaseModel):
     providers: list = []  # 統合プロバイダーリスト（新形式）
     agent: dict
@@ -5766,7 +5898,6 @@ async def setup_save(req: SetupSaveRequest):
                 f"AZURE_OPENAI_ENDPOINT={prov.get('endpoint','')}",
                 f"AZURE_OPENAI_DEPLOYMENTS={prov.get('deployments','')}",
                 f"AZURE_OPENAI_DEPLOYMENT={prov.get('deployments','').split(',')[0].strip() if prov.get('deployments') else ''}",
-                f"AZURE_OPENAI_API_VERSION={prov.get('api_version','2025-01-01-preview')}",
                 "",
             ]
         elif ptype == "azure_foundry":
@@ -5779,7 +5910,6 @@ async def setup_save(req: SetupSaveRequest):
                 f"{prefix}_API_KEY={api_key_val(prov.get('api_key',''), prefix+'_API_KEY')}",
                 f"{prefix}_MODELS={prov.get('models','')}",
                 f"{prefix}_MODEL={prov.get('models','').split(',')[0].strip() if prov.get('models') else prov.get('model','')}",
-                f"{prefix}_API_VERSION={prov.get('api_version','2024-12-01-preview')}",
                 "",
             ]
             foundry_count += 1
@@ -5946,12 +6076,8 @@ async def setup_save(req: SetupSaveRequest):
     ]
     if ig.get("azure_endpoint"):
         lines.append(f"IMAGE_AZURE_ENDPOINT={ig['azure_endpoint']}")
-    if ig.get("azure_api_version"):
-        lines.append(f"IMAGE_AZURE_API_VERSION={ig['azure_api_version']}")
     if ig.get("foundry_endpoint"):
         lines.append(f"IMAGE_FOUNDRY_ENDPOINT={ig['foundry_endpoint']}")
-    if ig.get("foundry_api_version"):
-        lines.append(f"IMAGE_FOUNDRY_API_VERSION={ig['foundry_api_version']}")
     ig_openai_key = env_val(ig.get("openai_api_key", ""), "IMAGE_OPENAI_API_KEY")
     if ig_openai_key:
         lines.append(f"IMAGE_OPENAI_API_KEY={ig_openai_key}")

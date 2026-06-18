@@ -8,10 +8,10 @@ from config import (
     IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_QUALITY, IMAGE_SIZE, IMAGE_INHERIT,
     OPENAI_API_KEY, IMAGE_OPENAI_API_KEY,
     GEMINI_API_KEY, IMAGE_GEMINI_API_KEY,
-    AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_VERSION,
-    IMAGE_AZURE_API_KEY, IMAGE_AZURE_ENDPOINT, IMAGE_AZURE_API_VERSION,
-    FOUNDRY_API_KEY, FOUNDRY_ENDPOINT, FOUNDRY_API_VERSION,
-    IMAGE_FOUNDRY_API_KEY, IMAGE_FOUNDRY_ENDPOINT, IMAGE_FOUNDRY_API_VERSION,
+    AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT,
+    IMAGE_AZURE_API_KEY, IMAGE_AZURE_ENDPOINT,
+    FOUNDRY_API_KEY, FOUNDRY_ENDPOINT,
+    IMAGE_FOUNDRY_API_KEY, IMAGE_FOUNDRY_ENDPOINT,
     WATERMARK_ENABLED, WATERMARK_TEXT, WATERMARK_POSITION, WATERMARK_COLOR, WATERMARK_OPACITY, WATERMARK_FONT_SIZE,
 )
 
@@ -25,7 +25,7 @@ IMAGE_MODELS_BY_PROVIDER = {
 
 
 def _make_client(provider: str):
-    from openai import OpenAI, AzureOpenAI
+    from openai import OpenAI
     if provider == "openai":
         key = OPENAI_API_KEY if IMAGE_INHERIT else (IMAGE_OPENAI_API_KEY or OPENAI_API_KEY)
         return OpenAI(api_key=key)
@@ -36,18 +36,13 @@ def _make_client(provider: str):
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         )
     elif provider == "azure":
-        key      = AZURE_OPENAI_API_KEY     if IMAGE_INHERIT else (IMAGE_AZURE_API_KEY     or AZURE_OPENAI_API_KEY)
-        endpoint = AZURE_OPENAI_ENDPOINT    if IMAGE_INHERIT else (IMAGE_AZURE_ENDPOINT    or AZURE_OPENAI_ENDPOINT)
-        version  = AZURE_OPENAI_API_VERSION if IMAGE_INHERIT else (IMAGE_AZURE_API_VERSION or AZURE_OPENAI_API_VERSION or "2025-04-01-preview")
-        # 引き継ぎOFF（専用エンドポイント）はGlobal Standard形式でBearer認証が必要
-        if IMAGE_INHERIT:
-            return AzureOpenAI(api_key=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
-        return AzureOpenAI(azure_ad_token=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
+        key      = AZURE_OPENAI_API_KEY  if IMAGE_INHERIT else (IMAGE_AZURE_API_KEY  or AZURE_OPENAI_API_KEY)
+        endpoint = AZURE_OPENAI_ENDPOINT if IMAGE_INHERIT else (IMAGE_AZURE_ENDPOINT or AZURE_OPENAI_ENDPOINT)
+        return OpenAI(api_key=key, base_url=endpoint.rstrip("/") + "/openai/v1/", max_retries=0)
     elif provider == "foundry":
-        key      = FOUNDRY_API_KEY     if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_KEY     or FOUNDRY_API_KEY)
-        endpoint = FOUNDRY_ENDPOINT    if IMAGE_INHERIT else (IMAGE_FOUNDRY_ENDPOINT    or FOUNDRY_ENDPOINT)
-        version  = FOUNDRY_API_VERSION if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_VERSION or FOUNDRY_API_VERSION or "2025-04-01-preview")
-        return AzureOpenAI(azure_ad_token=key, azure_endpoint=endpoint, api_version=version, max_retries=0)
+        key      = FOUNDRY_API_KEY  if IMAGE_INHERIT else (IMAGE_FOUNDRY_API_KEY  or FOUNDRY_API_KEY)
+        endpoint = FOUNDRY_ENDPOINT if IMAGE_INHERIT else (IMAGE_FOUNDRY_ENDPOINT or FOUNDRY_ENDPOINT)
+        return OpenAI(api_key=key, base_url=endpoint.rstrip("/") + "/openai/v1/", max_retries=0)
     else:
         raise ValueError(f"未対応のプロバイダー: {provider}")
 

@@ -24,8 +24,6 @@ from config import (
     WEB_RESEARCH_PROVIDER,
     RESPONSES_API_ENABLED,
     RESPONSES_API_MODEL,
-    AZURE_OPENAI_API_VERSION,
-    FOUNDRY_API_VERSION,
     VERIFY_ON_WRITE_ENABLED,
     ASYNC_MAX_TURNS,
     OPENROUTER_FALLBACK_MODELS,
@@ -918,12 +916,10 @@ if WEB_RESEARCH_PROVIDER.startswith("deep-research"):
 def _make_async_client(provider_config: dict):
     ptype = provider_config.get("type", "azure")
     if ptype in ("azure", "foundry"):
-        return AsyncAzureOpenAI(
-            azure_endpoint=provider_config["url"],
+        # v1 API（api-version 不要）: AsyncAzureOpenAI ではなく AsyncOpenAI + base_url（#66）
+        return AsyncOpenAI(
+            base_url=provider_config["url"].rstrip("/") + "/openai/v1/",
             api_key=provider_config["api_key"],
-            api_version=provider_config.get("api_version") or (
-                FOUNDRY_API_VERSION if ptype == "foundry" else AZURE_OPENAI_API_VERSION
-            ),
             http_client=httpx.AsyncClient(trust_env=False),
         )
     elif ptype == "gemini":

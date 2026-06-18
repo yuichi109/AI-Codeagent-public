@@ -5,6 +5,168 @@
 
 ---
 
+## 2026-06-18（セッション57）Azure/Foundry v1 API移行・APIバージョン欄削除（v1.20.2）
+
+### Azure OpenAI / Foundry を v1 API に移行（#66）
+
+チャット推論・BGエージェント・画像生成の全クライアントを `AzureOpenAI` クラスから `OpenAI + base_url` 方式に変更。`api-version` パラメータが不要になった。
+
+- `server.py`: `_make_client()` / `_make_async_client()` / `_make_async_client_for()`（azure・foundry）を `OpenAI(base_url=endpoint+"/openai/v1/")` に変更（4箇所）
+- `agent_core.py`: BGエージェントの `_make_async_client()` を同様に変更（1箇所）、未使用 import（`AsyncAzureOpenAI` / `AZURE_OPENAI_API_VERSION` / `FOUNDRY_API_VERSION`）を削除
+- `tools/image_tools.py`: Azure・Foundry 画像生成クライアントも v1 API に移行。`AzureOpenAI` → `OpenAI + base_url`、`version` 変数と関連 import を削除
+- `setup.html`: Azure OpenAI・Foundry プロバイダーカードおよび画像生成セクションの「API バージョン」入力欄を削除
+- `server.py`: プロバイダー保存時に `AZURE_OPENAI_API_VERSION` / `FOUNDRY_API_VERSION` を `.env` へ書き戻していた処理を削除
+- `.env`: `AZURE_OPENAI_API_VERSION` / `FOUNDRY_API_VERSION` / `IMAGE_AZURE_API_VERSION` を削除（RAG用 `RAG_EMBED_API_VERSION`・Responses用 `RESPONSES_API_VERSION` は継続）
+
+**継続使用中（v1 移行対象外）:**
+- RAG（`rag_tools.py`）・Responses API（`responses_tools.py`）は `AzureOpenAI` を継続使用（それぞれ専用の api_version 欄あり）
+- デプロイ一覧取得の管理 REST API・APIキー疎通確認エンドポイントは api_version を継続使用
+
+### バージョン
+
+- `config.py`: `APP_VERSION = "1.20.2"`
+
+---
+
+## 2026-06-17（セッション55）セットアップUI虫眼鏡・フォールバック修正・Xツイート投稿（v1.20.1）
+
+### セットアップUI: 保存前APIキー確認ボタン追加（#64）
+
+- `setup.html`: `apiKeyInput()` ヘルパー関数を追加
+  - APIキー入力欄を `<div>` でラップし、「🔍 確認」ボタンと結果スパンをインライン配置
+  - 全6プロバイダーのキー入力欄を `apiKeyInput()` に統一（`replace_all`）
+- `setup.html`: `verifyApiKey()` 非同期関数を追加
+  - `POST /setup/verify-key` を呼び出し、✅/❌ をボタン横に表示
+  - マスク済みキー（`***xxxx`）を受け取った場合は `.env` から実キーを解決してから検証
+- `server.py`: `VerifyKeyRequest` モデルと `POST /setup/verify-key` エンドポイントを追加
+  - 純粋な読み取り専用エンドポイント（`.env` 書き込みなし・キー削除リスクなし）
+  - Azure OpenAI / Azure Foundry: 401 → ❌、404 → ✅（認証OK・API非対応）、200 → ✅
+  - Gemini / OpenAI / Groq / OpenRouter: 各APIにリクエストして確認
+
+### OpenRouterフォールバック候補が🔍後に更新されない修正（#67）
+
+- `setup.html`: `fetchModelsBtn()` にフォールバックチェックボックス（`.fb-box`）更新処理を追加
+  - モデル一覧取得後、既存チェック状態を保持しつつ `.fb-box` を再生成
+  - 初回設定時にOpenRouterのフォールバック候補が表示されなかったバグを修正
+
+### GitLab Issue追加
+
+- **#66**: Azure OpenAI / Foundry を v1 API に移行（api-version 設定を全廃）
+  - 2025年8月 GA の v1 API 移行で `*_API_VERSION` 環境変数を全廃できる
+- **#67**: OpenRouter初回設定時フォールバック候補未表示バグ（上記修正でクローズ予定）
+
+### バージョン
+
+- `config.py`: `APP_VERSION = "1.20.1"`
+
+### X (Twitter) スレッド投稿
+
+- @yuichi109 にて GitHub 公開リポの紹介ツイートを2本投稿
+  - 1本目: 機能概要・マルチLLM・WSL版/Win版
+  - 2本目（スレッド返信）: インストール詳細（WSL版/Windows版の所要ディスク・依存パッケージ）
+
+---
+
+## 2026-06-17（セッション54）GitHub公開・README刷新・ブランチ大掃除（コード変更なし）
+
+コード変更なし。公開インフラの整備・ドキュメント刷新・リポジトリ清掃を実施。
+
+### GitHub 公開リポジトリ設定
+
+- **`yuichi109/AI-Codeagent-public`** を GitHub に新規作成（Public）
+- ローカルに `github` リモートを追加（`git push github main for_windows` で即時 push 可能）
+- GitLab プッシュミラーに GitHub を追加（remote_mirror id 4060610）→ origin push だけで GitLab・GitHub 両方に自動反映
+- **発見: GitLab プッシュミラーはブランチ削除を GitHub に伝播しない**。ブランチ削除後は GitHub に直接 `git push github --delete <branch>` が必要（memory に記録済み）
+
+### README.md 全面刷新
+
+- デモ画像 3 枚を `docs/screenshots/` に追加・README 冒頭に配置
+  - `chat.png` — チャット＋Mermaid 自動清書
+  - `model.png` — 7プロバイダー切り替え＋設定パネル
+  - `editor.png` — Monaco エディタ＋ファイルツリー
+- 「チャットで指示するだけ」導入フック＋30年インフラエンジニア背景を追記
+- 「よくある AI チャット vs このエージェント」比較表を新設
+- 作り込んだポイント 8 項目（サンドボックス・3モード・別モデル再実行・スケジューラー・MCP・RAG・検証ループ・Windows操作）
+- 7プロバイダー一覧表（実コードで存在を検証済み）
+- clone URL を GitHub に更新・作者リンクに GitHub 追加
+
+### docs/setup.md 修正（公開リポジトリ向け）
+
+- 存在しないファイル名 `setup.bat` → `start.bat` に統一（6箇所）
+- clone URL を非公開 GitLab → GitHub 公開リポに変更（WSL/Windows 両方・HTTPS/SSH）
+- Windows Step 2 に Playwright セットアップ・タスクトレイ常駐の記述を追記（実挙動と整合）
+- 社内プロキシ `no_proxy` に `github.com` を追加
+
+### ブランチ・ワークツリー大掃除
+
+- `claude/*` ワークツリー 22 個を削除（git worktree remove --force）→ `.claude/worktrees` **353MB 解放**
+- `claude/*` ローカルブランチ 22 本を削除（全て `origin/main` に取り込み済み・独自コミット 0 件）
+- `feature/mcp-client` をローカル・origin・public・github から全削除（同じく取り込み済み）
+- 残ブランチ: **main / for_windows の 2 本のみ**（ローカル・全リモートで整合）
+- `git gc --prune=now` で不要オブジェクトも回収
+
+### Windows ログイン監視タスクの確立（定時スケジューラー活用）
+
+コード変更なし。既存ツール（`run_powershell` / `send_email` / スケジューラー）の組み合わせで実現。
+
+**要件**: ドメイン参加 Windows 11（iac-work / 10.49.89.36）に誰もログインしていない場合にメール通知。月〜金 8〜18 時の定時実行。
+
+**試行錯誤のまとめ**:
+- `qwinsta /server:IP` → Error 1707（IP指定不可・RPC要）
+- `Win32_ComputerSystem.UserName` → RDPセッションを拾えない
+- `Win32_LogonSession (LogonType 2/10)` → サインアウト後もゴーストセッションが残る
+- `Win32_TSSession` → クラスが存在しない環境
+- **`Win32_Process (explorer.exe)`** → ✅ **正解**。サインアウト済みなら空・ログイン中なら ProcessId と User が返る。コンソール・RDP 両対応
+
+**資格情報管理**:
+- Credential Manager の「Domain Password」型はパスワード読み出し不可
+- `cmdkey /generic:iac-work /user:spec-edu\administrator /pass:xxx` で Generic 型として登録し直すことで `Get-StoredCredential` での取得が可能に
+
+**確定したタスクプロンプト**:
+```
+Import-Module CredentialManager
+$cred = Get-StoredCredential -Target "iac-work"
+$result = Get-WmiObject -ComputerName 10.49.89.36 -Class Win32_Process -Credential $cred -Filter "Name='explorer.exe'"
+if ($result) { Write-Output "ログイン中" } else { Write-Output "誰もログインしていない" }
+結果が「誰もログインしていない」だったらメールで通知して。「ログイン中」なら何もしない。
+```
+
+スケジューラー登録・メール通知まで動作確認済み。
+
+---
+
+### 発見: main と for_windows はコードが完全同一
+
+- 差分はドキュメントのみ（README.md / setup.md / changelog.md）
+- `config.py` が `sys.platform == "win32"` でポートを自動切替（WSL=8000 / Windows=8001）
+- `start.bat` / `tray.py` は main にも存在する
+- Windows ユーザーは main をそのままダウンロードして `start.bat` を実行すれば動く（for_windows への切替は不要）
+- 現状は README が「for_windows に切り替えろ」と案内しているため不要な混乱を招いている → 次回 README を修正すれば解消（低リスク）
+
+---
+
+## 2026-06-16（セッション53）issue整合・ドキュメント整理（コード変更なし）
+
+コード変更は一切なし。実コードを「正」として GitLab issue / roadmap / メモリの整合を取った。
+
+### issue 整理
+- **クローズ（実装済み）**: #48 Groq対応 / #49 OpenRouter対応 / #14 MCPサポート / #62 スマホ対応（レスポンシブUI） / #61 ポート一元管理
+  - 各issueに「vX.Y.Zで実装済み」完了コメントを追記してからクローズ
+- **コメント追加・open維持**: #12 サブエージェント（Phase1完了・Phase2/3未実装のため維持）
+- **新規起票**:
+  - #63 OpenRouterプロバイダーでの画像生成対応（chat.completions + modalities方式）— 優先度 中〜低
+  - #64 セットアップUI: 保存前でもAPIキーの接続確認（虫眼鏡）ができるようにする — 優先度 中
+
+### ドキュメント整理
+- `docs/roadmap.md`: 実装済みの「スマホ対応（レスポンシブUI）#62」を削除し、未実装の「Tailscale連携の自動化」のみ中優先度に残置（commit `046d58b`・両ブランチpush済み）
+
+### 調査メモ（実装なし）
+- OpenRouter の画像生成は `chat.completions + modalities:["image","text"]` 方式（images APIとは根本的に異なる）。generate/editとも同一経路で実装可能。ただしコスパ面でOpenAI直が優位なため、現時点では現状維持が妥当（→#63）。
+- セットアップUIの虫眼鏡ボタンは保存前のキーでは叩けない設計上の問題（→#64）。ベストプラクティスは「入力→確認→保存」の順。
+- BG分類（/classify-bg）は確実に発火するハードコードワード無し（LLM判定）。手動BGボタンが確実。画像系ワード固定化（見送りA案）は不採用方針のまま。
+
+---
+
 ## 2026-06-16（セッション52）推論エフォート制御＋フォールバック復元バグ修正（v1.20.0）
 
 v1.19.0 のフォールバック機能を **Chrome 実機で総合テスト（4項目すべて合格）**。その過程で見つけた復元バグの修正と、推論の深さ（reasoning effort）制御を追加。

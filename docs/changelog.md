@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-06-18（セッション57）Azure/Foundry v1 API移行・APIバージョン欄削除（v1.20.2）
+
+### Azure OpenAI / Foundry を v1 API に移行（#66）
+
+チャット推論・BGエージェント・画像生成の全クライアントを `AzureOpenAI` クラスから `OpenAI + base_url` 方式に変更。`api-version` パラメータが不要になった。
+
+- `server.py`: `_make_client()` / `_make_async_client()` / `_make_async_client_for()`（azure・foundry）を `OpenAI(base_url=endpoint+"/openai/v1/")` に変更（4箇所）
+- `agent_core.py`: BGエージェントの `_make_async_client()` を同様に変更（1箇所）、未使用 import（`AsyncAzureOpenAI` / `AZURE_OPENAI_API_VERSION` / `FOUNDRY_API_VERSION`）を削除
+- `tools/image_tools.py`: Azure・Foundry 画像生成クライアントも v1 API に移行。`AzureOpenAI` → `OpenAI + base_url`、`version` 変数と関連 import を削除
+- `setup.html`: Azure OpenAI・Foundry プロバイダーカードおよび画像生成セクションの「API バージョン」入力欄を削除
+- `server.py`: プロバイダー保存時に `AZURE_OPENAI_API_VERSION` / `FOUNDRY_API_VERSION` を `.env` へ書き戻していた処理を削除
+- `.env`: `AZURE_OPENAI_API_VERSION` / `FOUNDRY_API_VERSION` / `IMAGE_AZURE_API_VERSION` を削除（RAG用 `RAG_EMBED_API_VERSION`・Responses用 `RESPONSES_API_VERSION` は継続）
+
+**継続使用中（v1 移行対象外）:**
+- RAG（`rag_tools.py`）・Responses API（`responses_tools.py`）は `AzureOpenAI` を継続使用（それぞれ専用の api_version 欄あり）
+- デプロイ一覧取得の管理 REST API・APIキー疎通確認エンドポイントは api_version を継続使用
+
+### バージョン
+
+- `config.py`: `APP_VERSION = "1.20.2"`
+
+---
+
 ## 2026-06-17（セッション55）セットアップUI虫眼鏡・フォールバック修正・Xツイート投稿（v1.20.1）
 
 ### セットアップUI: 保存前APIキー確認ボタン追加（#64）

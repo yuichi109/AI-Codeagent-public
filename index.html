@@ -9,8 +9,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚛️</text></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; overflow-x: clip; }
-  #header { padding: 10px 20px; background: #181825; border-bottom: 1px solid #313244; font-weight: bold; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; overflow-x: clip; overflow-y: hidden; }
+  #header { padding: 10px 20px; background: #181825; border-bottom: 1px solid #313244; font-weight: bold; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   #header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   /* ===== ヘッダーアイコンのテーマ（data-htheme で切替・localStorage保存） ===== */
   .hgrp { display: inline-flex; align-items: center; gap: 6px; }
@@ -887,7 +887,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
     <span id="provider-label"></span>
-    <select id="model-select" title="Azureデプロイを切り替え" onchange="switchDeployment(this.value)" style="display:none"></select>
+    <select id="model-select" title="モデルを切り替え" onchange="switchDeployment(this.value)" style="display:none"></select>
     <span class="cbar-div"></span>
     <span class="hgrp">
       <button id="shell-btn" class="cbtn" data-tip="シェル実行" onclick="toggleShellPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>

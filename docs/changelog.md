@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-06-19（セッション59）コード全体把握・設計確認（コード変更なし）
+
+### セッション内容
+- コード変更なし（確認・把握のみ）
+- `docs/changelog.md`・オープンイシュー（19件）・全ソースコードを通読し現状を完全把握
+- `_load_workspace_agent_mds()` の動作確認：`workspace/` 直下および1階層下のサブディレクトリの `AGENT.md` / `MEMORY.md` / `memory/*.md` がシステムプロンプトに自動注入される設計を確認
+- `workspace/` 直下に `AGENT.md` を置けば全プロジェクト共通ルールとして機能することを確認
+- gpt-5.4-mini vs DeepSeek V4 Flash 比較調査：コーディング・エージェント用途はDeepSeek V4 Flashがコスパ優位（約6.6倍安い・SWE-bench Verified+7.3pt）、マルチモーダルが必要な場合はgpt-5.4-mini
+
+---
+
+## 2026-06-19（セッション58）ヘッダースクロールバグ修正（v1.20.2）
+
+### Windows Server 2025のEdgeでヘッダーがスクロールされる問題を修正
+
+別ホスト（Windows Server 2025）のEdgeからアクセスした際、ページ上部のヘッダーがスクロールしてしまう症状が発生。Windows 11のEdgeでは再現しなかった。
+
+**原因**: `#header` に `flex-shrink: 0` が指定されておらず、DPIスケーリングの差（Win Server: 100%、Win11: 125%）によりレイアウト計算結果が変わり、ヘッダーが縮んでスクロール対象になっていた。
+
+**修正内容** (`index.html`):
+- `body`: `overflow-x: clip` → `overflow-x: clip; overflow-y: hidden`（縦スクロールを明示的に禁止）
+- `#header`: `flex-shrink: 0` を追加（ヘッダーが縮まないよう明示）
+
+修正後、新規会話では問題解消を確認。過去の会話履歴は古いキャッシュのため影響なし。
+
+---
+
 ## 2026-06-18（セッション57）Azure/Foundry v1 API移行・APIバージョン欄削除（v1.20.2）
 
 ### Azure OpenAI / Foundry を v1 API に移行（#66）

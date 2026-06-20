@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.20.2"
+APP_VERSION = "1.20.3"
 
 try:
     load_dotenv(override=True, encoding='utf-8')

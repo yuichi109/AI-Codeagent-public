@@ -2377,6 +2377,9 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     if (slashPos !== -1 && (slashPos === 0 || /\s/.test(val[slashPos - 1]))) {
       const query = val.substring(slashPos + 1);
       if (!/\s/.test(query)) {
+        // ポップアップを開く瞬間（直前は閉じていた）にキャッシュを破棄し最新スキルを取り直す。
+        // これで新規作成したスキルが再読込なしで補完に出る。
+        if (document.getElementById('skill-popup').style.display === 'none') _skills = null;
         const skills = await _fetchSkills();
         const uiItems = Object.entries(UI_COMMANDS).map(([trigger, def]) => ({ trigger, description: def.description }));
         _skillPopupShow([...uiItems, ...skills], query);

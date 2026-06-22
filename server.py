@@ -18,7 +18,7 @@ from openai import AzureOpenAI, OpenAI, AsyncAzureOpenAI, AsyncOpenAI
 from config import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENTS, SEARXNG_ENABLED, GITLAB_PAT, GITLAB_USER, ALLOWED_WORK_DIR, FOUNDRY_ENDPOINT, FOUNDRY_API_KEY, FOUNDRY_MODEL, FOUNDRY_MODELS, FOUNDRY_API_VERSION, FOUNDRY_INSTANCES, GEMINI_API_KEY, GEMINI_MODELS, GROQ_API_KEY, GROQ_MODELS, OPENROUTER_API_KEY, OPENROUTER_MODELS, OPENROUTER_FALLBACK_MODELS, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_MODELS, RESPONSES_API_ENABLED, RESPONSES_API_MODEL, WEB_RESEARCH_PROVIDER, OBSIDIAN_VAULT_PATH, APP_VERSION, ASYNC_MAX_JOBS
 from tools.async_job_db import init_db as _init_async_db, create_job as _create_async_job, get_job as _get_async_job, get_chunks as _get_async_chunks, list_jobs as _list_async_jobs, update_job as _update_async_job, delete_job as _delete_async_job
 from tools.inbox_worker import start_worker, stop_worker, get_status as inbox_get_status, scan_inbox as inbox_scan_now, ensure_inbox_dirs, get_stale_drafts
-from prompts import get_system_prompt, get_chat_system_prompt
+from prompts import get_system_prompt, get_chat_system_prompt, load_skill_by_trigger
 
 # Gemini デフォルトモデル一覧（GEMINI_MODELS 未設定時のフォールバック）
 _GEMINI_DEFAULT_MODELS = [
@@ -2415,6 +2415,17 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             else:
                 user_content = f"{auto_ctx}\n\n{user_content}"
         system_prompt = get_system_prompt(bypass_approval, plan_mode)
+        # ユーザーが /スキル名 で明示的に呼び出した場合、そのスキル本文を名指しで前面注入する。
+        # 長いスキル一覧から探させると非力なモデル（mini等）が拾い損ねるため。
+        _skill_hit = load_skill_by_trigger(user_message) if isinstance(user_message, str) else None
+        if _skill_hit:
+            _trig, _body = _skill_hit
+            system_prompt += (
+                f"\n\n## 🎯 ユーザーが呼び出したスキル: {_trig}\n"
+                f"ユーザーは入力の冒頭で **{_trig}** スキルを明示的に呼び出した。"
+                f"「用意されていない」等と言わず、**以下の手順に厳密に従って実行すること**"
+                f"（他のスキルと混同しない）。\n\n{_body}"
+            )
         if workspace_scope:
             system_prompt += (
                 f"\n\n## 作業ディレクトリ制限\n"

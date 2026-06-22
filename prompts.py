@@ -94,6 +94,41 @@ def _load_skills() -> str:
                 pass
     return "\n\n---\n\n".join(sections)
 
+
+def load_skill_by_trigger(text: str):
+    """ユーザー入力の先頭トークンが /トリガー のとき、該当スキルの (trigger, 本文) を返す。
+    一覧の中から探させると非力なモデル（mini等）が拾い損ねるため、名指しで本文を渡す用途。
+    一致しなければ None。"""
+    if not _SKILLS_DIR.exists() or not text:
+        return None
+    t = text.strip()
+    if not t.startswith("/"):
+        return None
+    first = t.split()[0]  # "/backup-subdir arg" → "/backup-subdir"
+    for skill_dir in sorted(_SKILLS_DIR.iterdir()):
+        skill_file = skill_dir / "SKILL.md"
+        if not (skill_dir.is_dir() and skill_file.exists()):
+            continue
+        try:
+            content = skill_file.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        lines = content.split("\n")
+        trig = None
+        body = content
+        if lines and lines[0].strip() == "---":
+            end = next((i for i, l in enumerate(lines[1:], 1) if l.strip() == "---"), None)
+            if end:
+                for l in lines[1:end]:
+                    if l.strip().startswith("trigger:"):
+                        trig = l.split(":", 1)[1].strip()
+                        break
+                body = "\n".join(lines[end + 1:]).strip()
+        if trig and trig == first:
+            return (trig, body.replace("{APP_PORT}", str(APP_PORT)))
+    return None
+
+
 BYPASS_SECTION = """
 ## ⚠️ 承認バイパスモード: ON（最優先ルール）
 

@@ -5,6 +5,17 @@
 
 ---
 
+## 2026-06-22（セッション61）run_command の長寿命プロセス無限ハング修正（v1.20.5）
+
+- **症状**: エージェントに「サーバー起動／再起動スクリプト」を実行させると、スクリプトが `=== 再起動完了 ===` まで出力して**画面上は完了しているのに run_command が戻らず数分〜永久に固まる**。モデル非依存。
+- **真因**: `run_command` / `_run_bash_sandboxed` が `subprocess.run(capture_output=True)`＝内部で `communicate()` を使い、**出力パイプの EOF を待つ**実装だった。スクリプトが `uvicorn ... &` 等でサーバーを背景起動すると、その子が出力 fd を握り続けてパイプが閉じず、スクリプト本体が exit しても読み取りが返らない。タイムアウトも別セッションに逃げた孫に届かず発火しなかった。
+- **修正（Claude Code の Bash と同じ流儀）**: 出力取得を「パイプ EOF 待ち」から「**プロセスの exit 待ち**」に変更。新ヘルパー `_capture_run()` を追加し、①出力を一時ファイルに流す（読み取りがブロックしない）②完了は `proc.wait(timeout)` で判定（孫が fd を握っても直接の子が exit すれば即返る）③タイムアウト時は `start_new_session=True` ＋ `os.killpg` で**プロセスグループごと kill**（孫まで）。`run_command`・`_run_bash_sandboxed` 両方を本ヘルパー経由に統一。`agent_core.py` は `tools.command_tools.run_command` を import 共有のため BG/定時経路にも自動適用。
+- **タイムアウト値は不変**（timeout_minutes / LONG_RUNNING=300s / 既定30s）。長い命令が新たにエラーになることはない。副次効果として旧 PIPE 方式のバッファ詰まり（大量出力デッドロック）も解消。`start_new_session` 化で「子の再起動が本体8000番を巻き込む」件の波及も防止。
+- **テスト**: unit（通常出力・背景起動で即返る・タイムアウト発火）＋ e2e（実 `python -m http.server` を背景起動→0.01秒で返り・サーバー生存・タイムアウト時に孫まで kill）＋長時間8秒完走・50万行大量出力。すべて合格。
+- 両ブランチ push 済み。
+
+---
+
 ## 2026-06-22（セッション61）Linux setup.sh の Playwright Chromium 版数固定（v1.20.4）
 
 - **症状**: 新規 Linux/WSL 環境（Win Server 2025 上の WSL Ubuntu 等）で `setup.sh install` 後にブラウザ操作（スクショ等）が `Browser "chrome-for-testing" is not installed` 等で失敗。手動で `pip install playwright==1.60.0 && python3 -m playwright install chromium` を打つと復活していた。

@@ -1,9 +1,13 @@
 import os
 import shlex
 import shutil
+import signal
 import subprocess
+import tempfile
 from pathlib import Path
 from config import ALLOWED_WORK_DIR, ALLOWED_WORK_DIRS, COMMAND_TIMEOUT_SECONDS
+
+_POSIX = os.name == "posix"
 
 # 危険コマンドのブラックリスト（ホワイトリスト廃止 → ブラックリスト方式に移行）
 # rm -rf / や dd if=/dev/zero 等のシステム破壊コマンドのみ拒否
@@ -95,6 +99,74 @@ def _is_permission_error(stderr: str) -> bool:
     return any(kw.lower() in stderr_lower for kw in keywords)
 
 
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """プロセスグループ全体を kill する（バックグラウンドに逃げた孫プロセスも含む）。
+    start_new_session=True で起動しているため、グループ kill は子の系統だけに当たり、
+    本体（AI-Codeagent サーバー）には波及しない。"""
+    if _POSIX:
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+    else:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def _capture_run(args: list, *, cwd: str = None, env: dict = None, timeout=None) -> tuple:
+    """subprocess.run(capture_output=True) の代替。
+
+    capture_output=True は内部で communicate()＝**出力パイプの EOF を待つ**ため、
+    スクリプトがバックグラウンドでサーバー（uvicorn 等）を起動すると、その子が出力 fd を
+    握り続けてパイプが閉じず、スクリプト本体が終了しても永久に固まる。
+
+    ここでは出力を一時ファイルに流し、**起動したコマンド自身の終了 (proc.wait)** で完了を
+    判定する。孫プロセスが fd を握っていても、直接の子が exit すれば即返る（＝固まらない）。
+    タイムアウト時はプロセスグループごと kill する（孫まで巻き込む）。
+
+    戻り値: (returncode, stdout, stderr, timed_out)
+    """
+    with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+        proc = subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=out_f,
+            stderr=err_f,
+            cwd=cwd,
+            env=env,
+            shell=False,
+            start_new_session=True,  # 子を独立セッション化（グループ kill が本体に波及しない）
+        )
+        timed_out = False
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _kill_process_group(proc)
+        out_f.seek(0)
+        err_f.seek(0)
+        stdout = out_f.read().decode("utf-8", errors="replace")
+        stderr = err_f.read().decode("utf-8", errors="replace")
+        return proc.returncode, stdout, stderr, timed_out
+
+
 def _run_bash_sandboxed(args: list) -> dict:
     """
     bubblewrap (bwrap) を使ってシェルスクリプトをサンドボックス内で実行する。
@@ -153,21 +225,19 @@ def _run_bash_sandboxed(args: list) -> dict:
     ]
 
     try:
-        result = subprocess.run(
+        rc, stdout, stderr, timed_out = _capture_run(
             bwrap_cmd,
-            capture_output=True,
-            text=True,
             timeout=COMMAND_TIMEOUT_SECONDS,
         )
+        if timed_out:
+            return {"error": f"{COMMAND_TIMEOUT_SECONDS}秒のタイムアウトを超えました", "stdout": "", "stderr": "", "returncode": -1}
         return {
-            "stdout": _truncate_output(result.stdout),
-            "stderr": _truncate_output(result.stderr, 4000),
-            "returncode": result.returncode,
+            "stdout": _truncate_output(stdout),
+            "stderr": _truncate_output(stderr, 4000),
+            "returncode": rc,
             "error": None,
             "sandbox": "bubblewrap",
         }
-    except subprocess.TimeoutExpired:
-        return {"error": f"{COMMAND_TIMEOUT_SECONDS}秒のタイムアウトを超えました", "stdout": "", "stderr": "", "returncode": -1}
     except Exception as e:
         return {"error": f"サンドボックス実行エラー: {e}", "stdout": "", "stderr": "", "returncode": -1}
 
@@ -260,37 +330,35 @@ def run_command(command: str, work_dir: str = None, description: str = "", env: 
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}}
 
     try:
-        result = subprocess.run(
+        rc, stdout, stderr, timed_out = _capture_run(
             args,
-            capture_output=True,
-            text=True,
-            timeout=effective_timeout,
             cwd=str(resolved_work_dir),
-            shell=False,
             env=merged_env,
+            timeout=effective_timeout,
         )
 
+        if timed_out:
+            timeout_label = f"{effective_timeout // 60}分" if effective_timeout and effective_timeout >= 60 else f"{effective_timeout}秒"
+            return {"error": f"{timeout_label}のタイムアウトを超えました（コマンド: {base_cmd}）。処理がまだ進行中の可能性があります。タイムアウトを延長して再実行しますか？", "stdout": "", "stderr": "", "returncode": -1}
+
         # 権限エラーで失敗した場合、AIにユーザー確認を促すヒントを付与する
-        if (result.returncode != 0
+        if (rc != 0
                 and args[0] != "sudo"
-                and _is_permission_error(result.stderr)):
+                and _is_permission_error(stderr)):
             return {
-                "stdout": _truncate_output(result.stdout),
-                "stderr": _truncate_output(result.stderr, 4000),
-                "returncode": result.returncode,
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr, 4000),
+                "returncode": rc,
                 "error": None,
                 "hint": f"権限エラーが発生しました。`sudo {command}` で再実行することで解決できる可能性があります。ユーザーに確認してから再実行してください。",
             }
 
         return {
-            "stdout": _truncate_output(result.stdout),
-            "stderr": _truncate_output(result.stderr, 4000),
-            "returncode": result.returncode,
+            "stdout": _truncate_output(stdout),
+            "stderr": _truncate_output(stderr, 4000),
+            "returncode": rc,
             "error": None,
         }
-    except subprocess.TimeoutExpired:
-        timeout_label = f"{effective_timeout // 60}分" if effective_timeout and effective_timeout >= 60 else f"{effective_timeout}秒"
-        return {"error": f"{timeout_label}のタイムアウトを超えました（コマンド: {base_cmd}）。処理がまだ進行中の可能性があります。タイムアウトを延長して再実行しますか？", "stdout": "", "stderr": "", "returncode": -1}
     except FileNotFoundError:
         return {"error": f"コマンド '{args[0]}' が見つかりません", "stdout": "", "stderr": "", "returncode": -1}
     except Exception as e:

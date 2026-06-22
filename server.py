@@ -1766,6 +1766,25 @@ async def execute_tool_async(name: str, arguments: dict) -> str:
         return json.dumps(msg, ensure_ascii=False)
 
 
+def _kill_proc_tree(proc):
+    """asyncio subprocess をプロセスグループごと kill する（start_new_session=True 前提）。
+    バックグラウンドに逃げた孫（疎通確認の curl 等）も道連れにする。
+    start_new_session で独立グループになっているため本体には波及しない。"""
+    import os as _os
+    import signal as _signal
+    if _os.name == "posix":
+        try:
+            pgid = _os.getpgid(proc.pid)
+            _os.killpg(pgid, _signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
 async def _stream_command(arguments: dict):
     """run_command をストリーミングで実行する async generator。
     {'type': 'line', 'line': str} を逐次 yield し、最後に {'type': 'result', 'result': str} を yield する。
@@ -1862,10 +1881,12 @@ async def _stream_command(arguments: dict):
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(resolved_work_dir),
             env=merged_env,
+            start_new_session=True,  # 独立セッション化（タイムアウト時のグループkillが本体に波及しない）
         )
     except FileNotFoundError:
         yield {"type": "result", "result": json.dumps({"error": f"コマンド '{args[0]}' が見つかりません", "stdout": "", "stderr": "", "returncode": -1})}
@@ -1881,21 +1902,46 @@ async def _stream_command(arguments: dict):
     try:
         loop = asyncio.get_event_loop()
         deadline = (loop.time() + effective_timeout) if effective_timeout else None
-        async for line_bytes in proc.stdout:
+        # async for だと「次の行（EOF）待ち」で固まり、出力ゼロのコマンド（疎通確認の
+        # curl 等）でタイムアウト判定に到達しない。readline をタイムアウト付きで待ち、
+        # 出力が無くても deadline とプロセス終了を毎回チェックする方式にする。
+        while True:
+            try:
+                line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=0.5)
+            except asyncio.TimeoutError:
+                # 0.5秒以内に行が来なかった: deadline 超過 or プロセス終了をチェック
+                if deadline and loop.time() > deadline:
+                    timed_out = True
+                    _kill_proc_tree(proc)
+                    break
+                if proc.returncode is not None:
+                    break  # 終了済みで出力も尽きた
+                continue
+            if not line_bytes:
+                break  # EOF（プロセスが出力を閉じた）
             line = line_bytes.decode("utf-8", errors="replace")
             stdout_lines.append(line)
             yield {"type": "line", "line": line.rstrip()}
             if deadline and loop.time() > deadline:
                 timed_out = True
-                proc.kill()
+                _kill_proc_tree(proc)
                 break
     except Exception as e:
-        proc.kill()
+        _kill_proc_tree(proc)
         yield {"type": "result", "result": json.dumps({"error": str(e), "stdout": _truncate_output("".join(stdout_lines)), "stderr": "", "returncode": -1})}
         return
 
-    await proc.wait()
-    stderr_bytes = await stderr_task
+    # プロセス終了待ち（タイムアウトで kill 済みでも reap する）。念のため wait もガード。
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        _kill_proc_tree(proc)
+    # stderr の read も EOF 待ちで固まりうるのでガードする
+    try:
+        stderr_bytes = await asyncio.wait_for(stderr_task, timeout=2)
+    except asyncio.TimeoutError:
+        stderr_task.cancel()
+        stderr_bytes = b""
     stderr_str = stderr_bytes.decode("utf-8", errors="replace")
 
     if timed_out:

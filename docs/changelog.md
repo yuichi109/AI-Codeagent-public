@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-06-22（セッション61）Linux setup.sh の Playwright Chromium 版数固定（v1.20.4）
+
+- **症状**: 新規 Linux/WSL 環境（Win Server 2025 上の WSL Ubuntu 等）で `setup.sh install` 後にブラウザ操作（スクショ等）が `Browser "chrome-for-testing" is not installed` 等で失敗。手動で `pip install playwright==1.60.0 && python3 -m playwright install chromium` を打つと復活していた。
+- **原因（版数ドリフト）**: `config/mcp_servers.json` は `@playwright/mcp@0.0.74`（chromium-**1223** 要求）に固定済みだったが、`setup.sh` 側のブラウザ導入が `npx --yes @playwright/mcp install-browser chromium`（**版数指定なし＝latest**）で chromium-1226/1228 を入れてしまい不一致。Windows の `start.bat` は `pip install playwright==1.60.0` で 1223 に固定済みだったが、**Linux の `setup.sh` だけ固定漏れ**だった。
+- **修正**: `setup.sh` のブラウザ導入を venv 方式の固定版に変更 — `"$VENV_DIR/bin/pip" install playwright==1.60.0` → `"$VENV_DIR/bin/python" -m playwright install chromium`。これで chromium-1223 が共有キャッシュ（`~/.cache/ms-playwright`）に入り `@0.0.74` と揃う。npx 経由のDL後フリーズ既知バグも回避。`install-deps`（システム依存）は版数非依存のため変更なし。
+- 関連: pip と @playwright/mcp の chromium revision を必ず揃えるルール（CLAUDE.md「Win版Playwright MCP」節）の Linux 側への適用漏れを解消。
+
+---
+
 ## 2026-06-20（セッション60）ページ縦スクロール復活バグ修正（v1.20.3）
 
 - **症状**: Windows Server 2025（Edge/Chrome）で、突然スクロールバーが消えてページの上下にアクセスできなくなる（入力UIごと画面外に隠れる）。ブラウザ幅を狭めてモバイルサイズにするとスクロールバーと入力UIが復活する。Win11では再現せず。

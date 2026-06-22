@@ -198,13 +198,17 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         sudo apt-get install -y nodejs
         ok "Node.js をインストールしました: $(node --version)"
     fi
-    # Playwright MCP 用 Chromium のプリインストール
+    # Playwright MCP 用 Chromium のプリインストール（chromium-1223 に固定）
+    # config/mcp_servers.json の @playwright/mcp@0.0.74 は chromium-1223 を要求するため、
+    # npx(latest) ではなく pip の playwright==1.60.0 経由で入れて版数を揃える
+    # （npx 経由はダウンロード後にフリーズする既知バグもあるため避ける）
     info "Playwright Chromium（MCP用）をインストール中..."
-    if npx --yes @playwright/mcp install-browser chromium 2>&1 | tail -3; then
+    "$VENV_DIR/bin/pip" install playwright==1.60.0 -q
+    if "$VENV_DIR/bin/python" -m playwright install chromium 2>&1 | tail -3; then
         ok "Playwright Chromium をインストールしました"
     else
         warn "Playwright Chromium のインストールに失敗しました（後で手動で実行してください）"
-        warn "  npx @playwright/mcp install-browser chromium"
+        warn "  $VENV_DIR/bin/python -m playwright install chromium"
     fi
     # Playwright システム依存パッケージ（chrome-for-testing の実行に必要）
     info "Playwright システム依存パッケージをインストール中..."

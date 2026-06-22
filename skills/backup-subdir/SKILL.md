@@ -10,7 +10,8 @@ workspace 以下のサブディレクトリを **個別の tar.gz** でバック
 
 ### バックアップ
 
-1. `list_files()` で **workspace 直下** のサブディレクトリ一覧を取得し、**番号付きリスト**で表示する
+1. **`list_files(".")`** で **workspace ルート（ALLOWED_WORK_DIR）の直下**のサブディレクトリ一覧を取得し、**番号付きリスト**で表示する
+   - **重要**: 現在のセッションのスコープが `AI` 等になっていても、**その中ではなく必ず workspace ルート直下**を対象にする（`list_files(".")` は常に workspace ルートを指す）。サブディレクトリの中（`list_files("AI")` 等）を見てはいけない。
 2. ユーザーが番号（複数可: 1,3）を入力
 3. `mkdir -p ~/Backups/` で保存先を確保
 4. 選択された各ディレクトリを `tar czf ~/Backups/<dir>_<YYYYMMDD>.tar.gz <dir>` で個別圧縮（work_dir は workspace ルート・`timeout_minutes` を指定）

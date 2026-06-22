@@ -13,12 +13,16 @@ workspace 以下のサブディレクトリを **個別の tar.gz** でバック
 1. **`list_files(".")`** で **workspace ルート（ALLOWED_WORK_DIR）の直下**のサブディレクトリ一覧を取得し、**番号付きリスト**で表示する
    - **重要**: 現在のセッションのスコープが `AI` 等になっていても、**その中ではなく必ず workspace ルート直下**を対象にする（`list_files(".")` は常に workspace ルートを指す）。サブディレクトリの中（`list_files("AI")` 等）を見てはいけない。
 2. ユーザーが番号（複数可: 1,3）を入力
-3. `mkdir -p ~/Backups/` で保存先を確保
-4. 選択された各ディレクトリを `tar czf ~/Backups/<dir>_<YYYYMMDD>.tar.gz <dir>` で個別圧縮（work_dir は workspace ルート・`timeout_minutes` を指定）
-5. 既存ファイルがある場合は「上書きしますか？（y）／時刻付きで別名保存しますか？（t）」と確認
-   - **y** → 上書き保存
-   - **t** → `tar czf ~/Backups/<dir>_<YYYYMMDD>_<HHMMSS>.tar.gz <dir>` で時刻まで付与して別名保存
-6. 完了時 `ls -lh ~/Backups` でファイルサイズ一覧を表示
+3. `mkdir -p ~/Backups/` で保存先を確保し、日付を `date +%Y%m%d` で取得しておく
+4. 選択された各ディレクトリについて、**必ず圧縮（tar）の前に**保存先ファイルの有無を確認する
+   - ⚠️ **`tar czf` は既存ファイルを無条件で黙って上書きする**。確認は必ず**圧縮の前**に行うこと（圧縮してから確認しても手遅れ＝既に上書き済み）。
+   - `test -f ~/Backups/<dir>_<YYYYMMDD>.tar.gz && echo EXISTS` で存在確認（`EXISTS` と出れば既存ファイルあり）
+   - **既存だった場合** → 「上書きしますか？（y）／時刻付きで別名保存しますか？（t）」と確認し、**ユーザーの回答を待ってから**圧縮する
+     - **y** → `tar czf ~/Backups/<dir>_<YYYYMMDD>.tar.gz <dir>`（上書き）
+     - **t** → 時刻を `date +%H%M%S` で取得し `tar czf ~/Backups/<dir>_<YYYYMMDD>_<HHMMSS>.tar.gz <dir>`
+   - **存在しなかった場合** → そのまま `tar czf ~/Backups/<dir>_<YYYYMMDD>.tar.gz <dir>`
+   - いずれも work_dir は workspace ルート・`timeout_minutes`（例10）を指定
+5. 完了時 `ls -lh ~/Backups` でファイルサイズ一覧を表示
 
 ### リストア
 

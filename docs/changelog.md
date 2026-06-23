@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-06-23（セッション63）協調型マルチエージェント「チーム方式」Step1＋Step2 実装（v1.21.0・feature/multi-agent-team）
+
+> パイプライン方式（逐次・会話なし）は無改修で温存し、Claude Code Agent Teams に倣った
+> **チーム方式（並列・mailbox 直接通信・共有タスクリスト）**を UI トグルで追加。
+> 設計書: `docs/multi-agent-team-design.md` / 詳細メモリ: [[project-multi-agent-team]]。
+> **このブランチのみ。main / for_windows は無変更**（全体確認後にマージするユーザー方針）。
+
+### Step1: 協調コア
+- 新規 `tools/team_tools.py`:
+  - **共有タスクリスト** `tasks.json`: self-claim（pending かつ依存完了のみ取得）・`os.open(O_CREAT|O_EXCL)` ファイルロックで同時 claim 競合防止・完了で依存 unblock。
+  - **mailbox**: 宛先別 `mailbox/{name}.jsonl` 追記＋既読オフセットで未読のみ取得。`send_message`/`read_messages`/`list_tasks`。総送信数 `MULTI_AGENT_MAX_MESSAGES`(20) で暴走ガード。
+  - `run_team_member`: teammate のエージェントループ。**ターン冒頭に自分宛 mailbox を機械注入**（弱モデルが read_messages を呼び忘れても会話に入る）。ツール未使用でテキストだけ返したら**1回催促**。
+  - **専用便箋 executor**（`make_team_executor`）: job_dir＋自分の名前をクロージャで束ね、チームツールを処理。新ツールは**グローバル登録しない**（コンテキスト依存＝並列で取り違え防止）。
+  - `dispatch_team_task`: 依存グラフ付き plan.json を生成。
+- `prompts.py`: `dispatcher_team`（並列化を強く促す指針）・`get_team_member_prompt`。
+- `server.py`: `team_agent_stream`（plan_ready 確認フローは既存流用）・`ChatRequest.team_mode`・/chat 分岐（再開時は plan.json の mode を優先）。
+- `index.html`: 「パイプライン⇔チーム」トグル追加（既定パイプライン＝既存無改修）。**キャッシュバスター無し→ハードリロード必要**。
+- `config.py`: `MULTI_AGENT_TEAM_ENABLED`(true)・`MULTI_AGENT_MAX_PARALLEL`・`MULTI_AGENT_MAX_MESSAGES`。
+
+### Step2: ワーカープール＋検収/差し戻し＋並列化
+- **ワーカープール方式（A案）**: 役割に縛られず、空いたワーカー（`agent-1`…）が**実行可能なタスクを何でも取る**。`asyncio.gather`＋`Semaphore(max_parallel)` で同時実行。同役割の独立タスクが**真に並列**で走る（電卓4実装が agent-1〜4 で同時稼働を確認）。
+- **リード検収＋1回差し戻し**: teammate 完了後に宣言ファイル（`files`）の実在を `verify_task_files` で確認。無ければ「未作成」を伝えて**1回だけ再実行**、それでも無ければ正直に **未達** と記録（完了の嘘を撲滅）。
+- **相対パスの自動補正**（検証中に発見した真因の修正）: teammate の相対パス（`code/x.py` 等）を **job_dir 基準に正す**。従来は workspace ルートに落ちてファイル消失に見えていた。`path`/`file_path`/`work_dir` を補正。
+- `MULTI_AGENT_MAX_PARALLEL` 既定 **5**（天井。計画値は `min` で上限クランプ）。
+- ディスパッチャー指針強化: 独立な同種作業は鎖で依存させず共通の設計だけに依存＝並列化。
+
+### 検証（e2e: `tests/e2e_team.py`・実 LLM）
+- 単体: claim 競合・依存解決・mailbox 未読・専用便箋 executor 合格。
+- e2e（電卓）: 5ワーカー・コーディング4タスク同時並列・差し戻しで全完了・四則＋テスト＋test-result.md を**全て job_dir 内に生成**・workspace 漏れゼロ。
+- パイプライン方式の回帰なし（従来の逐次フロー維持を確認）。
+
+### Step3 向け残課題（次セッション）
+- 検収がファイルの「有無」のみ（中身の妥当性・テスト合否は未検収）。
+- teammate の status ファイル作り忘れで差し戻しが多発気味（プロンプト or 検収対象の調整余地）。
+- 複数 teammate の進捗が 1 本の SSE にラベル表示のみ（per-agent 表示未実装）・plan 承認モード未実装。
+
+---
+
 ## 2026-06-22（セッション61）`/backup-subdir` 同名上書きバグ修正（v1.20.10）
 
 - **症状**: 既に同名のバックアップファイルがあると、確認なしで**上書きされてしまう**。

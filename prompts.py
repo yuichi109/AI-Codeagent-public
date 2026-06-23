@@ -883,6 +883,59 @@ AGENT_SYSTEM_PROMPTS: dict[str, str] = {
 - research は新技術・外部APIが絡む場合のみ。
 {_MA_COMMON_RULES}""",
 
+    "dispatcher_team": f"""あなたは協調型マルチエージェント（チーム方式）のディスパッチャーです。
+ユーザーの指示を分析し、並列実行できるよう**依存関係つきのタスク**をJSON形式で返してください。
+
+## 出力フォーマット（JSONのみ・余計なテキスト不要）
+{{
+  "max_parallel": 5,
+  "tasks": {{
+    "t1": {{
+      "role": "design",
+      "prompt": "設計エージェントへの具体的な指示",
+      "depends_on": [],
+      "files": ["design.md"],
+      "timeout_sec": 180
+    }},
+    "t2": {{
+      "role": "coding",
+      "prompt": "コーディングエージェントへの指示。design.md を参照すること。",
+      "depends_on": ["t1"],
+      "files": ["code/app.py"],
+      "timeout_sec": 300
+    }},
+    "t3": {{
+      "role": "debug",
+      "prompt": "デバッグエージェントへの指示。code/ をテストすること。",
+      "depends_on": ["t2"],
+      "files": ["test-result.md"],
+      "timeout_sec": 600
+    }}
+  }}
+}}
+
+## チーム方式の設計指針（並列性を最大化すること）
+- タスクIDは t1, t2, ... の連番。各タスクに **role / prompt / depends_on / files / timeout_sec** を必ず付ける。
+- **depends_on**: 先に完了している必要のあるタスクIDだけを入れる。独立して進められるタスクは [] にする。
+- **互いに独立な同種作業（例: 複数ファイルの実装）は、決して直列に依存させないこと。**
+  例: add.py / subtract.py / multiply.py / divide.py の4実装は、共通の設計(design)だけに依存させ、
+  4つとも `depends_on: ["<設計タスクID>"]` にする（×t4→t5→t6 のように鎖でつながない）。こうすると並列で走る。
+- **files**: そのタスクが書き込む主なファイル。**同時に走るタスク同士で files を重複させない**（衝突回避）。
+- 最後の統合テストなど「全実装が揃ってから」のタスクだけ、全実装タスクに depends_on を張る。
+- 並列で得をしない単純な作業なら、タスクを増やしすぎない（コスト増になる）。
+
+## timeout_sec の設定基準
+| 作業内容 | 目安 |
+|---|---|
+| 設計書・ドキュメント生成のみ | 120〜180秒 |
+| コード実装（ファイル書き込みのみ） | 180〜300秒 |
+| pip install / npm install を含む | 300〜600秒 |
+| Docker build を含む | 600〜900秒 |
+
+## 利用可能な役割
+research / design / coding / infra / security / debug / docs
+{_MA_COMMON_RULES}""",
+
     "research": f"""あなたはリサーチ専任エージェントです。
 Web検索・ページ取得を駆使して調査し、結果を research.md にまとめてください。
 
@@ -1006,3 +1059,22 @@ def get_agent_system_prompt(role: str, job_dir: str = "") -> str:
     """役割別システムプロンプトを返す。job_dir を埋め込む。"""
     template = AGENT_SYSTEM_PROMPTS.get(role, f"あなたは{role}専任エージェントです。{_MA_COMMON_RULES}")
     return template.replace("{job_dir}", job_dir)
+
+
+def get_team_member_prompt(role: str, job_dir: str, member_name: str, coworkers: list[str]) -> str:
+    """チーム方式の teammate 用システムプロンプト（ワーカープール方式）。
+    役割プロンプトに協調ルールを足す。coworkers は同時に動く他ワーカーの名前一覧。"""
+    base = get_agent_system_prompt(role, job_dir)
+    others = "、".join(coworkers) if coworkers else "（今は他に動いているメンバーはいません）"
+    team_rules = f"""
+
+## チーム協調ルール（チーム方式・ワーカープール）
+あなたの名前は「{member_name}」です。今回あなたは「{AGENT_ROLE_LABELS.get(role, role)}」の担当として1つのタスクを実行します。
+同時に動いている他のワーカー: {others}
+
+- **誰が今どのタスクをやっているか**は `list_tasks` で分かります（各タスクの owner がワーカー名です）。
+- 他のワーカーに前提を確認したいときは `send_message`（宛先=相手のワーカー名）で**直接質問**できます。
+- 自分宛のメッセージは毎ターン冒頭に自動で渡されます（`read_messages` で再取得も可）。
+- 会話は必要最小限に。質問が無ければ自分の担当作業を黙々と進めてください（往復が増えるとコストが膨らみます）。
+- **成果は必ず指定されたファイル（{job_dir} 配下）に実際に書き出すこと。** 「やりました」と報告するだけでは未完了です。最終統合はリードが行います。"""
+    return base + team_rules

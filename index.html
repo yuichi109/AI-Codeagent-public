@@ -180,8 +180,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #ma-btn svg { width: 15px; height: 15px; }
   #ma-btn:hover { color: #cdd6f4; border-color: #6c7086; }
   #ma-btn.active { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
-  #maq-dd .dd-btn { border-radius: 0 8px 8px 0; border-left: none; color: #a6adc8; }
+  #maq-dd .dd-btn { border-radius: 0; border-left: none; color: #a6adc8; }
   #ma-btn.active + #maq-dd .dd-btn { color: #cba6f7; border-color: #cba6f7; }
+  #mat-dd .dd-btn { border-radius: 0 8px 8px 0; border-left: none; color: #a6adc8; }
+  #ma-btn.active ~ #mat-dd .dd-btn { color: #cba6f7; border-color: #cba6f7; }
   #srcimg-clear-btn { display: inline-grid; place-items: center; height: 32px; padding: 0 7px; background: rgba(137,180,250,0.18); color: #a6adc8; border: none; border-radius: 0 8px 8px 0; cursor: pointer; font-size: 13px; transition: color 0.15s, background 0.15s; }
   #srcimg-clear-btn:hover { color: #f38ba8; background: #3d2030; }
   #srcimg-btn.active { border-radius: 8px 0 0 8px; }
@@ -1359,7 +1361,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             <button type="button" class="dd-item" data-value="auto">自動</button>
           </div>
         </div>
-        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div></span>
+        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: パイプライン（逐次）/ チーム（並列・mailbox）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">パイプライン</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="pipeline">パイプライン</button><button type="button" class="dd-item" data-value="team">チーム（並列）</button></div></div></span>
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
@@ -2121,15 +2123,18 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   function updateMultiAgentBtn() {
     const btn = document.getElementById('ma-btn');
     const dd = document.getElementById('maq-dd');
+    const td = document.getElementById('mat-dd');
     if (!btn) return;
     if (isMultiAgentActive()) {
       btn.classList.add('active');
       btn.title = 'マルチエージェント: ON（複数AIが役割分担して実行）';
       if (dd) dd.style.display = '';
+      if (td) td.style.display = '';
     } else {
       btn.classList.remove('active');
       btn.title = 'マルチエージェント: OFF（通常の単一エージェントモード）';
       if (dd) dd.style.display = 'none';
+      if (td) td.style.display = 'none';
     }
   }
   // 品質/コスト設定は専用キー maQuality に保存（旧実装は agentMode と共用で壊れていた）
@@ -2146,10 +2151,26 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const dd = document.getElementById('maq-dd');
     if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
   }
+  // 実行方式（パイプライン⇔チーム）: 既定はパイプライン（既存挙動を変えない）
+  function getTeamMethod() {
+    return localStorage.getItem('maMethod') || 'pipeline';
+  }
+  const MAT_LABELS = { pipeline: 'パイプライン', team: 'チーム（並列）' };
+  function updateMaMethod() {
+    const btn = document.getElementById('mat-dd-btn');
+    if (!btn) return;
+    const v = getTeamMethod();
+    const lbl = btn.querySelector('.dd-label');
+    if (lbl) lbl.textContent = MAT_LABELS[v] || v;
+    const dd = document.getElementById('mat-dd');
+    if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
+  }
   // 初期化
   updateMultiAgentBtn();
   updateMaQuality();
+  updateMaMethod();
   _initDropdown('maq-dd', (v) => { localStorage.setItem('maQuality', v); updateMaQuality(); });
+  _initDropdown('mat-dd', (v) => { localStorage.setItem('maMethod', v); updateMaMethod(); });
 
   function stopGeneration() {
     if (abortController) abortController.abort();
@@ -4799,6 +4820,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           workspace_scope: currentWorkspaceScope,
           multi_agent: isMultiAgentActive(),
           agent_mode: getAgentMode(),
+          team_mode: getTeamMethod() === 'team',
           resume_job_id: resumeJobId || '',
         }),
       });

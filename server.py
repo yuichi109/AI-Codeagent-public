@@ -81,6 +81,7 @@ from tools.code_tools import code_lint
 from tools.verify_tools import augment_tool_result_with_verify
 from config import VERIFY_ON_WRITE_ENABLED
 from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SECONDS, ASYNC_MAX_TURNS
+from config import MULTI_AGENT_TEAM_ENABLED, MULTI_AGENT_MAX_PARALLEL, MULTI_AGENT_TIMEOUT_SEC as _MA_TIMEOUT_SEC
 from tools import schedule_db
 from tools.scheduler import scheduler_loop as _scheduler_loop
 from tools.todo_tools import todo_update, todo_read
@@ -1973,6 +1974,7 @@ class ChatRequest(BaseModel):
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
+    team_mode: bool = False      # True=協調型チーム方式 / False=パイプライン方式（既存・既定）
     resume_job_id: str = ""     # 計画確認後の再開ジョブID
 
 
@@ -2297,6 +2299,194 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
     except Exception as e:
         import traceback
         yield _sse(f"❌ マルチエージェントエラー: `{type(e).__name__}: {e}`")
+        print(traceback.format_exc())
+
+    yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+
+
+async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = ""):
+    """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
+    Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
+    Phase 2: ユーザー返答を解釈 → 実行（並列＋self-claim＋mailbox）/ 再計画 / キャンセル
+    パイプライン方式（multi_agent_stream）は無改修で温存。
+    """
+    import asyncio as _asyncio
+    import time
+    from tools.multi_agent_tools import generate_final_report, new_job_id
+    from tools.team_tools import (
+        dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
+        verify_task_files,
+    )
+    from prompts import get_team_member_prompt, AGENT_ROLE_LABELS
+
+    def _sse(text: str) -> str:
+        return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
+
+    ma_cfg = _load_ma_config()
+    d_cfg    = ma_cfg.get("dispatcher", {})
+    d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
+    d_model  = d_cfg.get("model", _provider_config["model"])
+    d_client = _make_async_client_for(d_preset)
+
+    def _plan_lines(plan: dict) -> str:
+        out = ""
+        for tid, t in plan.get("tasks", {}).items():
+            label = AGENT_ROLE_LABELS.get(t.get("role", ""), t.get("role", ""))
+            deps = t.get("depends_on", [])
+            dep_s = f" (依存: {', '.join(deps)})" if deps else " (並列可)"
+            out += f"- `{tid}` **{label}**: {t.get('prompt', '')[:70]}{dep_s}\n"
+        return out
+
+    try:
+        if resume_job_id:
+            # ---- Phase 2: ユーザー返答を解釈 ----
+            job_id = resume_job_id
+            base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+            job_dir = base_dir / "jobs" / job_id
+            if not (job_dir / "plan.json").exists():
+                candidates = list(ALLOWED_WORK_DIR.glob(f"*/jobs/{job_id}")) + [ALLOWED_WORK_DIR / "jobs" / job_id]
+                job_dir = next((c for c in candidates if (c / "plan.json").exists()), job_dir)
+            plan_file = job_dir / "plan.json"
+            if not plan_file.exists():
+                yield _sse("❌ ジョブが見つかりません。\n")
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            plan = json.loads(plan_file.read_text(encoding="utf-8"))
+            original_task_file = job_dir / "original_task.txt"
+            original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
+
+            action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
+            action = action_result.get("action", "execute")
+            notes  = action_result.get("notes", "")
+
+            if action == "cancel":
+                yield _sse("🚫 了解しました、キャンセルします。\n")
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            if action == "replan":
+                yield _sse("🔄 計画を修正中...\n\n")
+                revised_message = original_task + (f"\n\n【修正指示】{notes}" if notes else "")
+                plan = await dispatch_team_task(revised_message, d_client, d_model, job_dir)
+                plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+                yield _sse(_plan_lines(plan))
+                yield _sse("\nこの内容でよろしいですか？\n")
+                roles = list(dict.fromkeys(t.get("role") for t in plan.get("tasks", {}).values()))
+                yield f"data: {json.dumps({'type': 'plan_ready', 'job_id': job_id, 'roles': roles})}\n\n"
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            yield _sse(f"▶ **チーム実行開始** (job: `{job_id}`)\n\n")
+
+        else:
+            # ---- Phase 1: 新規ジョブ → 計画表示 → 停止 ----
+            job_id = new_job_id()
+            base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+            job_dir = base_dir / "jobs" / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+
+            yield _sse(f"👥 **チーム方式マルチエージェント** (job: `{job_id}`)\n\n")
+            yield _sse("📋 タスク分解中...\n\n")
+
+            plan = await dispatch_team_task(user_message, d_client, d_model, job_dir)
+            (job_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
+            (job_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+
+            yield _sse(_plan_lines(plan))
+            yield _sse("\nこの流れで実行してよいですか？ タスクの追加・変更があればお知らせください。\n")
+            roles = list(dict.fromkeys(t.get("role") for t in plan.get("tasks", {}).values()))
+            yield f"data: {json.dumps({'type': 'plan_ready', 'job_id': job_id, 'roles': roles})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+            return
+
+        # ---- 実行フェーズ（ワーカープール＝役割に縛られず空いた人が取る・self-claim・mailbox・検収/差し戻し）----
+        init_team_job(plan, job_dir)
+        # 設定値を天井とし、計画が大きい値を出しても超えさせない。タスク数より多くは立てない。
+        max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
+        n_tasks = len(plan.get("tasks", {}))
+        n_workers = max(1, min(max_parallel, n_tasks))
+        workers = [f"agent-{i+1}" for i in range(n_workers)]
+        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(workers))}）が空いたタスクから並列で着手します\n\n")
+
+        sem = _asyncio.Semaphore(max_parallel)
+        queue: _asyncio.Queue = _asyncio.Queue()
+        # 全タスクが在りうる最大待ち時間（デッドロック保険）
+        deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
+
+        async def worker(name: str):
+            coworkers = [w for w in workers if w != name]
+            while time.time() < deadline:
+                claimed = claim_task(job_dir, name)   # role=None: 役割を問わず実行可能なものを取る
+                if claimed.get("none"):
+                    if claimed.get("pending_remain"):
+                        await _asyncio.sleep(2)   # 依存待ち
+                        continue
+                    break                          # 実行可能な pending なし → 退場
+                tid = claimed["id"]
+                role = claimed.get("role", "")
+                label = AGENT_ROLE_LABELS.get(role, role)
+                role_cfg = ma_cfg.get(role, d_cfg)
+                preset_id = claimed.get("preset_id") or role_cfg.get("preset_id", d_preset)
+                model     = claimed.get("model")     or role_cfg.get("model", d_model)
+                client    = _make_async_client_for(preset_id)
+                sys_prompt = get_team_member_prompt(role, str(job_dir), name, coworkers)
+                queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
+                async with sem:
+                    missing: list[str] = []
+                    try:
+                        # 1回実行 → 宣言ファイルを検収 → 未達なら1回だけ差し戻し再実行
+                        for attempt in range(2):
+                            prompt = claimed.get("prompt", "")
+                            if attempt == 1:
+                                prompt += (
+                                    f"\n\n【リードからの差し戻し】前回の実行で次のファイルが作成されていません: "
+                                    f"{', '.join(missing)}\n必ずツール（write_file 等）で実際に作成してください。"
+                                )
+                                queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（未作成: {', '.join(missing)}）\n")
+                            await run_team_member(
+                                member_name=name, role=role, system_prompt=sys_prompt,
+                                task_prompt=prompt, all_tools=TOOLS,
+                                base_executor=execute_tool_async, async_client=client,
+                                model=model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
+                            )
+                            missing = verify_task_files(job_dir, claimed)
+                            if not missing:
+                                break
+                        if missing:
+                            complete_task(job_dir, tid, f"未達（未作成: {', '.join(missing)}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{', '.join(missing)} が作成されず）\n")
+                        else:
+                            complete_task(job_dir, tid, "完了")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
+                    except Exception as e:
+                        complete_task(job_dir, tid, f"エラー: {type(e).__name__}: {e}")
+                        queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
+                        print(f"[team_agent] {name}/{tid} エラー: {e}")
+
+        async def run_all():
+            try:
+                await _asyncio.gather(*[worker(w) for w in workers])
+            finally:
+                queue.put_nowait(None)
+
+        runner = _asyncio.create_task(run_all())
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield _sse(item)
+        await runner  # 例外を表に出す
+
+        yield _sse("\n📄 最終報告書を生成中...\n\n")
+        report = await generate_final_report(d_client, d_model, job_dir)
+        yield _sse(f"---\n\n{report}\n\n")
+        scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
+        yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
+
+    except Exception as e:
+        import traceback
+        yield _sse(f"❌ チーム方式エラー: `{type(e).__name__}: {e}`")
         print(traceback.format_exc())
 
     yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
@@ -3164,7 +3354,21 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     if req.multi_agent or req.resume_job_id:
-        stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
+        # チーム方式か判定。再開時は plan.json の mode を優先（トグルの取り違え防止）。
+        use_team = req.team_mode
+        if req.resume_job_id:
+            try:
+                _base = (ALLOWED_WORK_DIR / req.workspace_scope) if req.workspace_scope else ALLOWED_WORK_DIR
+                _cands = [_base / "jobs" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f"*/jobs/{req.resume_job_id}")) + [ALLOWED_WORK_DIR / "jobs" / req.resume_job_id]
+                _pf = next((c / "plan.json" for c in _cands if (c / "plan.json").exists()), None)
+                if _pf:
+                    use_team = json.loads(_pf.read_text(encoding="utf-8")).get("mode") == "team"
+            except Exception:
+                pass
+        if use_team and MULTI_AGENT_TEAM_ENABLED:
+            stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
+        else:
+            stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
     else:
         # mode を優先解釈（後方互換: 旧 bypass_approval フラグも auto 扱いで尊重）
         plan_mode = (req.mode == "plan")

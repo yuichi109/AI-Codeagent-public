@@ -2165,6 +2165,14 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const dd = document.getElementById('mat-dd');
     if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
   }
+  // 起動・動作テスト（納品前にこの環境で実際に起動/実行して検証する）: 既定OFF（安全側）
+  // UIは計画確認時の「▶実行する」の隣のチェックボックスで切替（localStorage に保存）
+  function getStartupTest() {
+    return localStorage.getItem('maStartupTest') === 'true';
+  }
+  function setStartupTest(v) {
+    localStorage.setItem('maStartupTest', v ? 'true' : 'false');
+  }
   // 初期化
   updateMultiAgentBtn();
   updateMaQuality();
@@ -4821,6 +4829,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           multi_agent: isMultiAgentActive(),
           agent_mode: getAgentMode(),
           team_mode: getTeamMethod() === 'team',
+          startup_test: getStartupTest(),
           resume_job_id: resumeJobId || '',
         }),
       });
@@ -5087,10 +5096,13 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             const msgEl = getOrCreateAiMsg()?.el || getOrCreateAiMsg();
             if (msgEl) {
               const btnWrap = document.createElement('div');
-              btnWrap.style.cssText = 'margin-top:12px;display:flex;gap:8px;';
+              btnWrap.style.cssText = 'margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
               btnWrap.innerHTML = `
                 <button onclick="sendMaResume('${data.job_id}','execute')" style="background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:bold;">▶ 実行する</button>
                 <button onclick="sendMaResume('${data.job_id}','cancel')" style="background:#45475a;color:#cdd6f4;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">✕ キャンセル</button>
+                <label title="ONにすると納品前にこの環境で実際に起動/実行して動作確認します。システム変更や他PC向けの構築シェルはOFFのままに（=この環境では実行されません）。ONでも破壊的コマンドは自動で実行拒否します。" style="display:flex;align-items:center;gap:4px;font-size:13px;color:#cdd6f4;cursor:pointer;margin-left:4px;">
+                  <input type="checkbox" ${getStartupTest() ? 'checked' : ''} onchange="setStartupTest(this.checked)"> 🔎 起動テスト
+                </label>
               `;
               msgEl.appendChild(btnWrap);
             }

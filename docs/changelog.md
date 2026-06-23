@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-06-23（セッション64）チーム方式 Step3 堅牢化（v1.21.1・feature/multi-agent-team・未コミット）
+
+> Step3 として検収・納品の信頼性を作り込み。実機で「マルチでdebugまでさせたのに動かない物を納品」「mini が
+> くだらない理由で差し戻され上位モデルに多発フォールバック」という問題を、原因を1つずつ潰して対処。
+> **このブランチのみ・全て未コミット。main / for_windows は無変更。**
+
+### 検収の強化（①）
+- `verify_task_files`: 空/空白だけのファイルも未達扱いに（作ったフリを弾く）。
+- `verify_task` 新設: debug役の `test-result.md` の FAIL を抜粋付きで検出。
+- 差し戻しを毎回エスカレーション（具体的な未達内容を渡す）＋**最終トライだけ上位モデルへ格上げ**（`MULTI_AGENT_ESCALATE_PRESET/MODEL`・空ならディスパッチャーにフォールバック）。前提＝ディスパッチャーを最上位モデルに（config/.env/UIに注意書き）。
+
+### status.md の信頼性
+- 記録を**リード機械化＋ファイルロック**（`update_status_locked`・並列の lost update 防止）。
+- 役割/共有(`_MA_COMMON_RULES`)/`dispatcher_team` プロンプトから「status を書く」手順を全撤去（teammate の丸ごと上書き事故を解消）。
+
+### 429 レート制限
+- ワーカーのLLM呼び出しに指数バックオフ＋ジッター再試行（`_create_with_backoff`・`MULTI_AGENT_RATELIMIT_RETRIES`=5/`_BASE_DELAY`=2.0）。
+
+### 成果物の配置を機械保証（モデル非依存）
+- `reconcile_declared_files`: モデルがどこに書いても宣言パスへ自動集約（同名でも他タスクの正規物は奪わない）。検収の直前に実行。
+- 真因＝コーディング役プロンプトの「出力先 code/」と dispatcher の宣言パス（`js/...`）の矛盾で mini が誤配置→未達→無駄な差し戻し/格上げ。team_rules で「宣言パス厳守・役割の出力先は無効」を上書き＋ワーカーが prompt 冒頭に作成対象ファイルを明示注入。
+
+### 納品ゲート＝「動く証拠が無いものは納品しない」（②の一般化）
+- `run_acceptance_checks`: ディスパッチャーが出す受け入れ条件（**起動確認 startup / 実行確認 run**）をリードが機械実行。**合否は終了コード基準**。`browser_smoke_test`: index.html を実ブラウザ(Playwright)で開き JS/CORS/読込エラーを検出（pageerror＋console error＋requestfailed・favicon除外）。
+- 失敗時は強モデルで1回自動修復→再検証→ダメなら「⚠️未完成」と正直に報告（成功と偽らない）。
+- **安全弁**: `sudo`/`apt`/`systemctl`/`rm -rf`/`ssh`/`curl|bash` 等やスクリプト中身の破壊的コマンドは実行せず静的検証(`bash -n`等)に格下げ。`kind:"syntax"` も静的のみ。→ **システム変更/他PC向け構築シェルをこの開発機で実行する事故を防止**。
+- **UI**: 計画確認の「▶実行する」の隣に「🔎起動テスト」チェックボックス（`startup_test` フラグ・既定OFF＝安全側・localStorage `maStartupTest`）。ヘッダーに最初付けたが秒数/トークン表示を圧迫したため撤去し、実行ボタン横へ移動。
+- 誤判定修正: 受け入れの `expect_contains` を**大文字小文字無視**で照合（`SELFTEST PASSED` vs `selftest passed:` で動く物を偽FAILにしていた件）。dispatcher に「合否は終了コードで・決め打ち文字列は原則使わない」を明示。
+
+### プロンプト（debug安全・Webアプリ）
+- debug役: GUI/ゲーム/サーバー等「終わらないプロセス」を素で起動しない鉄則（py_compile/node --check/コアロジックを実際に呼ぶ）。
+- coding役/dispatcher: ブラウザで直接開くWebアプリは ESモジュール禁止＝通常 `<script>`＋IIFE＋`window`名前空間（`file://` CORS・グローバル二重宣言の回避）。
+
+### テスト・環境
+- `tests/e2e_team_retry.py` 追加（差し戻し→格上げ→status機械記録を LLM不使用で決定論検証・ALL PASS）。各機能を単体検証済み（配置補正/429/ロック/受け入れ run・startup/破壊的格下げ/ブラウザ検出）。
+- venv に `playwright==1.60.0` 導入（chromium-1223 既存利用）。`config.py` `APP_VERSION` 1.21.0→1.21.1。
+
+---
+
 ## 2026-06-23（セッション63）協調型マルチエージェント「チーム方式」Step1＋Step2 実装（v1.21.0・feature/multi-agent-team）
 
 > パイプライン方式（逐次・会話なし）は無改修で温存し、Claude Code Agent Teams に倣った

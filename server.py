@@ -82,6 +82,7 @@ from tools.verify_tools import augment_tool_result_with_verify
 from config import VERIFY_ON_WRITE_ENABLED
 from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SECONDS, ASYNC_MAX_TURNS
 from config import MULTI_AGENT_TEAM_ENABLED, MULTI_AGENT_MAX_PARALLEL, MULTI_AGENT_TIMEOUT_SEC as _MA_TIMEOUT_SEC
+from config import MULTI_AGENT_MAX_RETRIES, MULTI_AGENT_ESCALATE_PRESET, MULTI_AGENT_ESCALATE_MODEL
 from tools import schedule_db
 from tools.scheduler import scheduler_loop as _scheduler_loop
 from tools.todo_tools import todo_update, todo_read
@@ -1975,6 +1976,7 @@ class ChatRequest(BaseModel):
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
     team_mode: bool = False      # True=協調型チーム方式 / False=パイプライン方式（既存・既定）
+    startup_test: bool = False   # True=納品前にこの環境で起動/実行テストを行う（既定OFF=安全側）
     resume_job_id: str = ""     # 計画確認後の再開ジョブID
 
 
@@ -2304,7 +2306,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
     yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
 
 
-async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = ""):
+async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False):
     """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
     Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
     Phase 2: ユーザー返答を解釈 → 実行（並列＋self-claim＋mailbox）/ 再計画 / キャンセル
@@ -2315,7 +2317,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
     from tools.multi_agent_tools import generate_final_report, new_job_id
     from tools.team_tools import (
         dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
-        verify_task_files,
+        verify_task, reconcile_declared_files, update_status_locked as _update_status,
+        find_entry_html, browser_smoke_test, run_acceptance_checks,
     )
     from prompts import get_team_member_prompt, AGENT_ROLE_LABELS
 
@@ -2433,34 +2436,71 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                 sys_prompt = get_team_member_prompt(role, str(job_dir), name, coworkers)
                 queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
                 async with sem:
-                    missing: list[str] = []
+                    problems: list[str] = []
+                    # 実行 → 検収（ファイル有無/空＋中身）→ 未達なら差し戻し再実行。
+                    # 回数は MULTI_AGENT_MAX_RETRIES（既定2＝計3トライ）。差し戻しは毎回エスカレーション
+                    # （具体的な未達内容・テスト失敗の抜粋を渡す）。最終トライだけ上位モデルへ格上げ。
+                    max_attempts = MULTI_AGENT_MAX_RETRIES + 1
+                    # 作成対象ファイルを prompt 先頭に明示し、宣言パス厳守を強制する。
+                    # （役割プロンプトの汎用「出力先 code/」に弱いモデルが引っ張られ、宣言と違う場所に
+                    #  書いて検収を落とす＝無駄な差し戻し/格上げを誘発する事故を防ぐ。最重要修正）
+                    _decl_files = claimed.get("files", [])
+                    if _decl_files:
+                        _files_str = "\n".join(f"- {f}" for f in _decl_files)
+                        base_prompt = (
+                            "【作成・編集するファイルはこれだけ。下記の相対パスを1文字も変えずに作ること。"
+                            "code/ などの別の場所には絶対に作らない（役割の一般的な『出力先』より、このパス指定が優先）】\n"
+                            f"{_files_str}\n\n" + claimed.get("prompt", "")
+                        )
+                    else:
+                        base_prompt = claimed.get("prompt", "")
                     try:
-                        # 1回実行 → 宣言ファイルを検収 → 未達なら1回だけ差し戻し再実行
-                        for attempt in range(2):
-                            prompt = claimed.get("prompt", "")
-                            if attempt == 1:
+                        for attempt in range(max_attempts):
+                            is_final = attempt == max_attempts - 1
+                            prompt = base_prompt
+                            run_client, run_model = client, model
+                            if attempt >= 1:
+                                detail = "\n".join(f"- {p}" for p in problems)
                                 prompt += (
-                                    f"\n\n【リードからの差し戻し】前回の実行で次のファイルが作成されていません: "
-                                    f"{', '.join(missing)}\n必ずツール（write_file 等）で実際に作成してください。"
+                                    f"\n\n【リードからの差し戻し（{attempt}回目）】前回の成果に次の問題があります:\n{detail}\n"
+                                    f"上記を解消し、必ずツール（write_file / run_command 等）で成果ファイルを実際に作り直してください。"
                                 )
-                                queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（未作成: {', '.join(missing)}）\n")
+                                queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（{attempt}回目）\n")
+                            # 最終トライは上位モデルへ格上げ（未設定ならディスパッチャーのモデル）。
+                            # 前提: ディスパッチャー＝最上位モデル（config の注意書き参照）なので、
+                            # フォールバック差し替えは常に「同等か格上げ」になり格下げしない。
+                            if is_final and attempt >= 1:
+                                esc_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
+                                esc_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
+                                if (esc_preset, esc_model) != (preset_id, model):
+                                    run_client = _make_async_client_for(esc_preset)
+                                    run_model  = esc_model
+                                    queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
                             await run_team_member(
                                 member_name=name, role=role, system_prompt=sys_prompt,
                                 task_prompt=prompt, all_tools=TOOLS,
-                                base_executor=execute_tool_async, async_client=client,
-                                model=model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
+                                base_executor=execute_tool_async, async_client=run_client,
+                                model=run_model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
                             )
-                            missing = verify_task_files(job_dir, claimed)
-                            if not missing:
+                            # 検収の前に、迷子ファイルを宣言パスへ機械的に集約（モデル非依存の保証層）
+                            relocated = reconcile_declared_files(job_dir, claimed)
+                            if relocated:
+                                queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
+                            problems = verify_task(job_dir, claimed)
+                            if not problems:
                                 break
-                        if missing:
-                            complete_task(job_dir, tid, f"未達（未作成: {', '.join(missing)}）")
-                            queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{', '.join(missing)} が作成されず）\n")
+                        if problems:
+                            summary = "未達: " + " / ".join(problems)
+                            complete_task(job_dir, tid, summary)
+                            _update_status(job_dir, role, f"未達 ⚠️（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{'; '.join(problems)}）\n")
                         else:
                             complete_task(job_dir, tid, "完了")
+                            _update_status(job_dir, role, f"完了（{tid}）")
                             queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
                     except Exception as e:
                         complete_task(job_dir, tid, f"エラー: {type(e).__name__}: {e}")
+                        _update_status(job_dir, role, f"エラー ⚠️（{tid}）")
                         queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
                         print(f"[team_agent] {name}/{tid} エラー: {e}")
 
@@ -2478,8 +2518,78 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             yield _sse(item)
         await runner  # 例外を表に出す
 
+        # ---- 納品ゲート（モデル非依存の実行検収）----
+        # debug役の自己申告 PASS では合否を決めない。リードが acceptance コマンドを機械実行し、
+        # index.html があれば実ブラウザでも検証する。通らなければ強モデルで1回修復→再検証。
+        # それでも通らなければ「未完成」として正直に納品する（成功と偽らない）。
+        entry_html = find_entry_html(job_dir)
+        acceptance = plan.get("acceptance", []) or []
+
+        async def _run_gate() -> list[str]:
+            probs: list[str] = []
+            if acceptance:
+                probs += await _asyncio.to_thread(run_acceptance_checks, job_dir, acceptance)
+            if entry_html:
+                probs += await _asyncio.to_thread(browser_smoke_test, entry_html)
+            return probs
+
+        gate_problems: list[str] = []
+        if not startup_test:
+            # 起動・動作テストOFF（既定）。この環境で実行しない＝システム変更/他PC向けスクリプトでも安全。
+            if acceptance or entry_html:
+                yield _sse("\nℹ️ 起動・動作テストはOFFです（実行検証なし）。実機で動かす成果物は、UIの「起動テスト」をONにすると納品前に自動検証します。\n")
+        elif acceptance or entry_html:
+            yield _sse("\n🔎 納品前の動作検証中（起動/実行・ブラウザ）...\n")
+            gate_problems = await _run_gate()
+            if gate_problems:
+                for gp in gate_problems[:5]:
+                    yield _sse(f"  ⚠️ {gp.splitlines()[0]}\n")
+                fix_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
+                fix_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
+                yield _sse(f"  🔧 強モデルで自動修復を試行 (`{fix_preset}` / `{fix_model}`)...\n")
+                try:
+                    proj_files = ", ".join(
+                        str(p.relative_to(job_dir)) for p in sorted(job_dir.rglob("*"))
+                        if p.is_file() and p.suffix in (".html", ".js", ".css", ".py", ".json", ".css", ".ts")
+                        and "__pycache__" not in p.parts
+                    )
+                    fix_prompt = (
+                        "あなたは統合修復担当です。成果物が次の検証に失敗し、まだ動きません:\n"
+                        f"{chr(10).join(gate_problems)}\n\n"
+                        f"対象ファイル: {proj_files}\n"
+                        "エラー内容から原因を特定し、実際に起動/実行できるよう修正してください。"
+                        "ブラウザで開くWebアプリの場合は、ESモジュール（type=module/import/export）を使わず "
+                        "通常の <script>＋IIFE＋window名前空間に統一すること（素のグローバル関数は衝突して全停止します）。"
+                        "read_file で確認し、edit_file / write_file で修正すること。"
+                    )
+                    await run_team_member(
+                        member_name="fixer", role="coding",
+                        system_prompt=get_team_member_prompt("coding", str(job_dir), "fixer", []),
+                        task_prompt=fix_prompt, all_tools=TOOLS,
+                        base_executor=execute_tool_async,
+                        async_client=_make_async_client_for(fix_preset), model=fix_model,
+                        job_dir=job_dir,
+                    )
+                    gate_problems = await _run_gate()
+                except Exception as fe:
+                    gate_problems = gate_problems + [f"統合修復に失敗: {type(fe).__name__}: {fe}"]
+                if gate_problems:
+                    yield _sse(f"  ❌ 修復後も動作検証に失敗（{len(gate_problems)}件）。未完成として報告します。\n")
+                else:
+                    yield _sse("  ✅ 動作検証OK（修復後）。実際に起動/動作することを確認しました。\n")
+            else:
+                yield _sse("  ✅ 動作検証OK。実際に起動/動作することを確認しました。\n")
+
         yield _sse("\n📄 最終報告書を生成中...\n\n")
         report = await generate_final_report(d_client, d_model, job_dir)
+        if gate_problems:
+            # 動かないものを「成功」と偽らない。先頭に未完成バナーと実エラーを明示。
+            detail = "\n".join(f"- {p.splitlines()[0]}" for p in gate_problems[:5])
+            yield _sse(
+                "---\n\n## ⚠️ 未完成（動作検証に失敗）\n"
+                "このジョブは成果物が**実際には動作しません**。残っている問題:\n"
+                f"{detail}\n\n以下は参考の作業報告です。\n\n"
+            )
         yield _sse(f"---\n\n{report}\n\n")
         scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
         yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
@@ -3366,7 +3476,7 @@ async def chat(req: ChatRequest):
             except Exception:
                 pass
         if use_team and MULTI_AGENT_TEAM_ENABLED:
-            stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
+            stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test)
         else:
             stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
     else:

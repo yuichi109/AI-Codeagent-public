@@ -614,6 +614,7 @@
     </div>
     <div class="section-body">
       <p class="hint" style="margin-bottom:12px">役割ごとに使用するプロバイダーとモデルを設定します。未設定の場合は現在のアクティブプロバイダーが使われます。ディスパッチャーがタスクに応じてモデルを変更することもあります。</p>
+      <p class="hint" style="margin-bottom:12px;color:#f9e2af">⚠️ チーム方式では、検収で未達のタスクの<b>最終トライだけディスパッチャーのモデルへ格上げ</b>して再実行します。<b>ディスパッチャーには最上位モデルを割り当ててください</b>（ディスパッチャーより強いモデルを他の役割に当てると、格上げが逆に格下げになります）。</p>
       <table id="ma-role-table" style="width:100%;border-collapse:collapse">
         <thead>
           <tr style="color:#6c7086;font-size:12px;text-align:left">

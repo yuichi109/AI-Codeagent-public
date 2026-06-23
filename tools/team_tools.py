@@ -13,13 +13,43 @@ docs/multi-agent-team-design.md / [[project-multi-agent-team]] 参照。
   → 同時並列で取り違えが起きない。チーム方式は本モジュール内で自己完結し
     [[project-dual-tool-registry]] の対象外（BG/定時から呼ばれない）。
 """
+import asyncio
 import json
 import os
+import random
+import shutil
 import time
 from pathlib import Path
 from typing import Awaitable, Callable
 
 import config
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    """例外が 429（レート制限）かどうかをプロバイダー非依存で判定する。"""
+    if e.__class__.__name__ == "RateLimitError":
+        return True
+    code = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+    if code == 429:
+        return True
+    s = str(e).lower()
+    return "429" in s or "too many requests" in s or "rate limit" in s
+
+
+async def _create_with_backoff(async_client, create_kwargs: dict):
+    """chat.completions.create を 429 のとき指数バックオフ＋ジッターで再試行する。
+    429 以外の例外、または上限到達時はそのまま送出（呼び出し側のタスクエラー扱いに任せる）。"""
+    retries = config.MULTI_AGENT_RATELIMIT_RETRIES
+    base = config.MULTI_AGENT_RATELIMIT_BASE_DELAY
+    for attempt in range(retries + 1):
+        try:
+            return await async_client.chat.completions.create(**create_kwargs)
+        except Exception as e:
+            if not _is_rate_limit_error(e) or attempt == retries:
+                raise
+            # 並列ワーカーが同時に再試行して再衝突しないようジッターを足す
+            delay = min(base * (2 ** attempt), 30.0) + random.uniform(0, base)
+            await asyncio.sleep(delay)
 
 # 役割 → teammate 名（mailbox の宛先・team.json のメンバー名に使う）
 TEAM_MEMBER_NAMES: dict[str, str] = {
@@ -157,7 +187,8 @@ def claim_task(job_dir: Path, member_name: str, role: str | None = None, task_id
 
 
 def verify_task_files(job_dir: Path, task: dict) -> list[str]:
-    """タスクが宣言した files のうち、実際に存在しないものを返す（リードの検収用）。"""
+    """タスクが宣言した files のうち、未達のもの（存在しない/空・空白のみ）を返す（リードの検収用）。
+    「作ったフリ」（0バイト・空白だけのファイル）も未達として弾く。"""
     missing: list[str] = []
     for f in task.get("files", []):
         p = Path(f)
@@ -165,7 +196,287 @@ def verify_task_files(job_dir: Path, task: dict) -> list[str]:
             p = job_dir / f
         if not p.exists():
             missing.append(f)
+            continue
+        try:
+            if p.is_file() and not p.read_text(encoding="utf-8", errors="ignore").strip():
+                missing.append(f)  # 空 or 空白のみ＝実質未作成
+        except OSError:
+            pass
     return missing
+
+
+def _read_file_excerpt(path: Path, max_chars: int = 600) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore").strip()
+    except OSError:
+        return ""
+    return text if len(text) <= max_chars else text[:max_chars] + "…（以下略）"
+
+
+def reconcile_declared_files(job_dir: Path, task: dict) -> list[str]:
+    """宣言ファイルが宣言パスに無い/空のとき、job_dir 内の同名・非空ファイルを探して宣言パスへ移動する。
+    モデルが指定と違う場所（code/ 配下など）に書いてしまっても、機械的に正しい場所へ集約する＝
+    **モデルの賢さ・従順さに一切依存しない**保証層。検収（verify_task）の直前に呼ぶ。
+
+    安全策:
+    - 既に中身のある宣言ファイルは触らない。
+    - 候補は job_dir 内の同名・非空ファイルのうち、**どのタスクの宣言パスにも該当しない**「迷子ファイル」のみ
+      （他タスクの正規成果物を奪わない）。
+    - 候補が一意（ちょうど1個）のときだけ移動する。0個=正当な未達、複数=曖昧なので動かさない。
+    返り値: 実施した移動の説明（"元 → 宣言パス"）リスト。"""
+    def _abs(rel_or_abs: str) -> str:
+        p = Path(rel_or_abs)
+        return str((p if p.is_absolute() else job_dir / rel_or_abs).resolve())
+
+    # 全タスクの宣言パス（＝正規の置き場所）を集めておき、候補から除外する
+    all_declared_abs = set()
+    for t in _read_tasks(job_dir):
+        for f in t.get("files", []):
+            all_declared_abs.add(_abs(f))
+
+    moved: list[str] = []
+    for f in task.get("files", []):
+        dest = Path(_abs(f))
+        if dest.exists() and dest.is_file():
+            try:
+                if dest.read_text(encoding="utf-8", errors="ignore").strip():
+                    continue  # 既に正しい場所に中身あり
+            except OSError:
+                continue
+        base = os.path.basename(f)
+        candidates = []
+        for cand in job_dir.rglob(base):
+            if not cand.is_file() or "__pycache__" in cand.parts:
+                continue
+            cand_abs = str(cand.resolve())
+            if cand_abs == str(dest.resolve()) or cand_abs in all_declared_abs:
+                continue  # 自分自身 or 他タスクの正規成果物
+            try:
+                if not cand.read_text(encoding="utf-8", errors="ignore").strip():
+                    continue
+            except OSError:
+                continue
+            candidates.append(cand)
+        if len(candidates) == 1:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(candidates[0]), str(dest))
+                moved.append(f"{candidates[0].relative_to(job_dir)} → {f}")
+            except OSError:
+                pass
+    return moved
+
+
+def verify_task(job_dir: Path, task: dict) -> list[str]:
+    """タスクの検収。問題点を人間可読の文字列リストで返す（空＝合格）。
+    ①宣言ファイルの有無/空チェック ②役割別の中身チェック（debug役のテスト合否など）。
+    差し戻し時、返した文字列をそのまま teammate に渡して新情報（具体的なエラー）を与える。"""
+    problems: list[str] = []
+
+    missing = verify_task_files(job_dir, task)
+    if missing:
+        problems.append("未作成または空のファイル: " + ", ".join(missing))
+
+    role = task.get("role", "")
+    if role == "debug":
+        # test-result.md がFAIL/不合格を示しているなら、その抜粋を添えて差し戻す
+        tr = job_dir / "test-result.md"
+        if tr.exists():
+            text = tr.read_text(encoding="utf-8", errors="ignore")
+            low = text.lower()
+            failed = ("fail" in low or "不合格" in text) and not (
+                "pass" in low or "合格" in text or "成功" in text
+            )
+            if failed:
+                problems.append(
+                    "テストが不合格（test-result.md）。該当箇所:\n" + _read_file_excerpt(tr)
+                )
+    return problems
+
+
+def find_entry_html(job_dir: Path) -> Path | None:
+    """成果物の入口 index.html を探す（job直下を優先、無ければ最初に見つかったもの）。"""
+    direct = job_dir / "index.html"
+    if direct.exists():
+        return direct
+    for cand in sorted(job_dir.rglob("index.html")):
+        if "__pycache__" not in cand.parts:
+            return cand
+    return None
+
+
+def browser_smoke_test(html_path: Path, timeout_ms: int = 8000) -> list[str]:
+    """index.html を実ブラウザ（Playwright/Chromium）で開いて致命的エラーを返す＝モデル非依存の検収。
+    JSの構文エラー・モジュール不整合・グローバル衝突（already been declared）・読み込み失敗などを、
+    実際にブラウザで実行して検出する。playwright/chromium が無い環境では検査をスキップ（[] を返す）。
+    返り値: 問題点リスト（空＝ブラウザで正常に読み込めた）。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return []  # 検査不能な環境では誤検知で差し戻さない
+    errs: list[str] = []
+
+    def _on_console(m):
+        # console.error を拾う（type=module + file:// の CORS ブロックや、jsの読み込み失敗はここに出る）。
+        # favicon 等の無害なリソース404は除外して誤検知を防ぐ。
+        try:
+            if m.type == "error":
+                t = m.text or ""
+                if "favicon" not in t.lower():
+                    errs.append(t)
+        except Exception:
+            pass
+
+    def _on_requestfailed(req):
+        # .js/.css/.html の読み込み失敗（パス間違い等）を検出。favicon は無視。
+        try:
+            url = req.url or ""
+            if "favicon" in url.lower():
+                return
+            if url.split("?")[0].endswith((".js", ".css", ".mjs")):
+                errs.append(f"リソース読み込み失敗: {url}")
+        except Exception:
+            pass
+
+    try:
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch()
+            except Exception:
+                return []  # ブラウザ未導入ならスキップ
+            page = browser.new_page()
+            # pageerror = 未捕捉のJS例外（SyntaxError/ReferenceError等）。console.error = CORS/モジュール読込失敗。
+            page.on("pageerror", lambda e: errs.append(str(e)))
+            page.on("console", _on_console)
+            page.on("requestfailed", _on_requestfailed)
+            try:
+                page.goto(html_path.resolve().as_uri(), timeout=timeout_ms)
+                page.wait_for_timeout(600)
+            finally:
+                browser.close()
+    except Exception as e:
+        return [f"ブラウザでの読み込みに失敗: {type(e).__name__}: {e}"]
+    uniq = list(dict.fromkeys(errs))
+    if uniq:
+        return ["ブラウザ実行時にエラー: " + " / ".join(uniq[:5])]
+    return []
+
+
+# 明らかに破壊的・システム変更・他ホスト接続のコマンド（チェックON でも実行せず静的検証に格下げ）
+_DESTRUCTIVE_RE = __import__("re").compile(
+    r"(?:^|[\s|;&])(?:sudo|su|apt|apt-get|yum|dnf|pacman|zypper|snap|systemctl|service|"
+    r"mkfs\w*|dd|fdisk|parted|useradd|userdel|usermod|groupadd|passwd|reboot|shutdown|"
+    r"poweroff|halt|mount|umount|iptables|nft|ufw|crontab|ssh|scp|rsync|chown|chpasswd|"
+    r"mkswap|swapon|modprobe|insmod|update-grub|grub-install)\b"
+    r"|rm\s+-[a-zA-Z]*[rf]"           # rm -rf / rm -f 等
+    r"|\b(?:pip3?|npm|gem|cargo|pipx)\s+install\b.*(?:-g|--global)"
+    r"|(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:bash|sh)"   # curl ... | bash
+    r"|>\s*/(?:etc|usr|var|boot|sys|proc|dev|bin|sbin)\b", __import__("re").I,
+)
+
+
+def _is_destructive(cmd: str) -> bool:
+    return bool(_DESTRUCTIVE_RE.search(cmd or ""))
+
+
+def _script_is_destructive(args: list[str], job_dir: Path) -> bool:
+    """コマンドが実行しようとしているスクリプト（.sh/.bash）の中身も走査する。
+    `bash setup.sh` のようにコマンド行は無害でも、中身が apt/systemctl 等なら実行させない。"""
+    for a in args:
+        if a.endswith((".sh", ".bash")):
+            p = Path(a) if os.path.isabs(a) else job_dir / a
+            try:
+                if _DESTRUCTIVE_RE.search(p.read_text(encoding="utf-8", errors="ignore")):
+                    return True
+            except OSError:
+                pass
+    return False
+
+
+def _static_check(args: list[str], job_dir: Path) -> list[str]:
+    """実行せず構文だけ確認する（拡張子で bash -n / py_compile / node --check を選択）。
+    対象ファイルが見つからなければチェック不能としてスキップ（[]）。"""
+    from tools.command_tools import _capture_run
+    exts = {".sh": ["bash", "-n"], ".bash": ["bash", "-n"],
+            ".py": ["python3", "-m", "py_compile"], ".js": ["node", "--check"], ".mjs": ["node", "--check"]}
+    targets = [a for a in args if any(a.endswith(e) for e in exts)]
+    problems: list[str] = []
+    for tgt in targets:
+        ext = "." + tgt.rsplit(".", 1)[-1]
+        rc, out, err, _ = _capture_run(exts[ext] + [tgt], cwd=str(job_dir), timeout=20)
+        if rc != 0:
+            problems.append(f"構文エラー `{tgt}`:\n{(err or out).strip()[-400:]}")
+    return problems
+
+
+def run_acceptance_checks(job_dir: Path, checks: list[dict]) -> list[str]:
+    """プログラム成果物の受け入れ検収を機械的に実行する（debug役の自己申告 PASS に頼らない）。
+    各 check:
+      - cmd: 実行する単一コマンド（パイプ/&&不可・shell=False）
+      - kind: "run"（完走して終了コード0を期待）/ "startup"（起動して即死しなければOK＝サーバー/ゲーム用）
+      - expect_exit: run時の期待終了コード（既定0）
+      - expect_contains: run時、標準出力に含むべき文字列（任意）
+      - startup_sec: startup時、生存を確認する秒数（既定4）
+      - timeout_sec: run時の最大待ち秒数（既定30）
+    起動・実行の固まり対策は _capture_run（タイムアウト＋プロセスツリーkill）に委譲。
+    返り値: 問題点リスト（空＝全チェック通過）。"""
+    import shlex
+    from tools.command_tools import _capture_run
+
+    problems: list[str] = []
+    for chk in checks or []:
+        cmd = (chk.get("cmd") or "").strip()
+        if not cmd:
+            continue
+        kind = chk.get("kind", "run")
+        try:
+            args = shlex.split(cmd)
+        except ValueError:
+            problems.append(f"受け入れコマンドを解釈できません: `{cmd}`")
+            continue
+        # 安全弁: 破壊的・システム変更・他ホスト接続コマンドは実行せず構文チェックに格下げ
+        # （チェックON でもこの開発機を壊さない。kind="syntax" 指定時も同様に静的検証）。
+        if kind == "syntax" or _is_destructive(cmd) or _script_is_destructive(args, job_dir):
+            problems += _static_check(args, job_dir)
+            continue
+        if kind == "startup":
+            timeout = chk.get("startup_sec", 4)
+            rc, out, err, timed_out = _capture_run(args, cwd=str(job_dir), timeout=timeout)
+            # タイムアウト=起動し続けている=OK / 即exitでもrc==0なら正当（すぐ終わる実行）
+            if timed_out or rc == 0:
+                continue
+            tail = (err or out or "").strip()[-500:]
+            problems.append(f"起動確認に失敗 `{cmd}`（終了コード {rc}）:\n{tail}")
+        else:  # run
+            timeout = chk.get("timeout_sec", 30)
+            rc, out, err, timed_out = _capture_run(args, cwd=str(job_dir), timeout=timeout)
+            if timed_out:
+                problems.append(f"実行が時間内（{timeout}s）に終わりませんでした `{cmd}`")
+                continue
+            exp = chk.get("expect_exit", 0)
+            if rc != exp:
+                tail = (err or out or "").strip()[-500:]
+                problems.append(f"実行に失敗 `{cmd}`（終了コード {rc}, 期待 {exp}）:\n{tail}")
+                continue
+            # expect_contains は補助的な検証。終了コード0が主たる合否基準なので、
+            # 大文字小文字を無視して照合する（決め打ち文字列の大小ズレで動く物を誤判定しない）。
+            need = chk.get("expect_contains")
+            if need and need.lower() not in (out or "").lower():
+                problems.append(f"出力に期待文字列が見つかりません `{cmd}`（期待: {need}）:\n{(out or '').strip()[-300:]}")
+    return problems
+
+
+def update_status_locked(job_dir: Path, role: str, status: str) -> None:
+    """status.md の更新を team のファイルロックで保護する（並列ワーカーの lost update 防止）。
+    記録ロジックはパイプライン方式と共通の multi_agent_tools._update_status を流用する。
+    （パイプラインは逐次なので無防備でも問題なかったが、チーム方式は並列で同時書き込みが起きる）"""
+    from tools.multi_agent_tools import _update_status
+    lock_path = (job_dir / "status.md").with_suffix(".md.lock")
+    fd = _acquire_lock(lock_path)
+    try:
+        _update_status(job_dir, role, status)
+    finally:
+        _release_lock(fd, lock_path)
 
 
 def complete_task(job_dir: Path, task_id: str, summary: str = "") -> dict:
@@ -385,7 +696,7 @@ async def run_team_member(
         if allowed:
             create_kwargs["tools"] = allowed
 
-        response = await async_client.chat.completions.create(**create_kwargs)
+        response = await _create_with_backoff(async_client, create_kwargs)
         msg = response.choices[0].message
         messages.append(msg.model_dump(exclude_unset=True))
 

@@ -55,8 +55,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .gl-project-meta { font-size: 10px; color: #45475a; margin-top: 4px; display: flex; gap: 8px; align-items: center; }
   .gl-badge { padding: 1px 5px; border-radius: 3px; background: #313244; color: #6c7086; }
   #gitlab-status { padding: 24px 16px; text-align: center; color: #6c7086; font-size: 13px; }
-  #chat-wrapper { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
-  #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; }
+  #chat-wrapper { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; position: relative; }
+  #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; position: relative; z-index: 1; }
   .turn { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; width: 100%; max-width: 860px; }
   /* 別モデルで再実行（各ターン下・普段は薄く、ホバーで点灯） */
   .rerun-bar { display: flex; align-items: center; gap: 6px; margin-left: 16px; opacity: 0; transition: opacity .12s; }
@@ -179,11 +179,93 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #ma-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; background: transparent; color: #a6adc8; border: 1px solid #45475a; border-radius: 8px 0 0 8px; cursor: pointer; font-size: 12px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #ma-btn svg { width: 15px; height: 15px; }
   #ma-btn:hover { color: #cdd6f4; border-color: #6c7086; }
-  #ma-btn.active { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
+  /* マルチAI ON = エヴァンゲリオン風の赤ネオン明滅（文字＋枠） */
+  @keyframes evaNeonText {
+    0%, 100% { text-shadow: 0 0 3px #ff3b3b, 0 0 7px #ff0026; }
+    50%      { text-shadow: 0 0 7px #ff3b3b, 0 0 16px #ff0026, 0 0 26px #ff0026; }
+  }
+  @keyframes evaNeonBorder {
+    0%, 100% { border-color: #ff2a2a; box-shadow: 0 0 4px #ff0026, inset 0 0 4px rgba(255,0,38,0.35); }
+    50%      { border-color: #ff6060; box-shadow: 0 0 11px #ff0026, 0 0 20px #ff0026, inset 0 0 8px rgba(255,0,38,0.45); }
+  }
+  @keyframes evaNeonIcon {
+    0%, 100% { filter: drop-shadow(0 0 2px #ff0026); }
+    50%      { filter: drop-shadow(0 0 6px #ff0026) drop-shadow(0 0 10px #ff0026); }
+  }
+  #ma-btn.active { color: #ff5a5a; border-color: #ff2a2a; font-weight: bold; position: relative; z-index: 1; animation: evaNeonText 4.2s ease-in-out infinite, evaNeonBorder 4.2s ease-in-out infinite; }
+  #ma-btn.active svg { animation: evaNeonIcon 4.2s ease-in-out infinite; }
   #maq-dd .dd-btn { border-radius: 0; border-left: none; color: #a6adc8; }
-  #ma-btn.active + #maq-dd .dd-btn { color: #cba6f7; border-color: #cba6f7; }
+  #ma-btn.active + #maq-dd .dd-btn { color: #ff5a5a; border-color: #ff2a2a; position: relative; z-index: 1; animation: evaNeonText 4.2s ease-in-out infinite, evaNeonBorder 4.2s ease-in-out infinite; }
   #mat-dd .dd-btn { border-radius: 0 8px 8px 0; border-left: none; color: #a6adc8; }
-  #ma-btn.active ~ #mat-dd .dd-btn { color: #cba6f7; border-color: #cba6f7; }
+  #ma-btn.active ~ #mat-dd .dd-btn { color: #ff5a5a; border-color: #ff2a2a; position: relative; z-index: 1; animation: evaNeonText 4.2s ease-in-out infinite, evaNeonBorder 4.2s ease-in-out infinite; }
+  /* マルチAI発動中バナー（タイトル横・赤ネオン呼吸） */
+  /* 通常モード用＝緑の穏やかな呼吸（エヴァ計器の正常表示色） */
+  @keyframes evaNeonTextG {
+    0%, 100% { text-shadow: 0 0 2px #1aff8c, 0 0 5px #00b894; }
+    50%      { text-shadow: 0 0 5px #1aff8c, 0 0 11px #00b894; }
+  }
+  @keyframes evaNeonBorderG {
+    0%, 100% { border-color: #1f9c5e; box-shadow: 0 0 3px rgba(0,230,118,0.30), inset 0 0 3px rgba(0,230,118,0.20); }
+    50%      { border-color: #2bd66a; box-shadow: 0 0 8px rgba(0,230,118,0.45), inset 0 0 5px rgba(0,230,118,0.30); }
+  }
+  #ma-eva-banner {
+    display: none; align-items: center; gap: 8px; margin-left: 12px; padding: 3px 18px;
+    vertical-align: middle; white-space: nowrap; user-select: none;
+    border: 1px solid #ff2a2a; border-radius: 3px;
+    /* 黒地＋左右に黄黒ハザードライン（エヴァ機密カード踏襲） */
+    background:
+      repeating-linear-gradient(45deg, #f5c800 0 5px, #141414 5px 10px) left center / 16px 100% no-repeat,
+      repeating-linear-gradient(-45deg, #f5c800 0 5px, #141414 5px 10px) right center / 16px 100% no-repeat,
+      #0a0a0a;
+  }
+  #ma-eva-banner.show { display: inline-flex; }
+  #ma-eva-banner .eva-kbox {
+    font-size: 12px; font-weight: 900; letter-spacing: 2px;
+    padding: 0 5px; border: 1px solid currentColor; border-radius: 2px; line-height: 1.5;
+  }
+  #ma-eva-banner .eva-main { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; }
+  /* 警報＝マルチAI ON（赤・強め・速め） */
+  #ma-eva-banner.alert            { border-color: #ff2a2a; animation: evaNeonBorder 4.2s ease-in-out infinite; }
+  #ma-eva-banner.alert .eva-kbox  { color: #ff2a2a; animation: evaNeonText 4.2s ease-in-out infinite; }
+  #ma-eva-banner.alert .eva-main  { color: #ff3b3b; animation: evaNeonText 4.2s ease-in-out infinite; }
+  /* 情報＝通常モード（緑・穏やか・ゆっくり） */
+  #ma-eva-banner.info             { border-color: #1f9c5e; animation: evaNeonBorderG 5.6s ease-in-out infinite; }
+  #ma-eva-banner.info .eva-kbox   { color: #2bd66a; animation: evaNeonTextG 5.6s ease-in-out infinite; }
+  #ma-eva-banner.info .eva-main   { color: #3be08a; animation: evaNeonTextG 5.6s ease-in-out infinite; }
+  /* ===== エヴァモード：ヘッダーのトグルボタン ＋ チャット背面オーバーレイ（既定OFF） ===== */
+  #eva-toggle-btn { display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:4px 9px; background:transparent; color:#a6adc8; border:1px solid #45475a; border-radius:8px; cursor:pointer; font-size:12px; white-space:nowrap; transition:color .2s, border-color .2s; }
+  #eva-toggle-btn:hover { color:#cdd6f4; border-color:#6c7086; }
+  body.eva-on #eva-toggle-btn { color:#ff5a5a; border-color:#ff2a2a; font-weight:bold; animation:evaNeonBorder 4.2s ease-in-out infinite; }
+  body.eva-on.eva-info #eva-toggle-btn { color:#3be08a; border-color:#1f9c5e; animation:evaNeonBorderG 5.6s ease-in-out infinite; }
+  #eva-overlay { position:absolute; inset:0; z-index:0; display:none; overflow:hidden; pointer-events:none; color:#ff3b3b; }
+  body.eva-on #eva-overlay { display:block; }
+  body.eva-on.eva-info #eva-overlay { color:#3be08a; }
+  #eva-overlay .eo-haz { position:absolute; left:0; right:0; height:16px; background-image:repeating-linear-gradient(45deg,#f5c800 0 11px,#141414 11px 22px); opacity:.30; }
+  body.eva-on.eva-info #eva-overlay .eo-haz { opacity:.15; }
+  #eva-overlay .eo-haz.t { top:0; } #eva-overlay .eo-haz.b { bottom:0; }
+  #eva-overlay .eo-scan { position:absolute; inset:0; background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,.04) 0 1px,transparent 1px 3px); animation:evaScan 6s linear infinite; opacity:.45; }
+  @keyframes evaScan { from { background-position-y:0; } to { background-position-y:120px; } }
+  #eva-overlay .eo-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  #eva-overlay .eo-big { font-size:140px; font-weight:900; letter-spacing:16px; line-height:1; margin:0; opacity:.17; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-big { animation:evaNeonText 4.2s ease-in-out infinite; }
+  body.eva-on.eva-info #eva-overlay .eo-big { animation:evaNeonTextG 5.6s ease-in-out infinite; }
+  #eva-overlay .eo-sub { font-size:13px; font-weight:800; letter-spacing:6px; margin-top:14px; opacity:.5; }
+  #eva-overlay .eo-reticle { position:absolute; top:50%; left:50%; width:340px; height:340px; margin:-170px 0 0 -170px; border-radius:50%; border:1px dashed currentColor; opacity:.14; }
+  #eva-overlay .eo-reticle:before, #eva-overlay .eo-reticle:after { content:""; position:absolute; background:currentColor; opacity:.5; }
+  #eva-overlay .eo-reticle:before { left:50%; top:-16px; bottom:-16px; width:1px; transform:translateX(-50%); }
+  #eva-overlay .eo-reticle:after { top:50%; left:-16px; right:-16px; height:1px; transform:translateY(-50%); }
+  #eva-overlay .eo-ring { position:absolute; top:50%; left:50%; width:360px; height:360px; margin:-180px 0 0 -180px; border-radius:50%; border:2px solid currentColor; opacity:.12; animation:evaRing 4.2s ease-out infinite; }
+  body.eva-on.eva-info #eva-overlay .eo-reticle, body.eva-on.eva-info #eva-overlay .eo-ring { display:none; }
+  @keyframes evaRing { 0% { transform:scale(.5); opacity:.22; } 100% { transform:scale(1.3); opacity:0; } }
+  #eva-overlay .eo-warn { position:absolute; top:20px; left:0; right:0; text-align:center; font-size:12px; font-weight:900; letter-spacing:6px; opacity:.55; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-warn { animation:evaStrobe 1s steps(2,end) infinite; }
+  @keyframes evaStrobe { 0%,49% { opacity:.6; } 50%,100% { opacity:.12; } }
+  #eva-overlay .eo-sync { position:absolute; top:20px; right:18px; font-size:12px; font-weight:800; letter-spacing:2px; opacity:.5; font-variant-numeric:tabular-nums; }
+  #eva-overlay .eo-magi { position:absolute; bottom:26px; left:0; right:0; display:flex; gap:10px; justify-content:center; opacity:.5; }
+  #eva-overlay .eo-node { font-size:10px; font-weight:800; letter-spacing:2px; border:1px solid currentColor; border-radius:3px; padding:3px 8px; display:flex; align-items:center; gap:6px; }
+  #eva-overlay .eo-dot { width:7px; height:7px; border-radius:50%; background:currentColor; animation:evaDot 1.4s ease-in-out infinite; }
+  #eva-overlay .eo-node:nth-child(2) .eo-dot { animation-delay:.45s; } #eva-overlay .eo-node:nth-child(3) .eo-dot { animation-delay:.9s; }
+  @keyframes evaDot { 0%,100% { opacity:.25; } 50% { opacity:1; } }
   #srcimg-clear-btn { display: inline-grid; place-items: center; height: 32px; padding: 0 7px; background: rgba(137,180,250,0.18); color: #a6adc8; border: none; border-radius: 0 8px 8px 0; cursor: pointer; font-size: 13px; transition: color 0.15s, background 0.15s; }
   #srcimg-clear-btn:hover { color: #f38ba8; background: #3d2030; }
   #srcimg-btn.active { border-radius: 8px 0 0 8px; }
@@ -259,7 +341,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #bg-badge { position:absolute; top:-6px; right:-6px; background:#f38ba8; color:#1e1e2e; border-radius:10px; font-size:10px; font-weight:bold; padding:1px 5px; display:none; }
 
   /* ---- BG Side Pane ---- */
-  #bg-side-pane { display:none; width:340px; min-width:240px; max-width:480px; flex-shrink:0; background:#181825; border-left:1px solid #313244; flex-direction:column; overflow:hidden; }
+  #bg-side-pane { display:none; width:340px; min-width:240px; max-width:480px; flex-shrink:0; background:#181825; border-left:1px solid #313244; flex-direction:column; overflow:hidden; position:relative; z-index:2; }
   #bg-side-pane.open { display:flex; }
   #bg-pane-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#313244; border-bottom:1px solid #45475a; flex-shrink:0; }
   #bg-pane-title { font-size:13px; font-weight:bold; color:#a6e3a1; }
@@ -853,7 +935,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     /* 入力欄は通常 [＋][🎤マイク][送信] の1行だけ。残りは＋ボタンで開閉する */
     #input-more-btn { display: grid; }
     /* スマホで常に隠す（PC専用機能・ヘッダーと重複する表示） */
-    #codeblock-btn, #rawwrite-btn, .ma-group, #gen-status { display: none; }
+    #codeblock-btn, #rawwrite-btn, .ma-group, #gen-status, #ma-eva-banner, #eva-overlay, #eva-toggle-btn { display: none !important; }
     /* 折りたたみ対象（添付・生成元画像・モード・BG）：通常時は隠す */
     #attach-btn, #srcimg-btn, #mode-dd, #bg-btn { display: none; }
     /* ＋を押したとき（.more-open）だけ展開。元のdisplay値で戻す（.cbtn=grid / .dd・#bg-btn=inline-flex） */
@@ -885,6 +967,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 </div>
 <div id="header">
   <span id="app-title">⚛️ AI Code Agent</span>
+  <span id="ma-eva-banner" aria-hidden="true"><b class="eva-kbox">情報</b><span class="eva-main">単騎脳ー通常稼働</span></span>
+  <button id="eva-toggle-btn" onclick="toggleEvaMode()" title="臨戦モード（演出）ON/OFF">⚡臨戦</button>
   <div id="header-right">
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
@@ -1308,6 +1392,24 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   <button id="session-banner-back" onclick="newSession()">＋ 新しい会話</button>
 </div>
 <div id="chat-wrapper">
+  <div id="eva-overlay" aria-hidden="true">
+    <div class="eo-scan"></div>
+    <div class="eo-haz t"></div>
+    <div class="eo-haz b"></div>
+    <div class="eo-warn">＞＞ 警告 WARNING 警告 ＜＜</div>
+    <div class="eo-sync">SYNC 87.2%</div>
+    <div class="eo-center">
+      <div class="eo-reticle"></div>
+      <div class="eo-ring"></div>
+      <p class="eo-big">警報</p>
+      <div class="eo-sub">多重思考接続 ─ シンクロ率 上昇中</div>
+    </div>
+    <div class="eo-magi">
+      <div class="eo-node"><span class="eo-dot"></span>MELCHIOR-1</div>
+      <div class="eo-node"><span class="eo-dot"></span>BALTHASAR-2</div>
+      <div class="eo-node"><span class="eo-dot"></span>CASPER-3</div>
+    </div>
+  </div>
   <div id="chat"></div>
   <!-- BG Side Pane (right column, flex) -->
   <div id="bg-side-pane">
@@ -2130,19 +2232,60 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const btn = document.getElementById('ma-btn');
     const dd = document.getElementById('maq-dd');
     const td = document.getElementById('mat-dd');
+    const eb = document.getElementById('ma-eva-banner');
     if (!btn) return;
+    const kbox = eb && eb.querySelector('.eva-kbox');
+    const emain = eb && eb.querySelector('.eva-main');
     if (isMultiAgentActive()) {
       btn.classList.add('active');
       btn.title = 'マルチエージェント: ON（複数AIが役割分担して実行）';
       if (dd) dd.style.display = '';
       if (td) td.style.display = '';
+      if (eb) { eb.classList.add('show', 'alert'); eb.classList.remove('info'); }
+      if (kbox) kbox.textContent = '警報';
+      if (emain) emain.textContent = '多重思考接続 ─ シンクロ率 上昇中';
     } else {
       btn.classList.remove('active');
       btn.title = 'マルチエージェント: OFF（通常の単一エージェントモード）';
       if (dd) dd.style.display = 'none';
       if (td) td.style.display = 'none';
+      if (eb) { eb.classList.add('show', 'info'); eb.classList.remove('alert'); }
+      if (kbox) kbox.textContent = '情報';
+      if (emain) emain.textContent = '単騎脳ー通常稼働';
     }
+    applyEvaMode();
   }
+
+  // ---- エヴァモード（背面オーバーレイ演出・マルチAIとは独立トグル） ----
+  function isEvaMode() { return localStorage.getItem('evaMode') === 'true'; }
+  function toggleEvaMode() { localStorage.setItem('evaMode', !isEvaMode()); applyEvaMode(); }
+  function applyEvaMode() {
+    const on = isEvaMode();
+    const alert = isMultiAgentActive();   // マルチAI ON=警報(赤) / OFF=情報(緑)
+    document.body.classList.toggle('eva-on', on);
+    document.body.classList.toggle('eva-info', !alert);
+    const tb = document.getElementById('eva-toggle-btn');
+    if (tb) tb.title = '臨戦モード（演出）: ' + (on ? 'ON' : 'OFF');
+    const big = document.querySelector('#eva-overlay .eo-big');
+    const sub = document.querySelector('#eva-overlay .eo-sub');
+    const warn = document.querySelector('#eva-overlay .eo-warn');
+    if (big) big.textContent = alert ? '警報' : '情報';
+    if (sub) sub.textContent = alert ? '多重思考接続 ─ シンクロ率 上昇中' : '単騎脳ー通常稼働';
+    if (warn) warn.textContent = alert ? '＞＞ 警告 WARNING 警告 ＜＜' : '── 正常稼働 NORMAL ──';
+  }
+  // SYNC 数値の演出（エヴァモードON時のみ更新）
+  let _evaSyncBase = 87.2;
+  setInterval(() => {
+    if (!isEvaMode()) return;
+    const el = document.querySelector('#eva-overlay .eo-sync');
+    if (!el) return;
+    if (isMultiAgentActive()) {
+      _evaSyncBase = Math.min(99.4, _evaSyncBase + (Math.random() * 1.4 - 0.4));
+      el.textContent = 'SYNC ' + _evaSyncBase.toFixed(1) + '%';
+    } else {
+      el.textContent = 'SYNC ' + (62 + Math.random() * 0.6).toFixed(1) + '%';
+    }
+  }, 800);
   // 品質/コスト設定は専用キー maQuality に保存。値は economy(コスト優先)/quality(品質優先)の2択。
   // 旧値（balance 等）が残っていても economy に正規化する。
   function getAgentMode() {

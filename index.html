@@ -240,9 +240,14 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #eva-overlay { position:absolute; inset:0; z-index:0; display:none; overflow:hidden; pointer-events:none; color:#ff3b3b; }
   body.eva-on #eva-overlay { display:block; }
   body.eva-on.eva-info #eva-overlay { color:#3be08a; }
-  #eva-overlay .eo-haz { position:absolute; left:0; right:0; height:16px; background-image:repeating-linear-gradient(45deg,#f5c800 0 11px,#141414 11px 22px); opacity:.30; }
+  #eva-overlay .eo-haz { position:absolute; left:-40px; right:-40px; height:16px; background-image:repeating-linear-gradient(45deg,#f5c800 0 11px,#141414 11px 22px); opacity:.30; will-change:transform; }
   body.eva-on.eva-info #eva-overlay .eo-haz { opacity:.15; }
-  #eva-overlay .eo-haz.t { top:0; } #eva-overlay .eo-haz.b { bottom:0; }
+  #eva-overlay .eo-haz.t { top:0; }
+  #eva-overlay .eo-haz.b { bottom:0; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-haz.t { animation:evaHazT 2s linear infinite; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-haz.b { animation:evaHazB 2s linear infinite; }
+  @keyframes evaHazT { from { transform:translateX(0); } to { transform:translateX(31.11px); } }
+  @keyframes evaHazB { from { transform:translateX(0); } to { transform:translateX(-31.11px); } }
   #eva-overlay .eo-scan { position:absolute; inset:0; background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,.04) 0 1px,transparent 1px 3px); animation:evaScan 6s linear infinite; opacity:.45; }
   @keyframes evaScan { from { background-position-y:0; } to { background-position-y:120px; } }
   #eva-overlay .eo-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
@@ -250,18 +255,21 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   body.eva-on:not(.eva-info) #eva-overlay .eo-big { animation:evaNeonText 4.2s ease-in-out infinite; }
   body.eva-on.eva-info #eva-overlay .eo-big { animation:evaNeonTextG 5.6s ease-in-out infinite; }
   #eva-overlay .eo-sub { font-size:13px; font-weight:800; letter-spacing:6px; margin-top:14px; opacity:.5; }
+  #eva-overlay .eo-tag { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:3px; border:1px solid currentColor; border-radius:3px; padding:3px 12px; opacity:.55; }
   #eva-overlay .eo-reticle { position:absolute; top:50%; left:50%; width:340px; height:340px; margin:-170px 0 0 -170px; border-radius:50%; border:1px dashed currentColor; opacity:.14; }
   #eva-overlay .eo-reticle:before, #eva-overlay .eo-reticle:after { content:""; position:absolute; background:currentColor; opacity:.5; }
   #eva-overlay .eo-reticle:before { left:50%; top:-16px; bottom:-16px; width:1px; transform:translateX(-50%); }
   #eva-overlay .eo-reticle:after { top:50%; left:-16px; right:-16px; height:1px; transform:translateY(-50%); }
-  #eva-overlay .eo-ring { position:absolute; top:50%; left:50%; width:360px; height:360px; margin:-180px 0 0 -180px; border-radius:50%; border:2px solid currentColor; opacity:.12; animation:evaRing 4.2s ease-out infinite; }
+  #eva-overlay .eo-ring { position:absolute; top:50%; left:50%; width:360px; height:360px; margin:-180px 0 0 -180px; border-radius:50%; border:3px solid currentColor; opacity:.12; animation:evaRing 3.6s ease-out infinite; will-change:transform,opacity; }
   body.eva-on.eva-info #eva-overlay .eo-reticle, body.eva-on.eva-info #eva-overlay .eo-ring { display:none; }
-  @keyframes evaRing { 0% { transform:scale(.5); opacity:.22; } 100% { transform:scale(1.3); opacity:0; } }
+  @keyframes evaRing { 0% { transform:scale(.3); opacity:.6; } 100% { transform:scale(1.6); opacity:0; } }
   #eva-overlay .eo-warn { position:absolute; top:20px; left:0; right:0; text-align:center; font-size:12px; font-weight:900; letter-spacing:6px; opacity:.55; }
   body.eva-on:not(.eva-info) #eva-overlay .eo-warn { animation:evaStrobe 1s steps(2,end) infinite; }
   @keyframes evaStrobe { 0%,49% { opacity:.6; } 50%,100% { opacity:.12; } }
   #eva-overlay .eo-sync { position:absolute; top:20px; right:18px; font-size:12px; font-weight:800; letter-spacing:2px; opacity:.5; font-variant-numeric:tabular-nums; }
-  #eva-overlay .eo-magi { position:absolute; bottom:26px; left:0; right:0; display:flex; gap:10px; justify-content:center; opacity:.5; }
+  #eva-overlay .eo-magi { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); width:300px; max-width:62%; opacity:.45; }
+  #eva-overlay .eo-magi-svg { width:100%; height:auto; }
+  body.eva-on.eva-info #eva-overlay .eo-magi { display:none; }
   #eva-overlay .eo-node { font-size:10px; font-weight:800; letter-spacing:2px; border:1px solid currentColor; border-radius:3px; padding:3px 8px; display:flex; align-items:center; gap:6px; }
   #eva-overlay .eo-dot { width:7px; height:7px; border-radius:50%; background:currentColor; animation:evaDot 1.4s ease-in-out infinite; }
   #eva-overlay .eo-node:nth-child(2) .eo-dot { animation-delay:.45s; } #eva-overlay .eo-node:nth-child(3) .eo-dot { animation-delay:.9s; }
@@ -1401,13 +1409,34 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     <div class="eo-center">
       <div class="eo-reticle"></div>
       <div class="eo-ring"></div>
+      <div class="eo-ring" style="animation-delay:1.2s"></div>
+      <div class="eo-ring" style="animation-delay:2.4s"></div>
       <p class="eo-big">警報</p>
       <div class="eo-sub">多重思考接続 ─ シンクロ率 上昇中</div>
+      <div class="eo-tag">MAGI SYSTEM / MULTI-BRAIN</div>
     </div>
     <div class="eo-magi">
-      <div class="eo-node"><span class="eo-dot"></span>MELCHIOR-1</div>
-      <div class="eo-node"><span class="eo-dot"></span>BALTHASAR-2</div>
-      <div class="eo-node"><span class="eo-dot"></span>CASPER-3</div>
+      <svg class="eo-magi-svg" viewBox="0 0 300 300" width="300" height="300" aria-hidden="true">
+        <g stroke="#f5a000" stroke-width="6" stroke-linecap="round">
+          <line x1="150" y1="116" x2="150" y2="150"/>
+          <line x1="134" y1="160" x2="146" y2="186"/>
+          <line x1="166" y1="160" x2="154" y2="186"/>
+        </g>
+        <polygon points="18,8 282,8 282,104 172,104 150,120 128,104 18,104" fill="rgba(120,205,235,.18)" stroke="#7fd3ef" stroke-width="2"/>
+        <text x="150" y="58" text-anchor="middle" fill="#19d6e6" font-size="30" font-weight="900" letter-spacing="3">承認</text>
+        <text x="150" y="82" text-anchor="middle" fill="#cdeefb" font-size="12" font-weight="900" letter-spacing="1">BALTHASAR·2</text>
+        <text class="mc-model" x="150" y="97" text-anchor="middle" fill="#9fd9ef" font-size="9.5" font-weight="700" font-family="monospace">—</text>
+        <polygon points="8,166 120,166 146,188 146,292 8,292" fill="rgba(120,205,235,.18)" stroke="#7fd3ef" stroke-width="2"/>
+        <text x="74" y="214" text-anchor="middle" fill="#19d6e6" font-size="28" font-weight="900" letter-spacing="3">承認</text>
+        <text x="74" y="244" text-anchor="middle" fill="#cdeefb" font-size="12" font-weight="900" letter-spacing="1">CASPER·3</text>
+        <text class="mc-model" x="74" y="259" text-anchor="middle" fill="#9fd9ef" font-size="9.5" font-weight="700" font-family="monospace">—</text>
+        <polygon points="292,166 180,166 154,188 154,292 292,292" fill="rgba(255,42,42,.20)" stroke="#ff2a2a" stroke-width="2"/>
+        <text x="226" y="214" text-anchor="middle" fill="#ff3b3b" font-size="28" font-weight="900" letter-spacing="3">否決</text>
+        <text x="226" y="244" text-anchor="middle" fill="#ffd0d0" font-size="12" font-weight="900" letter-spacing="1">MELCHIOR·1</text>
+        <text class="mc-model" x="226" y="259" text-anchor="middle" fill="#ffb3b3" font-size="9.5" font-weight="700" font-family="monospace">—</text>
+        <polygon points="150,130 172,142 172,160 150,172 128,160 128,142" fill="rgba(10,8,4,.7)" stroke="#f5a000" stroke-width="2.5"/>
+        <text x="150" y="156" text-anchor="middle" fill="#f5a000" font-size="14" font-weight="900" letter-spacing="2">MAGI</text>
+      </svg>
     </div>
   </div>
   <div id="chat"></div>
@@ -2269,9 +2298,32 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const big = document.querySelector('#eva-overlay .eo-big');
     const sub = document.querySelector('#eva-overlay .eo-sub');
     const warn = document.querySelector('#eva-overlay .eo-warn');
+    const tag = document.querySelector('#eva-overlay .eo-tag');
     if (big) big.textContent = alert ? '警報' : '情報';
     if (sub) sub.textContent = alert ? '多重思考接続 ─ シンクロ率 上昇中' : '単騎脳ー通常稼働';
     if (warn) warn.textContent = alert ? '＞＞ 警告 WARNING 警告 ＜＜' : '── 正常稼働 NORMAL ──';
+    if (tag) tag.textContent = alert ? 'MAGI SYSTEM / MULTI-BRAIN' : 'MAGI SYSTEM / STAND BY';
+    if (on && alert) populateMagiModels();
+  }
+  // MAGI三賢人カードのモデル名を実マルチAI設定から流し込む（cache・モード連動）
+  let _magiCfgCache = null;
+  async function populateMagiModels() {
+    const cells = document.querySelectorAll('#eva-overlay .mc-model');
+    if (!cells.length) return;
+    try {
+      if (!_magiCfgCache) {
+        const r = await fetch('/multi-agent/config');
+        _magiCfgCache = await r.json();
+      }
+      const mode = getAgentMode();   // economy / quality
+      const set = (_magiCfgCache && (_magiCfgCache[mode] || _magiCfgCache.economy || _magiCfgCache.quality)) || {};
+      const roles = ['dispatcher', 'coding', 'research'];
+      cells.forEach((c, i) => {
+        const rc = set[roles[i]] || {};
+        c.textContent = rc.model || '—';
+        c.title = (rc.preset_id ? rc.preset_id + ' / ' : '') + (rc.model || '');
+      });
+    } catch (e) { /* 取得失敗時はプレースホルダのまま */ }
   }
   // SYNC 数値の演出（エヴァモードON時のみ更新）
   let _evaSyncBase = 87.2;

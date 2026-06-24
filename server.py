@@ -2173,7 +2173,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
     def _sse(text: str) -> str:
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
-    ma_cfg = _load_ma_config()
+    ma_cfg = _load_ma_config(agent_mode)
     d_cfg    = ma_cfg.get("dispatcher", {})
     d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
     d_model  = d_cfg.get("model", _provider_config["model"])
@@ -2357,7 +2357,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
     def _sse(text: str) -> str:
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
-    ma_cfg = _load_ma_config()
+    ma_cfg = _load_ma_config(agent_mode)
     d_cfg    = ma_cfg.get("dispatcher", {})
     d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
     d_model  = d_cfg.get("model", _provider_config["model"])
@@ -2721,7 +2721,7 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
     def _sse(text: str) -> str:
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
-    ma_cfg = _load_ma_config()
+    ma_cfg = _load_ma_config(agent_mode)
     d_cfg    = ma_cfg.get("dispatcher", {})
     d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
     d_model  = d_cfg.get("model", _provider_config["model"])
@@ -3889,8 +3889,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     if req.multi_agent or req.resume_job_id:
-        # 実行方式を決定。team_method（新）が優先、無ければ旧 team_mode から導出。
-        method = req.team_method or ("team" if req.team_mode else "pipeline")
+        # 実行方式を決定。team_method（新）が優先、無ければ旧 team_mode から導出（既定はシングル型）。
+        method = req.team_method or ("team" if req.team_mode else "single")
         if req.resume_job_id:
             # 再開時は、ジョブが実際にどの方式で作られたかをディスク上から判定（トグル取り違え防止）。
             # チーム/シングルの制御は .agent-jobs/<scope>/<id>/ に集約。パイプラインは旧来の <scope>/jobs/<id>/。
@@ -4978,17 +4978,45 @@ async def providers_config(req: ProviderConfigRequest):
 _MA_CONFIG_FILE = Path(__file__).parent / ".multi_agent_config.json"
 
 _MA_ROLE_DEFAULTS = ["dispatcher", "design", "coding", "debug", "security", "docs", "research", "infra"]
+_MA_MODES = ["economy", "quality"]   # コスト優先 / 品質優先
 
 
-def _load_ma_config() -> dict:
-    if _MA_CONFIG_FILE.exists():
-        try:
-            return json.loads(_MA_CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    # デフォルト: 現在のアクティブプロバイダーを全役割に適用
+def _default_ma_set() -> dict:
+    """未設定時のフォールバック: 全役割を現在のアクティブプロバイダー＋モデルに割り当てる。"""
     default = {"preset_id": _provider_config.get("preset_id", _provider_config["type"]), "model": _provider_config["model"]}
     return {role: dict(default) for role in _MA_ROLE_DEFAULTS}
+
+
+def _clone_ma_set(s: dict) -> dict:
+    return {r: dict(v) for r, v in s.items() if isinstance(v, dict)}
+
+
+def _load_ma_config_all() -> dict:
+    """economy / quality の2セット構造で返す。
+    旧フラット形式（役割キーが直下）は両セットへ複製して移行扱い。未設定はデフォルトへ。"""
+    raw = None
+    if _MA_CONFIG_FILE.exists():
+        try:
+            raw = json.loads(_MA_CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            raw = None
+    if isinstance(raw, dict) and ("economy" in raw or "quality" in raw):
+        eco  = raw.get("economy") or raw.get("quality") or _default_ma_set()
+        qual = raw.get("quality") or raw.get("economy") or _default_ma_set()
+        return {"economy": _clone_ma_set(eco), "quality": _clone_ma_set(qual)}
+    if isinstance(raw, dict) and raw:
+        # 旧フラット形式（1セットのみ）→ 両セットへ複製して移行
+        return {"economy": _clone_ma_set(raw), "quality": _clone_ma_set(raw)}
+    d = _default_ma_set()
+    return {"economy": d, "quality": _clone_ma_set(d)}
+
+
+def _load_ma_config(mode: str = "economy") -> dict:
+    """指定モード（economy/quality）の役割→モデル割当を返す。
+    旧来の agent_mode（balance 等）が来ても economy にフォールバックする。"""
+    m = mode if mode in _MA_MODES else "economy"
+    allc = _load_ma_config_all()
+    return allc.get(m) or allc.get("economy") or _default_ma_set()
 
 
 def _save_ma_config(cfg: dict):
@@ -5119,18 +5147,20 @@ async def rerun_models():
     for m in cur_deps:
         _add(cur_pid, cur_name, m)
 
-    # マルチAI設定があれば、その割当モデルも横断候補として追加（重複排除）
+    # マルチAI設定があれば、その割当モデルも横断候補として追加（economy/quality 両セット・重複排除）
     if _MA_CONFIG_FILE.exists():
-        for _role, rc in _load_ma_config().items():
-            pid = rc.get("preset_id")
-            _add(pid, name_by_preset.get(pid, pid), rc.get("model"))
+        for _set in _load_ma_config_all().values():
+            for _role, rc in _set.items():
+                pid = rc.get("preset_id")
+                _add(pid, name_by_preset.get(pid, pid), rc.get("model"))
 
     return JSONResponse({"models": items})
 
 
 @app.get("/multi-agent/config")
 async def ma_config_get():
-    return JSONResponse(_load_ma_config())
+    # economy / quality の2セット構造で返す（旧フラット形式は両セットへ複製済み）
+    return JSONResponse(_load_ma_config_all())
 
 
 @app.post("/multi-agent/config")

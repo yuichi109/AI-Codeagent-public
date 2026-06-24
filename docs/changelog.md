@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-06-24（セッション68）実行方式の既定をシングル型に＋品質/コストを2プリセット化（v1.22.7〜1.23.0・feature/multi-agent-team）
+
+> パイプライン方式は**削除せず塩漬け**で確定（調査の結論：削除は範囲限定だが UI既定・ルーティング既定・旧resume の3点手当てが必須＝動くものを触るリスクが上回る）。
+> 代わりに「既定をシングル型に寄せる」＋「飾りだった品質/コスト設定を実働化」。**このブランチのみ。main / for_windows は無変更。**
+
+### パイプライン削除可否の厳密調査（変更なし・結論=塩漬け継続）
+- パイプライン専用＝`multi_agent_stream`（server.py）／`dispatch_task`・`run_sub_agent`（tools/multi_agent_tools.py）／`AGENT_SYSTEM_PROMPTS["dispatcher"]`（prompts.py）。
+- **共有で消せない**: `multi_agent_tools.py` の `generate_final_report`/`new_job_id`/`_update_status`/`AGENT_ALLOWED_TOOLS`/`_filter_tools` は team_tools が流用。`get_agent_system_prompt` と役割プロンプト全部・`MULTI_AGENT_*` は team/single 共有。`agent_core.py` に参照ゼロ＝BG/定時は非依存。
+- 削除時の要手当て3点: ①UI 既定がパイプライン ②`/chat` ルーティングの catch-all がパイプライン ③旧ジョブ resume（`<scope>/jobs/<id>`）。
+
+### `.agent-jobs` 退避＋プルーンの確認（セッション67分の積み残し）
+- 退避: 実機ラン（GAME5）でスコープ直下が成果物のみ・制御は `.agent-jobs/GAME5/<id>/` に集約を確認。
+- プルーン: `tests/test_prune_agent_jobs.py` 新規（実LLM不要の合成テスト）。25件→20件・古い5件削除・keep=0 全削除・存在しないスコープも安全、を確認。
+
+### v1.22.7 実行方式トグルの既定をシングル型に（パイプライン塩漬け）
+- `index.html`: `getTeamMethod()` 既定 `pipeline`→`single`・初期ラベルもシングル型。`server.py` `/chat` の空フォールバックも `pipeline`→`single`（UI/サーバーで既定一致）。既存ユーザーの選択（localStorage maMethod）は保持。
+
+### v1.23.0 品質/コストを実働化＝2プリセット（コスト優先 / 品質優先）
+- **これまで `agent_mode`（balance/quality/economy）は受け取るだけで未使用（飾り）だった**。
+- `.multi_agent_config.json` を `{economy:{8役割}, quality:{8役割}}` の2セット構造に変更。`server.py`:
+  - `_load_ma_config_all()`＝2セットで返す（**旧フラット形式は両セットへ複製して自動移行**・未設定は現アクティブモデルへフォールバック）。`_load_ma_config(mode)`＝モード別セットを返す（旧 balance 等は economy にフォールバック）。
+  - 3つの stream（multi_agent_stream / team_agent_stream / single_team_stream）が `agent_mode` を `_load_ma_config(agent_mode)` に渡すよう配線＝**初めて機能**。
+  - `/rerun-models`・`GET /multi-agent/config` を2セット対応（GET は2セット構造を返す）。
+- `setup.html`: 役割設定を「💰コスト優先 / ✨品質優先」**タブ**で2セット別々に編集（タブ切替で編集保持・保存時に両方 POST）。`captureMaTable`/`switchMaTable` 追加。
+- `index.html`: チャットのドロップダウンを2値（コスト優先=economy / 品質優先=quality）に。**既定はコスト優先**。旧値は economy に正規化。
+- `tests/e2e_team_retry.py`: モンキーパッチ `_load_ma_config` を `lambda *a,**k` 化（引数付き呼び出しに追従）。
+- 検証: 構文OK・移行/フォールバックOK・再起動HTTP200・GET 2セット返却・POST往復(ok·8役割)確認。⚠️ index/setup はキャッシュバスター無し＝ハードリロード必須。
+
+---
+
 ## 2026-06-24（セッション67）シングル型を「スコープ＝継続」へ作り直し（v1.22.1〜1.22.6・feature/multi-agent-team）
 
 > 北極星＝**Claude Code に近づける／モード（single・team）を意識させない**。実機テスト（テトリス）で出た問題を

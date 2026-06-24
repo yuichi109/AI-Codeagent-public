@@ -68,7 +68,7 @@ def patch():
     ma_tools.generate_final_report = fake_final_report
     server._interpret_plan_response = fake_interpret
     server._make_async_client_for = lambda preset: object()
-    server._load_ma_config = lambda: {"dispatcher": {"preset_id": "strongprov", "model": "strong-model"}}
+    server._load_ma_config = lambda *a, **k: {"dispatcher": {"preset_id": "strongprov", "model": "strong-model"}}
 
 
 async def main():

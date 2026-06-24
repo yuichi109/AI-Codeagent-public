@@ -1361,7 +1361,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             <button type="button" class="dd-item" data-value="auto">自動</button>
           </div>
         </div>
-        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: パイプライン（逐次）/ チーム（並列・mailbox）/ シングル型（並列・会話継続・既存スコープ）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">パイプライン</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="pipeline">パイプライン</button><button type="button" class="dd-item" data-value="team">チーム（並列）</button><button type="button" class="dd-item" data-value="single">シングル型（並列）</button></div></div></span>
+        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コスト設定: コスト優先（安いモデル中心）/ 品質優先（上位モデル中心）。セットアップで2セットを編集"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">コスト優先</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="economy">コスト優先</button><button type="button" class="dd-item" data-value="quality">品質優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: パイプライン（逐次）/ チーム（並列・mailbox）/ シングル型（並列・会話継続・既存スコープ）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">シングル型（並列）</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="pipeline">パイプライン</button><button type="button" class="dd-item" data-value="team">チーム（並列）</button><button type="button" class="dd-item" data-value="single">シングル型（並列）</button></div></div></span>
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
@@ -2143,11 +2143,13 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       if (td) td.style.display = 'none';
     }
   }
-  // 品質/コスト設定は専用キー maQuality に保存（旧実装は agentMode と共用で壊れていた）
+  // 品質/コスト設定は専用キー maQuality に保存。値は economy(コスト優先)/quality(品質優先)の2択。
+  // 旧値（balance 等）が残っていても economy に正規化する。
   function getAgentMode() {
-    return localStorage.getItem('maQuality') || 'balance';
+    const v = localStorage.getItem('maQuality');
+    return (v === 'economy' || v === 'quality') ? v : 'economy';
   }
-  const MAQ_LABELS = { balance: 'バランス', quality: '品質優先', economy: 'コスト優先' };
+  const MAQ_LABELS = { economy: 'コスト優先', quality: '品質優先' };
   function updateMaQuality() {
     const btn = document.getElementById('maq-dd-btn');
     if (!btn) return;
@@ -2157,9 +2159,9 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const dd = document.getElementById('maq-dd');
     if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
   }
-  // 実行方式（パイプライン⇔チーム）: 既定はパイプライン（既存挙動を変えない）
+  // 実行方式: 既定はシングル型（並列）。パイプラインはモードとして残すが既定にはしない（塩漬け）
   function getTeamMethod() {
-    return localStorage.getItem('maMethod') || 'pipeline';
+    return localStorage.getItem('maMethod') || 'single';
   }
   const MAT_LABELS = { pipeline: 'パイプライン', team: 'チーム（並列）', single: 'シングル型（並列）' };
   function updateMaMethod() {

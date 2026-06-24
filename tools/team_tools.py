@@ -186,14 +186,17 @@ def claim_task(job_dir: Path, member_name: str, role: str | None = None, task_id
         _release_lock(fd, lock_path)
 
 
-def verify_task_files(job_dir: Path, task: dict) -> list[str]:
+def verify_task_files(job_dir: Path, task: dict, work_dir: Path | None = None) -> list[str]:
     """タスクが宣言した files のうち、未達のもの（存在しない/空・空白のみ）を返す（リードの検収用）。
-    「作ったフリ」（0バイト・空白だけのファイル）も未達として弾く。"""
+    「作ったフリ」（0バイト・空白だけのファイル）も未達として弾く。
+    work_dir 指定時は相対パスを work_dir 基準で解決する（シングル型マルチ＝既存スコープ作業用。
+    既定 None なら job_dir 基準＝従来挙動）。"""
+    base = work_dir or job_dir
     missing: list[str] = []
     for f in task.get("files", []):
         p = Path(f)
         if not p.is_absolute():
-            p = job_dir / f
+            p = base / f
         if not p.exists():
             missing.append(f)
             continue
@@ -213,7 +216,7 @@ def _read_file_excerpt(path: Path, max_chars: int = 600) -> str:
     return text if len(text) <= max_chars else text[:max_chars] + "…（以下略）"
 
 
-def reconcile_declared_files(job_dir: Path, task: dict) -> list[str]:
+def reconcile_declared_files(job_dir: Path, task: dict, work_dir: Path | None = None) -> list[str]:
     """宣言ファイルが宣言パスに無い/空のとき、job_dir 内の同名・非空ファイルを探して宣言パスへ移動する。
     モデルが指定と違う場所（code/ 配下など）に書いてしまっても、機械的に正しい場所へ集約する＝
     **モデルの賢さ・従順さに一切依存しない**保証層。検収（verify_task）の直前に呼ぶ。
@@ -223,10 +226,12 @@ def reconcile_declared_files(job_dir: Path, task: dict) -> list[str]:
     - 候補は job_dir 内の同名・非空ファイルのうち、**どのタスクの宣言パスにも該当しない**「迷子ファイル」のみ
       （他タスクの正規成果物を奪わない）。
     - 候補が一意（ちょうど1個）のときだけ移動する。0個=正当な未達、複数=曖昧なので動かさない。
-    返り値: 実施した移動の説明（"元 → 宣言パス"）リスト。"""
+    返り値: 実施した移動の説明（"元 → 宣言パス"）リスト。
+    work_dir 指定時は成果物の解決・探索を work_dir 基準で行う（tasks.json は job_dir=ctrl から読む）。"""
+    wd = work_dir or job_dir
     def _abs(rel_or_abs: str) -> str:
         p = Path(rel_or_abs)
-        return str((p if p.is_absolute() else job_dir / rel_or_abs).resolve())
+        return str((p if p.is_absolute() else wd / rel_or_abs).resolve())
 
     # 全タスクの宣言パス（＝正規の置き場所）を集めておき、候補から除外する
     all_declared_abs = set()
@@ -245,7 +250,7 @@ def reconcile_declared_files(job_dir: Path, task: dict) -> list[str]:
                 continue
         base = os.path.basename(f)
         candidates = []
-        for cand in job_dir.rglob(base):
+        for cand in wd.rglob(base):
             if not cand.is_file() or "__pycache__" in cand.parts:
                 continue
             cand_abs = str(cand.resolve())
@@ -260,27 +265,34 @@ def reconcile_declared_files(job_dir: Path, task: dict) -> list[str]:
         if len(candidates) == 1:
             dest.parent.mkdir(parents=True, exist_ok=True)
             try:
+                _src_rel = candidates[0]
                 shutil.move(str(candidates[0]), str(dest))
-                moved.append(f"{candidates[0].relative_to(job_dir)} → {f}")
+                try:
+                    _rel = _src_rel.relative_to(wd)
+                except ValueError:
+                    _rel = _src_rel
+                moved.append(f"{_rel} → {f}")
             except OSError:
                 pass
     return moved
 
 
-def verify_task(job_dir: Path, task: dict) -> list[str]:
+def verify_task(job_dir: Path, task: dict, work_dir: Path | None = None) -> list[str]:
     """タスクの検収。問題点を人間可読の文字列リストで返す（空＝合格）。
     ①宣言ファイルの有無/空チェック ②役割別の中身チェック（debug役のテスト合否など）。
-    差し戻し時、返した文字列をそのまま teammate に渡して新情報（具体的なエラー）を与える。"""
+    差し戻し時、返した文字列をそのまま teammate に渡して新情報（具体的なエラー）を与える。
+    work_dir 指定時は成果物を work_dir 基準で検収する（既定 None なら job_dir 基準＝従来挙動）。"""
+    base = work_dir or job_dir
     problems: list[str] = []
 
-    missing = verify_task_files(job_dir, task)
+    missing = verify_task_files(job_dir, task, work_dir=work_dir)
     if missing:
         problems.append("未作成または空のファイル: " + ", ".join(missing))
 
     role = task.get("role", "")
     if role == "debug":
         # test-result.md がFAIL/不合格を示しているなら、その抜粋を添えて差し戻す
-        tr = job_dir / "test-result.md"
+        tr = base / "test-result.md"
         if tr.exists():
             text = tr.read_text(encoding="utf-8", errors="ignore")
             low = text.lower()
@@ -505,6 +517,68 @@ def list_tasks(job_dir: Path) -> list[dict]:
 
 
 # ----------------------------------------------------------------------------
+# 試行ログ（attempts.jsonl）— 誰が・何回目・どのモデルで・結果はどうだったかを後追いする
+# ----------------------------------------------------------------------------
+def _attempts_path(job_dir: Path) -> Path:
+    return job_dir / "attempts.jsonl"
+
+
+def log_attempt(job_dir: Path, **fields) -> None:
+    """1トライ分の試行ログを attempts.jsonl に1行追記する（並列ワーカーの行混在を防ぐためロック保護）。
+    記録例: worker / task_id / role / attempt（1始まり）/ preset_id / model / escalated / result / elapsed_sec / problems。
+    どれが欠けても落とさない（ログ失敗で本処理を止めない）。"""
+    entry = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), **fields}
+    p = _attempts_path(job_dir)
+    lock_path = p.with_suffix(".jsonl.lock")
+    fd = _acquire_lock(lock_path)
+    try:
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    finally:
+        _release_lock(fd, lock_path)
+
+
+def read_attempts(job_dir: Path) -> list[dict]:
+    """attempts.jsonl を読み出す（壊れた行はスキップ）。"""
+    p = _attempts_path(job_dir)
+    if not p.exists():
+        return []
+    out: list[dict] = []
+    for ln in p.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            out.append(json.loads(ln))
+        except json.JSONDecodeError:
+            pass
+    return out
+
+
+def summarize_attempts_md(job_dir: Path) -> str:
+    """試行ログを人間可読の Markdown 表に整形する（空ならその旨）。"""
+    rows = read_attempts(job_dir)
+    if not rows:
+        return ""
+    out = "| タスク | 役割 | ワーカー | 試行 | モデル | 結果 | 秒 |\n|---|---|---|---|---|---|---|\n"
+    icon = {"ok": "✅", "ng": "⚠️", "error": "❌"}
+    for r in rows:
+        model = r.get("model", "")
+        if r.get("escalated"):
+            model += " ⬆️"
+        res = icon.get(r.get("result", ""), r.get("result", ""))
+        sec = r.get("elapsed_sec")
+        sec_s = f"{sec:.0f}" if isinstance(sec, (int, float)) else ""
+        out += (
+            f"| `{r.get('task_id','')}` | {r.get('role','')} | {r.get('worker','')} "
+            f"| {r.get('attempt','')} | `{model}` | {res} | {sec_s} |\n"
+        )
+    return out
+
+
+# ----------------------------------------------------------------------------
 # mailbox（teammate 間メッセージング・宛先別 jsonl・既読オフセット）
 # ----------------------------------------------------------------------------
 def _mailbox_dir(job_dir: Path) -> Path:
@@ -605,11 +679,15 @@ def make_team_executor(
     base_executor: Callable[[str, dict], Awaitable[str]],
     job_dir: Path,
     member_name: str,
+    work_dir: Path | None = None,
 ) -> Callable[[str, dict], Awaitable[str]]:
-    """teammate 専用の executor。チームツールは job_dir＋自分の名前を埋めて処理し、
-    それ以外は既存の execute_tool_async に委譲する。"""
-    # teammate は job_dir を作業ディレクトリとみなす。相対パスは job_dir 基準に正す
+    """teammate 専用の executor。チームツール（send/read/list）は job_dir＝制御ディレクトリ＋
+    自分の名前を埋めて処理し、それ以外は既存の execute_tool_async に委譲する。
+    成果物の相対パスは work_dir 基準に正す（work_dir 未指定なら job_dir 基準＝従来挙動）。
+    シングル型マルチでは work_dir=既存スコープ、job_dir=scope/.team/<id> に分離する。"""
+    # teammate は work_dir を作業ディレクトリとみなす。相対パスは work_dir 基準に正す
     # （絶対パスはそのまま）。これで「code/x.py」が workspace ルートに落ちる事故を防ぐ。
+    _work_base = work_dir or job_dir
     _PATH_KEYS = ("path", "file_path", "work_dir")
 
     def _rewrite_paths(args: dict) -> dict:
@@ -617,7 +695,7 @@ def make_team_executor(
         for k in _PATH_KEYS:
             v = out.get(k)
             if isinstance(v, str) and v and not os.path.isabs(v):
-                out[k] = str(job_dir / v)
+                out[k] = str(_work_base / v)
         return out
 
     async def _exec(name: str, args: dict) -> str:
@@ -649,9 +727,11 @@ async def run_team_member(
     job_dir: Path,
     max_iterations: int | None = None,
     timeout_sec: int | None = None,
+    work_dir: Path | None = None,
 ) -> str:
     """1タスクを実行する teammate のループ。ターン冒頭で自分宛 mailbox を機械的に注入する
-    （弱いモデルが read_messages を呼び忘れても会話に取り込まれる）。"""
+    （弱いモデルが read_messages を呼び忘れても会話に取り込まれる）。
+    work_dir 指定時は成果物の相対パスを work_dir 基準に解決する（既定は job_dir 基準）。"""
     from tools.multi_agent_tools import AGENT_ALLOWED_TOOLS, _filter_tools
 
     if max_iterations is None:
@@ -660,7 +740,7 @@ async def run_team_member(
         timeout_sec = config.MULTI_AGENT_TIMEOUT_SEC
 
     allowed = _filter_tools(all_tools, AGENT_ALLOWED_TOOLS.get(role, [])) + TEAM_TOOL_SCHEMAS
-    executor = make_team_executor(base_executor, job_dir, member_name)
+    executor = make_team_executor(base_executor, job_dir, member_name, work_dir=work_dir)
 
     messages = [
         {"role": "system", "content": system_prompt},

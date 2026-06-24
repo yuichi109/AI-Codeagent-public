@@ -1975,7 +1975,8 @@ class ChatRequest(BaseModel):
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
-    team_mode: bool = False      # True=協調型チーム方式 / False=パイプライン方式（既存・既定）
+    team_mode: bool = False      # 旧フラグ（後方互換）: True=チーム方式。team_method が優先される
+    team_method: str = ""        # "pipeline" | "team" | "single"（新方式）。空なら team_mode から導出
     startup_test: bool = False   # True=納品前にこの環境で起動/実行テストを行う（既定OFF=安全側）
     resume_job_id: str = ""     # 計画確認後の再開ジョブID
 
@@ -2319,6 +2320,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
         verify_task, reconcile_declared_files, update_status_locked as _update_status,
         find_entry_html, browser_smoke_test, run_acceptance_checks,
+        log_attempt, summarize_attempts_md,
     )
     from prompts import get_team_member_prompt, AGENT_ROLE_LABELS
 
@@ -2458,7 +2460,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                         for attempt in range(max_attempts):
                             is_final = attempt == max_attempts - 1
                             prompt = base_prompt
-                            run_client, run_model = client, model
+                            run_client, run_model, run_preset = client, model, preset_id
+                            escalated = False
                             if attempt >= 1:
                                 detail = "\n".join(f"- {p}" for p in problems)
                                 prompt += (
@@ -2474,8 +2477,10 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                                 esc_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
                                 if (esc_preset, esc_model) != (preset_id, model):
                                     run_client = _make_async_client_for(esc_preset)
-                                    run_model  = esc_model
+                                    run_model, run_preset = esc_model, esc_preset
+                                    escalated = True
                                     queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
+                            _attempt_t0 = time.time()
                             await run_team_member(
                                 member_name=name, role=role, system_prompt=sys_prompt,
                                 task_prompt=prompt, all_tools=TOOLS,
@@ -2487,6 +2492,14 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                             if relocated:
                                 queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
                             problems = verify_task(job_dir, claimed)
+                            # この1トライの試行ログを残す（誰が・何回目・どのモデルで・結果・所要秒数）
+                            log_attempt(
+                                job_dir, worker=name, task_id=tid, role=role,
+                                attempt=attempt + 1, preset_id=run_preset, model=run_model,
+                                escalated=escalated, result=("ok" if not problems else "ng"),
+                                elapsed_sec=round(time.time() - _attempt_t0, 1),
+                                problems=[p.splitlines()[0] for p in problems] if problems else [],
+                            )
                             if not problems:
                                 break
                         if problems:
@@ -2501,6 +2514,14 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                     except Exception as e:
                         complete_task(job_dir, tid, f"エラー: {type(e).__name__}: {e}")
                         _update_status(job_dir, role, f"エラー ⚠️（{tid}）")
+                        log_attempt(
+                            job_dir, worker=name, task_id=tid, role=role,
+                            attempt=locals().get("attempt", 0) + 1,
+                            preset_id=locals().get("run_preset", preset_id),
+                            model=locals().get("run_model", model),
+                            escalated=locals().get("escalated", False),
+                            result="error", problems=[f"{type(e).__name__}: {e}"],
+                        )
                         queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
                         print(f"[team_agent] {name}/{tid} エラー: {e}")
 
@@ -2591,12 +2612,322 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                 f"{detail}\n\n以下は参考の作業報告です。\n\n"
             )
         yield _sse(f"---\n\n{report}\n\n")
+        # 試行ログ（誰が・何回目・どのモデルで・結果）を表で提示し、生ログの場所も案内する
+        attempts_md = summarize_attempts_md(job_dir)
+        if attempts_md:
+            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + "\n_（生ログ: `attempts.jsonl`）_\n")
         scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
         yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
 
     except Exception as e:
         import traceback
         yield _sse(f"❌ チーム方式エラー: `{type(e).__name__}: {e}`")
+        print(traceback.format_exc())
+
+    yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+
+
+async def single_team_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False):
+    """シングル型マルチ（新方式・段階1）。
+    チーム方式の「儀式」を外し、シングルチャットと同じ操作感にする:
+      - 計画承認で止まらない（計画を情報として流して即実行）
+      - 作業場所＝今のスコープ（既存ファイルをその場で触る）。制御ファイルは <scope>/.team/<id>/ に隠す
+      - 実行後もジョブを生かす（job_open を流しフロントが job_id を保持＝会話継続の土台）
+    並列・self-claim・検収/差し戻し・自動格上げの核は team_tools をそのまま流用する。
+    既存の team_agent_stream / multi_agent_stream は無改修で温存。
+    """
+    import asyncio as _asyncio
+    import time
+    from tools.multi_agent_tools import generate_final_report, new_job_id
+    from tools.team_tools import (
+        dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
+        verify_task, reconcile_declared_files, update_status_locked as _update_status,
+        find_entry_html, browser_smoke_test, run_acceptance_checks,
+        log_attempt, summarize_attempts_md,
+    )
+    from prompts import get_team_member_prompt, AGENT_ROLE_LABELS
+
+    def _sse(text: str) -> str:
+        return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
+
+    ma_cfg = _load_ma_config()
+    d_cfg    = ma_cfg.get("dispatcher", {})
+    d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
+    d_model  = d_cfg.get("model", _provider_config["model"])
+    d_client = _make_async_client_for(d_preset)
+
+    def _plan_lines(plan: dict) -> str:
+        out = ""
+        for tid, t in plan.get("tasks", {}).items():
+            label = AGENT_ROLE_LABELS.get(t.get("role", ""), t.get("role", ""))
+            deps = t.get("depends_on", [])
+            dep_s = f" (依存: {', '.join(deps)})" if deps else " (並列可)"
+            out += f"- `{tid}` **{label}**: {t.get('prompt', '')[:70]}{dep_s}\n"
+        return out
+
+    # 既存スコープの内容を要約してディスパッチャーに渡す（更地前提を外す＝既存コードベース対応の土台）
+    def _scope_listing(work_dir: Path, limit: int = 60) -> str:
+        try:
+            names: list[str] = []
+            for p in sorted(work_dir.rglob("*")):
+                rel = p.relative_to(work_dir)
+                parts = rel.parts
+                if any(seg in (".team", "jobs", "__pycache__", ".git") for seg in parts):
+                    continue
+                if p.is_file():
+                    names.append(str(rel))
+                if len(names) >= limit:
+                    names.append("…（以下略）")
+                    break
+            return "\n".join(f"- {n}" for n in names)
+        except Exception:
+            return ""
+
+    try:
+        base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+        work_dir = base_dir
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        if resume_job_id:
+            # ---- 会話継続（段階1の基本refine）: 同じ制御ディレクトリ・同じスコープで追い実行 ----
+            job_id = resume_job_id
+            ctrl_dir = base_dir / ".team" / job_id
+            if not (ctrl_dir / "plan.json").exists():
+                # スコープを跨いだ場合の保険（.team/<id> を全スコープから探す）
+                cands = list(ALLOWED_WORK_DIR.glob(f".team/{job_id}")) + list(ALLOWED_WORK_DIR.glob(f"*/.team/{job_id}"))
+                ctrl_dir = next((c for c in cands if (c / "plan.json").exists()), ctrl_dir)
+                if (ctrl_dir / "plan.json").exists():
+                    work_dir = ctrl_dir.parent.parent  # <scope>/.team/<id> → <scope>
+            original_task_file = ctrl_dir / "original_task.txt"
+            original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else ""
+            yield _sse(f"▶ **続けて作業します** (job: `{job_id}`)\n\n")
+            scope_note = _scope_listing(work_dir)
+            dispatch_input = (
+                f"{original_task}\n\n【ここまでの成果物は既にスコープ内にあります。下記の追加指示に必要な分だけ"
+                f"作り直し・修正してください（無関係なファイルは触らない）】\n追加指示: {user_message}\n\n"
+                f"現在スコープにあるファイル:\n{scope_note}"
+            )
+            ctrl_dir.mkdir(parents=True, exist_ok=True)
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir)
+            (ctrl_dir / "original_task.txt").write_text(original_task + f"\n\n追加指示: {user_message}", encoding="utf-8")
+            (ctrl_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+            yield _sse(_plan_lines(plan) + "\n")
+        else:
+            # ---- 新規（儀式なし・即実行）----
+            job_id = new_job_id()
+            ctrl_dir = base_dir / ".team" / job_id
+            ctrl_dir.mkdir(parents=True, exist_ok=True)
+            scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+            yield _sse(f"👥 **シングル型マルチ** (job: `{job_id}` / 作業場所: `{scope_label}`)\n\n")
+            yield _sse("📋 タスク分解中...\n\n")
+            scope_note = _scope_listing(work_dir)
+            dispatch_input = user_message
+            if scope_note:
+                dispatch_input += (
+                    "\n\n【作業場所には既存ファイルがあります。更地に作り直すのではなく、"
+                    "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
+                )
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir)
+            (ctrl_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
+            (ctrl_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+            yield _sse(_plan_lines(plan) + "\n")
+
+        # ---- 実行フェーズ（ワーカープール＝チーム方式と同じ並列・検収・自動格上げ）----
+        init_team_job(plan, ctrl_dir)
+        max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
+        n_tasks = len(plan.get("tasks", {}))
+        n_workers = max(1, min(max_parallel, n_tasks))
+        workers = [f"agent-{i+1}" for i in range(n_workers)]
+        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(workers))}）が空いたタスクから並列で着手します\n\n")
+
+        sem = _asyncio.Semaphore(max_parallel)
+        queue: _asyncio.Queue = _asyncio.Queue()
+        deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
+
+        async def worker(name: str):
+            coworkers = [w for w in workers if w != name]
+            while time.time() < deadline:
+                claimed = claim_task(ctrl_dir, name)
+                if claimed.get("none"):
+                    if claimed.get("pending_remain"):
+                        await _asyncio.sleep(2)
+                        continue
+                    break
+                tid = claimed["id"]
+                role = claimed.get("role", "")
+                label = AGENT_ROLE_LABELS.get(role, role)
+                role_cfg = ma_cfg.get(role, d_cfg)
+                preset_id = claimed.get("preset_id") or role_cfg.get("preset_id", d_preset)
+                model     = claimed.get("model")     or role_cfg.get("model", d_model)
+                client    = _make_async_client_for(preset_id)
+                sys_prompt = get_team_member_prompt(role, str(work_dir), name, coworkers)
+                queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
+                async with sem:
+                    problems: list[str] = []
+                    max_attempts = MULTI_AGENT_MAX_RETRIES + 1
+                    _decl_files = claimed.get("files", [])
+                    if _decl_files:
+                        _files_str = "\n".join(f"- {f}" for f in _decl_files)
+                        base_prompt = (
+                            "【作成・編集するファイルはこれだけ。下記の相対パスを1文字も変えずに作ること。"
+                            "code/ などの別の場所には絶対に作らない（役割の一般的な『出力先』より、このパス指定が優先）】\n"
+                            f"{_files_str}\n\n" + claimed.get("prompt", "")
+                        )
+                    else:
+                        base_prompt = claimed.get("prompt", "")
+                    try:
+                        for attempt in range(max_attempts):
+                            is_final = attempt == max_attempts - 1
+                            prompt = base_prompt
+                            run_client, run_model, run_preset = client, model, preset_id
+                            escalated = False
+                            if attempt >= 1:
+                                detail = "\n".join(f"- {p}" for p in problems)
+                                prompt += (
+                                    f"\n\n【リードからの差し戻し（{attempt}回目）】前回の成果に次の問題があります:\n{detail}\n"
+                                    f"上記を解消し、必ずツール（write_file / run_command 等）で成果ファイルを実際に作り直してください。"
+                                )
+                                queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（{attempt}回目）\n")
+                            if is_final and attempt >= 1:
+                                esc_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
+                                esc_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
+                                if (esc_preset, esc_model) != (preset_id, model):
+                                    run_client = _make_async_client_for(esc_preset)
+                                    run_model, run_preset = esc_model, esc_preset
+                                    escalated = True
+                                    queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
+                            _attempt_t0 = time.time()
+                            await run_team_member(
+                                member_name=name, role=role, system_prompt=sys_prompt,
+                                task_prompt=prompt, all_tools=TOOLS,
+                                base_executor=execute_tool_async, async_client=run_client,
+                                model=run_model, job_dir=ctrl_dir, timeout_sec=claimed.get("timeout_sec"),
+                                work_dir=work_dir,
+                            )
+                            relocated = reconcile_declared_files(ctrl_dir, claimed, work_dir=work_dir)
+                            if relocated:
+                                queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
+                            problems = verify_task(ctrl_dir, claimed, work_dir=work_dir)
+                            log_attempt(
+                                ctrl_dir, worker=name, task_id=tid, role=role,
+                                attempt=attempt + 1, preset_id=run_preset, model=run_model,
+                                escalated=escalated, result=("ok" if not problems else "ng"),
+                                elapsed_sec=round(time.time() - _attempt_t0, 1),
+                                problems=[p.splitlines()[0] for p in problems] if problems else [],
+                            )
+                            if not problems:
+                                break
+                        if problems:
+                            summary = "未達: " + " / ".join(problems)
+                            complete_task(ctrl_dir, tid, summary)
+                            _update_status(ctrl_dir, role, f"未達 ⚠️（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{'; '.join(problems)}）\n")
+                        else:
+                            complete_task(ctrl_dir, tid, "完了")
+                            _update_status(ctrl_dir, role, f"完了（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
+                    except Exception as e:
+                        complete_task(ctrl_dir, tid, f"エラー: {type(e).__name__}: {e}")
+                        _update_status(ctrl_dir, role, f"エラー ⚠️（{tid}）")
+                        log_attempt(
+                            ctrl_dir, worker=name, task_id=tid, role=role,
+                            attempt=locals().get("attempt", 0) + 1,
+                            preset_id=locals().get("run_preset", preset_id),
+                            model=locals().get("run_model", model),
+                            escalated=locals().get("escalated", False),
+                            result="error", problems=[f"{type(e).__name__}: {e}"],
+                        )
+                        queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
+                        print(f"[single_team] {name}/{tid} エラー: {e}")
+
+        async def run_all():
+            try:
+                await _asyncio.gather(*[worker(w) for w in workers])
+            finally:
+                queue.put_nowait(None)
+
+        runner = _asyncio.create_task(run_all())
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield _sse(item)
+        await runner
+
+        # ---- 納品ゲート（指示が無いときだけ静的検証・正直報告は段階3で強化）----
+        entry_html = find_entry_html(work_dir)
+        acceptance = plan.get("acceptance", []) or []
+        gate_problems: list[str] = []
+        if not startup_test:
+            if acceptance or entry_html:
+                yield _sse("\nℹ️ 起動・動作テストはOFFです（実行検証なし）。実機で動かすなら「起動テスト」をONにしてください。\n")
+        elif acceptance or entry_html:
+            yield _sse("\n🔎 納品前の動作検証中（起動/実行・ブラウザ）...\n")
+            if acceptance:
+                gate_problems += await _asyncio.to_thread(run_acceptance_checks, work_dir, acceptance)
+            if entry_html:
+                gate_problems += await _asyncio.to_thread(browser_smoke_test, entry_html)
+            if gate_problems:
+                for gp in gate_problems[:5]:
+                    yield _sse(f"  ⚠️ {gp.splitlines()[0]}\n")
+            else:
+                yield _sse("  ✅ 動作検証OK。実際に起動/動作することを確認しました。\n")
+
+        # ---- 最終報告（スコープ全体を読まず、宣言された成果物だけを要約）----
+        yield _sse("\n📄 最終報告書を生成中...\n\n")
+        declared: list[str] = []
+        for t in plan.get("tasks", {}).values():
+            for f in t.get("files", []):
+                if f not in declared:
+                    declared.append(f)
+        files_content = ""
+        for rel in declared:
+            p = Path(rel)
+            if not p.is_absolute():
+                p = work_dir / rel
+            try:
+                if p.is_file():
+                    files_content += f"\n\n## {rel}\n{p.read_text(encoding='utf-8', errors='ignore')[:6000]}"
+            except OSError:
+                pass
+            if len(files_content) > 16000:
+                files_content += "\n\n…（以下略）"
+                break
+        if files_content.strip():
+            try:
+                resp = await d_client.chat.completions.create(
+                    model=d_model,
+                    messages=[
+                        {"role": "system", "content": "あなたはプロジェクト完了報告書を書く専門家です。成果物を読んで、ユーザー向けに分かりやすい最終報告書を日本語で簡潔にまとめてください。"},
+                        {"role": "user", "content": f"以下の成果物をもとに最終報告書を書いてください:\n{files_content}"},
+                    ],
+                    stream=False,
+                )
+                report = resp.choices[0].message.content or ""
+            except Exception as re:
+                report = f"（報告書生成に失敗: {type(re).__name__}）"
+        else:
+            report = "成果物ファイルが見つかりませんでした。"
+        if gate_problems:
+            detail = "\n".join(f"- {p.splitlines()[0]}" for p in gate_problems[:5])
+            yield _sse(
+                "---\n\n## ⚠️ 未完成（動作検証に失敗）\n"
+                "成果物が**実際には動作しません**。残っている問題:\n"
+                f"{detail}\n\n以下は参考の作業報告です。\n\n"
+            )
+        yield _sse(f"---\n\n{report}\n\n")
+        attempts_md = summarize_attempts_md(ctrl_dir)
+        if attempts_md:
+            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + "\n_（生ログ: `.team/" + job_id + "/attempts.jsonl`）_\n")
+        scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+        yield _sse(f"\n📁 作業場所: `{scope_label}/`（制御ファイル: `.team/{job_id}/`）\n")
+        yield _sse("\n💬 このまま続けて指示できます（「ここ直して」等）。\n")
+        # 実行後もジョブを生かす＝フロントが job_id を保持し、次の発言を同じジョブへ継続させる
+        yield f"data: {json.dumps({'type': 'team_job_open', 'job_id': job_id})}\n\n"
+
+    except Exception as e:
+        import traceback
+        yield _sse(f"❌ シングル型マルチ エラー: `{type(e).__name__}: {e}`")
         print(traceback.format_exc())
 
     yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
@@ -3464,18 +3795,26 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     if req.multi_agent or req.resume_job_id:
-        # チーム方式か判定。再開時は plan.json の mode を優先（トグルの取り違え防止）。
-        use_team = req.team_mode
+        # 実行方式を決定。team_method（新）が優先、無ければ旧 team_mode から導出。
+        method = req.team_method or ("team" if req.team_mode else "pipeline")
         if req.resume_job_id:
+            # 再開時は、ジョブが実際にどの方式で作られたかをディスク上から判定（トグル取り違え防止）。
             try:
                 _base = (ALLOWED_WORK_DIR / req.workspace_scope) if req.workspace_scope else ALLOWED_WORK_DIR
-                _cands = [_base / "jobs" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f"*/jobs/{req.resume_job_id}")) + [ALLOWED_WORK_DIR / "jobs" / req.resume_job_id]
-                _pf = next((c / "plan.json" for c in _cands if (c / "plan.json").exists()), None)
-                if _pf:
-                    use_team = json.loads(_pf.read_text(encoding="utf-8")).get("mode") == "team"
+                # シングル型は <scope>/.team/<id>/ に置かれる
+                _single = [_base / ".team" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f".team/{req.resume_job_id}")) + list(ALLOWED_WORK_DIR.glob(f"*/.team/{req.resume_job_id}"))
+                if any((c / "plan.json").exists() for c in _single):
+                    method = "single"
+                else:
+                    _cands = [_base / "jobs" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f"*/jobs/{req.resume_job_id}")) + [ALLOWED_WORK_DIR / "jobs" / req.resume_job_id]
+                    _pf = next((c / "plan.json" for c in _cands if (c / "plan.json").exists()), None)
+                    if _pf:
+                        method = "team" if json.loads(_pf.read_text(encoding="utf-8")).get("mode") == "team" else "pipeline"
             except Exception:
                 pass
-        if use_team and MULTI_AGENT_TEAM_ENABLED:
+        if method == "single" and MULTI_AGENT_TEAM_ENABLED:
+            stream = single_team_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test)
+        elif method == "team" and MULTI_AGENT_TEAM_ENABLED:
             stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test)
         else:
             stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)

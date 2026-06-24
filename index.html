@@ -1361,7 +1361,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             <button type="button" class="dd-item" data-value="auto">自動</button>
           </div>
         </div>
-        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: パイプライン（逐次）/ チーム（並列・mailbox）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">パイプライン</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="pipeline">パイプライン</button><button type="button" class="dd-item" data-value="team">チーム（並列）</button></div></div></span>
+        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: パイプライン（逐次）/ チーム（並列・mailbox）/ シングル型（並列・会話継続・既存スコープ）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">パイプライン</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="pipeline">パイプライン</button><button type="button" class="dd-item" data-value="team">チーム（並列）</button><button type="button" class="dd-item" data-value="single">シングル型（並列）</button></div></div></span>
       </div>
       <div id="input-right">
         <span id="gen-status"></span>
@@ -2088,15 +2088,33 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       if (bar) bar.remove();
     }
   }
+  // シングル型マルチの「会話継続中」インジケータ（実行/キャンセルの儀式は無し）
+  function _updateContinueUI(active) {
+    const id = 'ma-continue-bar';
+    let bar = document.getElementById(id);
+    if (active) {
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = id;
+        bar.style.cssText = 'background:#313244;border:1px solid #a6e3a1;border-radius:6px;padding:6px 12px;margin:4px 0;font-size:13px;color:#a6e3a1;display:flex;align-items:center;gap:8px;';
+        bar.innerHTML = '💬 <span>このまま続けて指示できます（「ここ直して」など）。同じ作業場所で続行します。</span><button onclick="_clearMaPending()" style="margin-left:auto;background:none;border:none;color:#6c7086;cursor:pointer;font-size:12px;">✕ 新規に戻す</button>';
+        const inputArea = document.getElementById('input-area') || document.querySelector('.input-area');
+        if (inputArea) inputArea.insertAdjacentElement('beforebegin', bar);
+      }
+    } else if (bar) {
+      bar.remove();
+    }
+  }
   function _clearMaPending() {
     _maPendingJobId = '';
     _updatePlanConfirmUI(false);
+    _updateContinueUI(false);
   }
 
   // 送信後にペンディングをクリア（実行開始 or キャンセル後）
   function _maConsumePending() {
     const id = _maPendingJobId;
-    if (id) { _maPendingJobId = ''; _updatePlanConfirmUI(false); }
+    if (id) { _maPendingJobId = ''; _updatePlanConfirmUI(false); _updateContinueUI(false); }
     return id;
   }
 
@@ -2155,7 +2173,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   function getTeamMethod() {
     return localStorage.getItem('maMethod') || 'pipeline';
   }
-  const MAT_LABELS = { pipeline: 'パイプライン', team: 'チーム（並列）' };
+  const MAT_LABELS = { pipeline: 'パイプライン', team: 'チーム（並列）', single: 'シングル型（並列）' };
   function updateMaMethod() {
     const btn = document.getElementById('mat-dd-btn');
     if (!btn) return;
@@ -4829,6 +4847,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           multi_agent: isMultiAgentActive(),
           agent_mode: getAgentMode(),
           team_mode: getTeamMethod() === 'team',
+          team_method: getTeamMethod(),
           startup_test: getStartupTest(),
           resume_job_id: resumeJobId || '',
         }),
@@ -5106,9 +5125,14 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
               `;
               msgEl.appendChild(btnWrap);
             }
+          } else if (data.type === 'team_job_open') {
+            // シングル型マルチ: 実行後もジョブを生かす。次の発言を同じジョブへ継続させる（会話継続＝refineの土台）。
+            // 計画確認の儀式（実行/キャンセルのボタン）は出さず、軽い「続けて指示できます」表示のみ。
+            _maPendingJobId = data.job_id;
+            _updateContinueUI(true);
           } else if (data.type === 'answer_done') {
             // plan_ready が来ていない場合はペンディング解除
-            if (!_maPendingJobId) _updatePlanConfirmUI(false);
+            if (!_maPendingJobId) { _updatePlanConfirmUI(false); _updateContinueUI(false); }
             // 読み上げ
             ttsSpeak(finalAnswer);
             // モデル名をラベルに表示（data.model は実際に応答したモデル）

@@ -148,13 +148,20 @@ async def generate_final_report(
     async_client,
     model: str,
     job_dir: Path,
+    out_dir: Path | None = None,
+    user_request: str = "",
 ) -> str:
-    """全成果物ファイルを読んで最終レポートを生成する"""
+    """全成果物ファイルを読んで最終レポートを生成する。
+    job_dir を成果物の探索元、out_dir を final-report.md の書き出し先にする
+    （スコープ直下を成果物にしつつ制御ファイルは別ディレクトリに置く構成のため）。
+    制御用ディレクトリ（.team / jobs 等）は探索から除外する。"""
     files_content = ""
     for path in sorted(job_dir.rglob("*.md")):
         if path.name == "final-report.md":
             continue
         rel = path.relative_to(job_dir)
+        if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in rel.parts):
+            continue
         try:
             files_content += f"\n\n## {rel}\n{path.read_text(encoding='utf-8')}"
         except Exception:
@@ -163,23 +170,35 @@ async def generate_final_report(
     if not files_content:
         return "成果物ファイルが見つかりませんでした。"
 
+    sys_msg = (
+        "あなたはプロジェクト完了報告書を書く専門家です。各エージェントの成果物を読んで、"
+        "ユーザー向けに分かりやすい最終報告書を日本語でまとめてください。"
+    )
+    if user_request.strip():
+        sys_msg += (
+            "\n報告書は必ず**ユーザーの要望を起点**に書くこと。冒頭に必ず「## ご要望への対応」セクションを置き、"
+            "要望を1項目ずつ箇条書きにし、各項目について『対応した/できていない/確認できない』を明示し、"
+            "対応した場合は**どのファイルのどこを・どう変えて**満たしたかを具体的に書く。"
+            "成果物から要望が満たされたと確認できない場合は、推測で『対応済み』と書かず正直に書くこと（嘘をつかない）。"
+        )
+        user_msg = (
+            f"# ユーザーの要望（これにどう応えたかを最優先で報告すること）\n{user_request}\n\n"
+            f"# 成果物\n{files_content}"
+        )
+    else:
+        user_msg = f"以下の成果物をもとに最終報告書を書いてください:\n{files_content}"
+
     response = await async_client.chat.completions.create(
         model=model,
         messages=[
-            {
-                "role": "system",
-                "content": "あなたはプロジェクト完了報告書を書く専門家です。各エージェントの成果物を読んで、ユーザー向けに分かりやすい最終報告書を日本語でまとめてください。",
-            },
-            {
-                "role": "user",
-                "content": f"以下の成果物をもとに最終報告書を書いてください:\n{files_content}",
-            },
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": user_msg},
         ],
         stream=False,
     )
 
     report = response.choices[0].message.content or "最終報告書の生成に失敗しました。"
-    (job_dir / "final-report.md").write_text(report, encoding="utf-8")
+    ((out_dir or job_dir) / "final-report.md").write_text(report, encoding="utf-8")
     return report
 
 

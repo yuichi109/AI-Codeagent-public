@@ -2071,7 +2071,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   loadReasoningEffort();
 
   // ---- マルチエージェント: 計画確認待ち状態 ----
-  let _maPendingJobId = '';
+  let _maPendingJobId = '';   // チーム方式の計画承認フロー専用（plan_ready→実行）。シングル型は使わない
 
   function _updatePlanConfirmUI(active) {
     const bar = document.getElementById('ma-plan-confirm-bar');
@@ -2088,27 +2088,15 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       if (bar) bar.remove();
     }
   }
-  // シングル型マルチの「会話継続中」インジケータ（実行/キャンセルの儀式は無し）
+  // シングル型は「スコープ＝継続」のため緑の継続バーは廃止（ジョブIDに継続を結びつけない）。
+  // 次の発言はそのまま同じ作業場所の既存ファイルを直す＝儀式不要。
   function _updateContinueUI(active) {
-    const id = 'ma-continue-bar';
-    let bar = document.getElementById(id);
-    if (active) {
-      if (!bar) {
-        bar = document.createElement('div');
-        bar.id = id;
-        bar.style.cssText = 'background:#313244;border:1px solid #a6e3a1;border-radius:6px;padding:6px 12px;margin:4px 0;font-size:13px;color:#a6e3a1;display:flex;align-items:center;gap:8px;';
-        bar.innerHTML = '💬 <span>このまま続けて指示できます（「ここ直して」など）。同じ作業場所で続行します。</span><button onclick="_clearMaPending()" style="margin-left:auto;background:none;border:none;color:#6c7086;cursor:pointer;font-size:12px;">✕ 新規に戻す</button>';
-        const inputArea = document.getElementById('input-area') || document.querySelector('.input-area');
-        if (inputArea) inputArea.insertAdjacentElement('beforebegin', bar);
-      }
-    } else if (bar) {
-      bar.remove();
-    }
+    const bar = document.getElementById('ma-continue-bar');
+    if (bar) bar.remove();
   }
   function _clearMaPending() {
     _maPendingJobId = '';
     _updatePlanConfirmUI(false);
-    _updateContinueUI(false);
   }
 
   // 送信後にペンディングをクリア（実行開始 or キャンセル後）
@@ -5125,11 +5113,6 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
               `;
               msgEl.appendChild(btnWrap);
             }
-          } else if (data.type === 'team_job_open') {
-            // シングル型マルチ: 実行後もジョブを生かす。次の発言を同じジョブへ継続させる（会話継続＝refineの土台）。
-            // 計画確認の儀式（実行/キャンセルのボタン）は出さず、軽い「続けて指示できます」表示のみ。
-            _maPendingJobId = data.job_id;
-            _updateContinueUI(true);
           } else if (data.type === 'answer_done') {
             // plan_ready が来ていない場合はペンディング解除
             if (!_maPendingJobId) { _updatePlanConfirmUI(false); _updateContinueUI(false); }

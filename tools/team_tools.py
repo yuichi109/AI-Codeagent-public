@@ -312,7 +312,7 @@ def find_entry_html(job_dir: Path) -> Path | None:
     if direct.exists():
         return direct
     for cand in sorted(job_dir.rglob("index.html")):
-        if "__pycache__" not in cand.parts:
+        if not any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in cand.parts):
             return cand
     return None
 
@@ -421,6 +421,37 @@ def _static_check(args: list[str], job_dir: Path) -> list[str]:
     return problems
 
 
+def _free_port() -> int:
+    """OS に空きTCPポートを1つ選ばせて返す（衝突回避用）。"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
+def _avoid_port_conflict(args: list[str]) -> list[str]:
+    """`python -m http.server <port>` 等の起動確認で、固定ポート（特に本体と同じ8000）が
+    既に使われていると `Address already in use` で即死し「起動失敗」と誤判定する。
+    http.server のポート引数を空きポートへ置換して自己衝突を防ぐ（起動確認はポート不問で
+    「起動して即死しなければOK」なので、どのポートでも目的を満たす）。"""
+    if "http.server" not in args:
+        return args
+    out = list(args)
+    try:
+        idx = out.index("http.server")
+    except ValueError:
+        return out
+    # http.server の次にある数値トークン＝ポート。あれば置換、無ければ追加。
+    if idx + 1 < len(out) and out[idx + 1].isdigit():
+        out[idx + 1] = str(_free_port())
+    else:
+        out.insert(idx + 1, str(_free_port()))
+    return out
+
+
 def run_acceptance_checks(job_dir: Path, checks: list[dict]) -> list[str]:
     """プログラム成果物の受け入れ検収を機械的に実行する（debug役の自己申告 PASS に頼らない）。
     各 check:
@@ -451,6 +482,8 @@ def run_acceptance_checks(job_dir: Path, checks: list[dict]) -> list[str]:
         if kind == "syntax" or _is_destructive(cmd) or _script_is_destructive(args, job_dir):
             problems += _static_check(args, job_dir)
             continue
+        # http.server の固定ポートが本体(8000)等と衝突して誤「起動失敗」になるのを防ぐ
+        args = _avoid_port_conflict(args)
         if kind == "startup":
             timeout = chk.get("startup_sec", 4)
             rc, out, err, timed_out = _capture_run(args, cwd=str(job_dir), timeout=timeout)
@@ -562,7 +595,7 @@ def summarize_attempts_md(job_dir: Path) -> str:
     rows = read_attempts(job_dir)
     if not rows:
         return ""
-    out = "| タスク | 役割 | ワーカー | 試行 | モデル | 結果 | 秒 |\n|---|---|---|---|---|---|---|\n"
+    out = "| タスク | 役割 | ワーカー | 試行 | モデル | 結果 | 秒 | 理由 |\n|---|---|---|---|---|---|---|---|\n"
     icon = {"ok": "✅", "ng": "⚠️", "error": "❌"}
     for r in rows:
         model = r.get("model", "")
@@ -571,9 +604,18 @@ def summarize_attempts_md(job_dir: Path) -> str:
         res = icon.get(r.get("result", ""), r.get("result", ""))
         sec = r.get("elapsed_sec")
         sec_s = f"{sec:.0f}" if isinstance(sec, (int, float)) else ""
+        # 成功以外は「なぜダメだったか」を理由欄に出す（pass/failしか分からない問題の解消）。
+        reason = ""
+        if r.get("result") != "ok":
+            probs = r.get("problems") or []
+            if isinstance(probs, str):
+                probs = [probs]
+            # 表セルを壊さないよう改行/パイプを除去し、長すぎる場合は丸める。
+            joined = " / ".join(str(p).replace("|", "\\|").replace("\n", " ").strip() for p in probs if p)
+            reason = (joined[:160] + "…") if len(joined) > 160 else joined
         out += (
             f"| `{r.get('task_id','')}` | {r.get('role','')} | {r.get('worker','')} "
-            f"| {r.get('attempt','')} | `{model}` | {res} | {sec_s} |\n"
+            f"| {r.get('attempt','')} | `{model}` | {res} | {sec_s} | {reason} |\n"
         )
     return out
 

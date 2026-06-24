@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-06-24（セッション67）シングル型を「スコープ＝継続」へ作り直し（v1.22.1〜1.22.6・feature/multi-agent-team）
+
+> 北極星＝**Claude Code に近づける／モード（single・team）を意識させない**。実機テスト（テトリス）で出た問題を
+> 1つずつ潰しつつ、継続(refine)を「ジョブID」でなく「**スコープ**」基準に作り直した。
+> single と team は同一エンジン（team_tools / dispatcher_team / get_team_member_prompt）を共有するため、以下は基本的に**両方に効く**。
+> **このブランチのみ。main / for_windows は無変更。** v1.22.0（シングル型段階1）は前コミット 429a5c2。
+
+### v1.22.1 納品ゲートの誤検知3種を対策
+- **debug の判定矛盾**: debug役プロンプトに「合否判定の鉄則」追加＝テストが落ちても (A)製品バグか (B)テスト側の前提ミスかを切り分け、(B)なら壊れたテストを直して再実行し、**動く成果物を自作テストの不備でFAILにしない**。
+- **http.server のポート衝突**: `run_acceptance_checks` に `_avoid_port_conflict`／`_free_port` を追加＝`python -m http.server 8000` の固定ポートを空きポートへ自動置換し、本体(uvicorn:8000)との自己衝突による偽「起動失敗」を解消。
+- **試行ログに「理由」列**: `summarize_attempts_md` で ⚠️/❌ のとき problems を表示（pass/fail しか分からない問題の解消）。
+- ※ `file://` での fetch/WASM 偽FAIL（browser_smoke_test を http 配信化）は**未対応で残す**。
+
+### v1.22.2 スコープ＝継続（全モードで既存ファイルをその場編集・儀式撤去）
+- `dispatcher_team` プロンプトに「★既存ファイルがあるときは作り直さずその場で修正・最小タスク」を明記（single/team 共通の dispatcher）。
+- `team_agent_stream` を **work_dir=スコープ** で動かすよう変更（従来は jobs/<id> に新規作成＝既存を触れなかった）。`generate_final_report` に `out_dir` 追加（成果物はスコープから読み、report は制御側に書く）。
+- フロントの緑「続けて指示できます」バー／「✕新規に戻す」／`team_job_open`／localStorage 継続を**撤去**。継続はスコープが持つ＝各指示は毎回フレッシュに分解（試行ログも新規・t1から）。team の計画承認フローは温存。
+
+### v1.22.3 制御ファイルをスコープ外へ退避＋自動プルーン
+- 制御/ログを `<scope>/.team|jobs/<id>` から **`workspace/.agent-jobs/<スコープ名>/<id>/`** へ集約（成果物に足場を混ぜない・スコープ名で迷子防止・`scope.txt` も残す）。`_agent_job_dir`／`_scope_from_job_dir`／`_prune_agent_jobs`（スコープごと直近20件保持）。`/chat` の再開ルーティングと各除外箇所（scope一覧/報告書/find_entry_html 等）を新パスに対応。
+
+### v1.22.4 最終報告書を「要望→対応」起点に
+- 報告生成にユーザーの指示文を渡し、冒頭に必ず「## ご要望への対応」を置く。要望ごとに対応/未対応/確認できないを明示し、対応箇所（ファイル・変更内容）を具体化。コードから確認できないものは推測で「対応済み」と書かない（嘘をつかない）。single はインライン、team は `generate_final_report(user_request=...)`。
+
+### v1.22.5 既存修正時のファイルロック緩和（実装箇所を grep で特定して直す）
+- 真因＝dispatcher が中身を見ずファイル名で対象を推測（renderer.js）→外す→ワーカーは宣言ファイル以外を触れず本物(main.js)を直せない。
+- `get_team_member_prompt` と worker base_prompt を「**新規作成は指定パス厳守／既存修正は grep・read_file で実装箇所を特定し、宣言に無い既存ファイルでも直す**」に緩和。`dispatcher_team` にも「ファイル名で当て推量せず grep で実装箇所を特定せよと指示に書け」を追加。
+
+### v1.22.6 試行ログに「分解（dispatcher）」行
+- タスク分解はディスパッチャー（役割割当の上位モデル想定）が行うが、`log_attempt` はワーカー試行のみ記録で「誰が分割したか」が見えなかった。新規ジョブの分解直後に dispatcher 行（role=`dispatch`・モデル＝dispatcher）を試行ログ先頭に記録（single/team 両方）。
+
+### 方針メモ
+- **パイプライン方式（multi_agent_stream）は将来的に削除**（ユーザー決定）。別系統で今回の改善がほぼ届かず最も遅れている＝廃止第一候補。当面は塩漬け。
+- 未確認: 各 v1.22.x の挙動は起動/スモークまで検証。要望対応・既存その場編集の最終品質は実機ラン（実トークン）での確認が前提。
+
 ## 2026-06-23（セッション64）チーム方式 Step3 堅牢化（v1.21.1・feature/multi-agent-team・未コミット）
 
 > Step3 として検収・納品の信頼性を作り込み。実機で「マルチでdebugまでさせたのに動かない物を納品」「mini が

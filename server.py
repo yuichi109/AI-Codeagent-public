@@ -2237,8 +2237,11 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             # ---- Phase 1: 新規ジョブ → 計画表示 → 停止 ----
             job_id = new_job_id()
             base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
-            job_dir = base_dir / "jobs" / job_id
+            # 制御ファイルはスコープの外（.agent-jobs/<scope>/<id>）に置く＝成果物に足場を混ぜない
+            job_dir = _agent_job_dir(workspace_scope, job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / "scope.txt").write_text(workspace_scope or "_root", encoding="utf-8")
+            _prune_agent_jobs(workspace_scope)
 
             yield _sse(f"🤖 **マルチエージェントモード** (job: `{job_id}`)\n\n")
             yield _sse("📋 タスク分解中...\n")
@@ -2307,6 +2310,33 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
     yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
 
 
+def _agent_job_dir(workspace_scope: str, job_id: str) -> Path:
+    """マルチエージェントの制御・ログ用ディレクトリ。ユーザーの成果物（スコープ直下）とは分離し、
+    `workspace/.agent-jobs/<スコープ名>/<id>/` に置く（スコープ内に足場ファイルを残さないため）。
+    スコープ名でフォルダを分けるので「どのプロジェクトのどの実行か」は保たれる。"""
+    seg = workspace_scope or "_root"
+    return ALLOWED_WORK_DIR / ".agent-jobs" / seg / job_id
+
+
+def _scope_from_job_dir(job_dir: Path) -> Path:
+    """制御ディレクトリ（.agent-jobs/<scope>/<id>）から、対応する成果物スコープを逆算する。"""
+    seg = job_dir.parent.name
+    return ALLOWED_WORK_DIR if seg in ("", "_root") else (ALLOWED_WORK_DIR / seg)
+
+
+def _prune_agent_jobs(workspace_scope: str, keep: int = 20) -> None:
+    """スコープごとに直近 keep 件だけ残し、古い制御ディレクトリを自動削除する（無限増殖を防ぐ）。"""
+    base = ALLOWED_WORK_DIR / ".agent-jobs" / (workspace_scope or "_root")
+    if not base.is_dir():
+        return
+    try:
+        dirs = sorted((d for d in base.iterdir() if d.is_dir()), key=lambda p: p.stat().st_mtime)
+        for d in dirs[:-keep] if keep > 0 else dirs:
+            shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
+
+
 async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False):
     """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
     Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
@@ -2342,14 +2372,31 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             out += f"- `{tid}` **{label}**: {t.get('prompt', '')[:70]}{dep_s}\n"
         return out
 
+    # 既存スコープの内容を要約してディスパッチャーに渡す（更地前提を外す＝既存コードベースをその場で直す）
+    def _scope_listing(d: Path, limit: int = 60) -> str:
+        try:
+            names: list[str] = []
+            for p in sorted(d.rglob("*")):
+                rel = p.relative_to(d)
+                if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in rel.parts):
+                    continue
+                if p.is_file():
+                    names.append(str(rel))
+                if len(names) >= limit:
+                    names.append("…（以下略）")
+                    break
+            return "\n".join(f"- {n}" for n in names)
+        except Exception:
+            return ""
+
     try:
         if resume_job_id:
             # ---- Phase 2: ユーザー返答を解釈 ----
             job_id = resume_job_id
             base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
-            job_dir = base_dir / "jobs" / job_id
+            job_dir = _agent_job_dir(workspace_scope, job_id)
             if not (job_dir / "plan.json").exists():
-                candidates = list(ALLOWED_WORK_DIR.glob(f"*/jobs/{job_id}")) + [ALLOWED_WORK_DIR / "jobs" / job_id]
+                candidates = list(ALLOWED_WORK_DIR.glob(f".agent-jobs/*/{job_id}"))
                 job_dir = next((c for c in candidates if (c / "plan.json").exists()), job_dir)
             plan_file = job_dir / "plan.json"
             if not plan_file.exists():
@@ -2388,13 +2435,29 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             # ---- Phase 1: 新規ジョブ → 計画表示 → 停止 ----
             job_id = new_job_id()
             base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
-            job_dir = base_dir / "jobs" / job_id
+            # 制御ファイルはスコープの外（.agent-jobs/<scope>/<id>）に置く＝成果物に足場を混ぜない
+            job_dir = _agent_job_dir(workspace_scope, job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / "scope.txt").write_text(workspace_scope or "_root", encoding="utf-8")
+            _prune_agent_jobs(workspace_scope)
 
             yield _sse(f"👥 **チーム方式マルチエージェント** (job: `{job_id}`)\n\n")
             yield _sse("📋 タスク分解中...\n\n")
 
-            plan = await dispatch_team_task(user_message, d_client, d_model, job_dir)
+            # 既存ファイルがあれば dispatcher に渡し、更地に作り直さずその場で直させる
+            scope_note = _scope_listing(base_dir)
+            dispatch_input = user_message
+            if scope_note:
+                dispatch_input += (
+                    "\n\n【作業場所には既存ファイルがあります。更地に作り直すのではなく、"
+                    "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
+                )
+            _d_t0 = time.time()
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, base_dir)
+            # 試行ログに「誰がタスク分解したか（ディスパッチャー＝上位モデル）」を先頭行として残す
+            log_attempt(job_dir, worker="dispatcher", task_id="—", role="dispatch",
+                        preset_id=d_preset, model=d_model, result="ok",
+                        elapsed_sec=round(time.time() - _d_t0, 1), problems=[])
             (job_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
             (job_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 
@@ -2406,6 +2469,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             return
 
         # ---- 実行フェーズ（ワーカープール＝役割に縛られず空いた人が取る・self-claim・mailbox・検収/差し戻し）----
+        # 成果物はスコープ直下（既存ファイルをその場で編集）、制御ファイルは job_dir(=.agent-jobs/<scope>/<id>) に隠す。
+        work_dir = _scope_from_job_dir(job_dir)
         init_team_job(plan, job_dir)
         # 設定値を天井とし、計画が大きい値を出しても超えさせない。タスク数より多くは立てない。
         max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
@@ -2435,7 +2500,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                 preset_id = claimed.get("preset_id") or role_cfg.get("preset_id", d_preset)
                 model     = claimed.get("model")     or role_cfg.get("model", d_model)
                 client    = _make_async_client_for(preset_id)
-                sys_prompt = get_team_member_prompt(role, str(job_dir), name, coworkers)
+                sys_prompt = get_team_member_prompt(role, str(work_dir), name, coworkers)
                 queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
                 async with sem:
                     problems: list[str] = []
@@ -2450,9 +2515,11 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                     if _decl_files:
                         _files_str = "\n".join(f"- {f}" for f in _decl_files)
                         base_prompt = (
-                            "【作成・編集するファイルはこれだけ。下記の相対パスを1文字も変えずに作ること。"
-                            "code/ などの別の場所には絶対に作らない（役割の一般的な『出力先』より、このパス指定が優先）】\n"
-                            f"{_files_str}\n\n" + claimed.get("prompt", "")
+                            "【ファイル指定＝作業のヒント】新規に作るファイルは下記パスにそのまま作ること"
+                            "（code/ などの別の場所に散らかさない）。ただし**既存の挙動を直す指示なら**、まず "
+                            "grep / read_file で対象機能の実装箇所を特定し、その実ファイルを編集すること"
+                            "（下記に無い既存ファイルでも、そこが実装箇所ならそこを直す。『指定外だから』と要望を放置しない）。\n"
+                            f"対象ファイル(ヒント):\n{_files_str}\n\n" + claimed.get("prompt", "")
                         )
                     else:
                         base_prompt = claimed.get("prompt", "")
@@ -2486,12 +2553,13 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                                 task_prompt=prompt, all_tools=TOOLS,
                                 base_executor=execute_tool_async, async_client=run_client,
                                 model=run_model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
+                                work_dir=work_dir,
                             )
                             # 検収の前に、迷子ファイルを宣言パスへ機械的に集約（モデル非依存の保証層）
-                            relocated = reconcile_declared_files(job_dir, claimed)
+                            relocated = reconcile_declared_files(job_dir, claimed, work_dir=work_dir)
                             if relocated:
                                 queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
-                            problems = verify_task(job_dir, claimed)
+                            problems = verify_task(job_dir, claimed, work_dir=work_dir)
                             # この1トライの試行ログを残す（誰が・何回目・どのモデルで・結果・所要秒数）
                             log_attempt(
                                 job_dir, worker=name, task_id=tid, role=role,
@@ -2543,13 +2611,13 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         # debug役の自己申告 PASS では合否を決めない。リードが acceptance コマンドを機械実行し、
         # index.html があれば実ブラウザでも検証する。通らなければ強モデルで1回修復→再検証。
         # それでも通らなければ「未完成」として正直に納品する（成功と偽らない）。
-        entry_html = find_entry_html(job_dir)
+        entry_html = find_entry_html(work_dir)
         acceptance = plan.get("acceptance", []) or []
 
         async def _run_gate() -> list[str]:
             probs: list[str] = []
             if acceptance:
-                probs += await _asyncio.to_thread(run_acceptance_checks, job_dir, acceptance)
+                probs += await _asyncio.to_thread(run_acceptance_checks, work_dir, acceptance)
             if entry_html:
                 probs += await _asyncio.to_thread(browser_smoke_test, entry_html)
             return probs
@@ -2570,9 +2638,9 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                 yield _sse(f"  🔧 強モデルで自動修復を試行 (`{fix_preset}` / `{fix_model}`)...\n")
                 try:
                     proj_files = ", ".join(
-                        str(p.relative_to(job_dir)) for p in sorted(job_dir.rglob("*"))
+                        str(p.relative_to(work_dir)) for p in sorted(work_dir.rglob("*"))
                         if p.is_file() and p.suffix in (".html", ".js", ".css", ".py", ".json", ".css", ".ts")
-                        and "__pycache__" not in p.parts
+                        and not any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in p.relative_to(work_dir).parts)
                     )
                     fix_prompt = (
                         "あなたは統合修復担当です。成果物が次の検証に失敗し、まだ動きません:\n"
@@ -2585,11 +2653,11 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                     )
                     await run_team_member(
                         member_name="fixer", role="coding",
-                        system_prompt=get_team_member_prompt("coding", str(job_dir), "fixer", []),
+                        system_prompt=get_team_member_prompt("coding", str(work_dir), "fixer", []),
                         task_prompt=fix_prompt, all_tools=TOOLS,
                         base_executor=execute_tool_async,
                         async_client=_make_async_client_for(fix_preset), model=fix_model,
-                        job_dir=job_dir,
+                        job_dir=job_dir, work_dir=work_dir,
                     )
                     gate_problems = await _run_gate()
                 except Exception as fe:
@@ -2602,7 +2670,9 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                 yield _sse("  ✅ 動作検証OK。実際に起動/動作することを確認しました。\n")
 
         yield _sse("\n📄 最終報告書を生成中...\n\n")
-        report = await generate_final_report(d_client, d_model, job_dir)
+        # 成果物はスコープ(work_dir)から読み、報告書(final-report.md)は制御側(job_dir)に書く。
+        # ユーザーの要望(original_task)を渡し「要望→どう対応したか」を冒頭に書かせる。
+        report = await generate_final_report(d_client, d_model, work_dir, out_dir=job_dir, user_request=original_task)
         if gate_problems:
             # 動かないものを「成功」と偽らない。先頭に未完成バナーと実エラーを明示。
             detail = "\n".join(f"- {p.splitlines()[0]}" for p in gate_problems[:5])
@@ -2614,10 +2684,11 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         yield _sse(f"---\n\n{report}\n\n")
         # 試行ログ（誰が・何回目・どのモデルで・結果）を表で提示し、生ログの場所も案内する
         attempts_md = summarize_attempts_md(job_dir)
+        _ctrl_label = f".agent-jobs/{job_dir.parent.name}/{job_id}"
         if attempts_md:
-            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + "\n_（生ログ: `attempts.jsonl`）_\n")
-        scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
-        yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
+            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + f"\n_（生ログ: `{_ctrl_label}/attempts.jsonl`）_\n")
+        scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+        yield _sse(f"\n📁 作業場所: `{scope_label}/`（制御ファイル: `{_ctrl_label}/`）\n")
 
     except Exception as e:
         import traceback
@@ -2672,7 +2743,7 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
             for p in sorted(work_dir.rglob("*")):
                 rel = p.relative_to(work_dir)
                 parts = rel.parts
-                if any(seg in (".team", "jobs", "__pycache__", ".git") for seg in parts):
+                if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in parts):
                     continue
                 if p.is_file():
                     names.append(str(rel))
@@ -2715,8 +2786,11 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
         else:
             # ---- 新規（儀式なし・即実行）----
             job_id = new_job_id()
-            ctrl_dir = base_dir / ".team" / job_id
+            # 制御ファイルはスコープの外（.agent-jobs/<scope>/<id>）に置く＝プロジェクト直下に足場を残さない
+            ctrl_dir = _agent_job_dir(workspace_scope, job_id)
             ctrl_dir.mkdir(parents=True, exist_ok=True)
+            (ctrl_dir / "scope.txt").write_text(workspace_scope or "_root", encoding="utf-8")
+            _prune_agent_jobs(workspace_scope)
             scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
             yield _sse(f"👥 **シングル型マルチ** (job: `{job_id}` / 作業場所: `{scope_label}`)\n\n")
             yield _sse("📋 タスク分解中...\n\n")
@@ -2727,7 +2801,12 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                     "\n\n【作業場所には既存ファイルがあります。更地に作り直すのではなく、"
                     "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
                 )
+            _d_t0 = time.time()
             plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir)
+            # 試行ログに「誰がタスク分解したか（ディスパッチャー＝上位モデル）」を先頭行として残す
+            log_attempt(ctrl_dir, worker="dispatcher", task_id="—", role="dispatch",
+                        preset_id=d_preset, model=d_model, result="ok",
+                        elapsed_sec=round(time.time() - _d_t0, 1), problems=[])
             (ctrl_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
             (ctrl_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
             yield _sse(_plan_lines(plan) + "\n")
@@ -2769,9 +2848,11 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                     if _decl_files:
                         _files_str = "\n".join(f"- {f}" for f in _decl_files)
                         base_prompt = (
-                            "【作成・編集するファイルはこれだけ。下記の相対パスを1文字も変えずに作ること。"
-                            "code/ などの別の場所には絶対に作らない（役割の一般的な『出力先』より、このパス指定が優先）】\n"
-                            f"{_files_str}\n\n" + claimed.get("prompt", "")
+                            "【ファイル指定＝作業のヒント】新規に作るファイルは下記パスにそのまま作ること"
+                            "（code/ などの別の場所に散らかさない）。ただし**既存の挙動を直す指示なら**、まず "
+                            "grep / read_file で対象機能の実装箇所を特定し、その実ファイルを編集すること"
+                            "（下記に無い既存ファイルでも、そこが実装箇所ならそこを直す。『指定外だから』と要望を放置しない）。\n"
+                            f"対象ファイル(ヒント):\n{_files_str}\n\n" + claimed.get("prompt", "")
                         )
                     else:
                         base_prompt = claimed.get("prompt", "")
@@ -2898,8 +2979,20 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                 resp = await d_client.chat.completions.create(
                     model=d_model,
                     messages=[
-                        {"role": "system", "content": "あなたはプロジェクト完了報告書を書く専門家です。成果物を読んで、ユーザー向けに分かりやすい最終報告書を日本語で簡潔にまとめてください。"},
-                        {"role": "user", "content": f"以下の成果物をもとに最終報告書を書いてください:\n{files_content}"},
+                        {"role": "system", "content": (
+                            "あなたはプロジェクト完了報告書を書く専門家です。報告書は必ず"
+                            "**ユーザーの要望を起点**に書くこと。冒頭に必ず「## ご要望への対応」セクションを置き、"
+                            "ユーザーの要望を1項目ずつ箇条書きにし、各項目について\n"
+                            "・対応した/できていない/確認できない のいずれかを明示\n"
+                            "・対応した場合は **どのファイルのどこを・どう変えて** その要望を満たしたかを具体的に書く\n"
+                            "・成果物のコードから要望が満たされたと確認できない場合は、推測で『対応済み』と書かず"
+                            "正直に『コード上は確認できない／未対応の可能性』と書く（嘘をつかない）。\n"
+                            "そのあとに簡潔な成果物概要を付ける。日本語で。"
+                        )},
+                        {"role": "user", "content": (
+                            f"# ユーザーの要望（これにどう応えたかを最優先で報告すること）\n{user_message}\n\n"
+                            f"# 成果物ファイルの内容\n{files_content}"
+                        )},
                     ],
                     stream=False,
                 )
@@ -2917,13 +3010,14 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
             )
         yield _sse(f"---\n\n{report}\n\n")
         attempts_md = summarize_attempts_md(ctrl_dir)
+        _ctrl_label = f".agent-jobs/{workspace_scope or '_root'}/{job_id}"
         if attempts_md:
-            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + "\n_（生ログ: `.team/" + job_id + "/attempts.jsonl`）_\n")
+            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + f"\n_（生ログ: `{_ctrl_label}/attempts.jsonl`）_\n")
         scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
-        yield _sse(f"\n📁 作業場所: `{scope_label}/`（制御ファイル: `.team/{job_id}/`）\n")
-        yield _sse("\n💬 このまま続けて指示できます（「ここ直して」等）。\n")
-        # 実行後もジョブを生かす＝フロントが job_id を保持し、次の発言を同じジョブへ継続させる
-        yield f"data: {json.dumps({'type': 'team_job_open', 'job_id': job_id})}\n\n"
+        yield _sse(f"\n📁 作業場所: `{scope_label}/`（制御ファイル: `{_ctrl_label}/`）\n")
+        # 継続は「スコープ＝作業場所」が土台。緑バー/ジョブIDの儀式は使わず、次の発言でそのまま
+        # 同じ作業場所の既存ファイルを直せる（毎回フレッシュに分解＝関係箇所だけ・試行ログも新規）。
+        yield _sse(f"\n💬 このまま続けて指示できます（「ここ直して」等）。同じ作業場所(`{scope_label}/`)の既存ファイルを直します。\n")
 
     except Exception as e:
         import traceback
@@ -3799,12 +3893,14 @@ async def chat(req: ChatRequest):
         method = req.team_method or ("team" if req.team_mode else "pipeline")
         if req.resume_job_id:
             # 再開時は、ジョブが実際にどの方式で作られたかをディスク上から判定（トグル取り違え防止）。
+            # チーム/シングルの制御は .agent-jobs/<scope>/<id>/ に集約。パイプラインは旧来の <scope>/jobs/<id>/。
             try:
                 _base = (ALLOWED_WORK_DIR / req.workspace_scope) if req.workspace_scope else ALLOWED_WORK_DIR
-                # シングル型は <scope>/.team/<id>/ に置かれる
-                _single = [_base / ".team" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f".team/{req.resume_job_id}")) + list(ALLOWED_WORK_DIR.glob(f"*/.team/{req.resume_job_id}"))
-                if any((c / "plan.json").exists() for c in _single):
-                    method = "single"
+                _agent = list(ALLOWED_WORK_DIR.glob(f".agent-jobs/*/{req.resume_job_id}"))
+                _apf = next((c / "plan.json" for c in _agent if (c / "plan.json").exists()), None)
+                if _apf:
+                    # シングル型は会話継続をスコープ基準にしたため resume を使わない＝再開はチーム方式の計画承認のみ。
+                    method = "team"
                 else:
                     _cands = [_base / "jobs" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f"*/jobs/{req.resume_job_id}")) + [ALLOWED_WORK_DIR / "jobs" / req.resume_job_id]
                     _pf = next((c / "plan.json" for c in _cands if (c / "plan.json").exists()), None)

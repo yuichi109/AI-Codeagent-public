@@ -122,9 +122,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #input-box:focus-within { border-color: #89b4fa; }
   #input { background: transparent; border: none; color: #cdd6f4; font-size: 14px; outline: none; resize: none; line-height: 1.5; max-height: 200px; overflow-y: auto; padding: 0; width: 100%; }
   #image-preview-area { display: flex; gap: 8px; flex-wrap: wrap; }
-  #input-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  #input-left { display: flex; align-items: center; gap: 4px; }
-  #input-right { display: flex; align-items: center; gap: 6px; }
+  #input-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; row-gap: 8px; }
+  #input-left { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 6px; }
+  /* gen-status は入力欄の外（直上）へ出したので送信/停止は圧迫されない。flex-wrap は万一の保険（通常は1行） */
+  #input-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
   /* 統一アイコンボタン（添付・コード・直接保存・生成元画像・マイク） */
   .cbtn { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; background: transparent; color: #a6adc8; border: none; border-radius: 8px; cursor: pointer; transition: background 0.15s, color 0.15s; flex-shrink: 0; }
   .cbtn:hover { background: #45475a; color: #cdd6f4; }
@@ -401,7 +402,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .bsb-cancelled,.bsb-cancelling { background:#6c7086; color:#cdd6f4; }
   .bg-icon-btn  { background:none; border:none; color:#6c7086; cursor:pointer; font-size:14px; padding:2px 5px; border-radius:4px; }
   .bg-icon-btn:hover { color:#cdd6f4; background:#45475a; }
-  #gen-status { display: none; font-size: 11px; color: #585b70; font-family: monospace; white-space: nowrap; }
+  #gen-status { display: none; font-size: 11px; color: #585b70; font-family: monospace; white-space: nowrap; max-width: 860px; margin: 0 auto; padding: 0 14px 3px; text-align: right; }
   .img-preview { position: relative; }
   .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
   .img-preview-del { position: absolute; top: -4px; right: -4px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; line-height: 16px; text-align: center; padding: 0; }
@@ -976,7 +977,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 <div id="header">
   <span id="app-title">⚛️ AI Code Agent</span>
   <span id="ma-eva-banner" aria-hidden="true"><b class="eva-kbox">情報</b><span class="eva-main">単騎脳ー通常稼働</span></span>
-  <button id="eva-toggle-btn" onclick="toggleEvaMode()" title="臨戦モード（演出）ON/OFF">⚡臨戦</button>
+  <button id="eva-toggle-btn" onclick="toggleEvaMode()" title="EVAモード（演出）ON/OFF">⚡EVA</button>
   <div id="header-right">
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
@@ -1467,6 +1468,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 </div>
 <div id="skill-popup" style="display:none"></div>
 <div id="input-area">
+  <div id="gen-status"></div>
   <div id="input-box">
     <textarea id="input" placeholder="指示を入力してください..." rows="1"></textarea>
     <div id="image-preview-area"></div>
@@ -1495,7 +1497,6 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コスト設定: コスト優先（安いモデル中心）/ 品質優先（上位モデル中心）。セットアップで2セットを編集"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">コスト優先</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="economy">コスト優先</button><button type="button" class="dd-item" data-value="quality">品質優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: パイプライン（逐次）/ チーム（並列・mailbox）/ シングル型（並列・会話継続・既存スコープ）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">シングル型（並列）</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="pipeline">パイプライン</button><button type="button" class="dd-item" data-value="team">チーム（並列）</button><button type="button" class="dd-item" data-value="single">シングル型（並列）</button></div></div></span>
       </div>
       <div id="input-right">
-        <span id="gen-status"></span>
         <button id="mic-btn" class="cbtn" onclick="toggleMic()" data-tip="音声入力（日本語）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
         <button id="bg-btn" onclick="bgBtnClick()" title="テキストあり→BGジョブ投入 / テキストなし→BG結果エリア開閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>BG<span id="bg-badge"></span></button>
         <button id="send" onclick="sendMessage()">送信<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
@@ -2203,6 +2204,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 
   // ---- マルチエージェント: 計画確認待ち状態 ----
   let _maPendingJobId = '';   // チーム方式の計画承認フロー専用（plan_ready→実行）。シングル型は使わない
+  let _maResumeAction = '';   // ""=通常（LLM分類）/ "replan"=審議の修正ボタン＝強制再計画（プランA）
 
   function _updatePlanConfirmUI(active) {
     const bar = document.getElementById('ma-plan-confirm-bar');
@@ -2243,6 +2245,110 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const inputEl = document.getElementById('input');
     if (inputEl) {
       inputEl.value = action === 'cancel' ? 'キャンセル' : '実行して';
+      inputEl.dispatchEvent(new Event('input'));
+    }
+    sendMessage();
+  }
+
+  // ---- MAGI 三賢者 計画審議パネル（チーム方式の計画承認画面） ----
+  function _magiEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function _magiEscAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/\n/g,'&#10;'); }
+
+  // BALTHASAR=ディスパッチャー(立案) / CASPER=コーディング(実装) / MELCHIOR=リサーチ(審議役)
+  function _magiApprovePanelHTML(jobId) {
+    const stc = getStartupTest() ? 'checked' : '';
+    return `
+    <div class="magi-approve" style="margin-top:12px;background:#05060a;border:1px solid #f5a000;border-radius:8px;padding:12px 12px 10px;">
+      <div style="text-align:center;color:#f5a000;font-weight:900;letter-spacing:2px;font-size:11.5px;margin-bottom:4px;">MAGI SYSTEM ─ 計画審議</div>
+      <svg viewBox="0 0 300 300" width="236" height="236" style="display:block;margin:0 auto;">
+        <g stroke="#f5a000" stroke-width="6" stroke-linecap="round">
+          <line x1="150" y1="116" x2="150" y2="150"/><line x1="134" y1="160" x2="146" y2="186"/><line x1="166" y1="160" x2="154" y2="186"/>
+        </g>
+        <polygon points="18,8 282,8 282,104 172,104 150,120 128,104 18,104" fill="rgba(120,205,235,.15)" stroke="#7fd3ef" stroke-width="2"/>
+        <text id="mv-b" x="150" y="50" text-anchor="middle" fill="#f5a000" font-size="26" font-weight="900" letter-spacing="3">待機</text>
+        <text x="150" y="76" text-anchor="middle" fill="#cdeefb" font-size="12" font-weight="900" letter-spacing="1">BALTHASAR·2</text>
+        <text class="mc-approve-model" data-role="dispatcher" x="150" y="92" text-anchor="middle" fill="#9fd9ef" font-size="9.5" font-weight="700" font-family="monospace">—</text>
+        <polygon points="8,166 120,166 146,188 146,292 8,292" fill="rgba(120,205,235,.15)" stroke="#7fd3ef" stroke-width="2"/>
+        <text id="mv-c" x="74" y="206" text-anchor="middle" fill="#f5a000" font-size="24" font-weight="900" letter-spacing="3">待機</text>
+        <text x="74" y="238" text-anchor="middle" fill="#cdeefb" font-size="12" font-weight="900" letter-spacing="1">CASPER·3</text>
+        <text class="mc-approve-model" data-role="coding" x="74" y="254" text-anchor="middle" fill="#9fd9ef" font-size="9.5" font-weight="700" font-family="monospace">—</text>
+        <polygon points="292,166 180,166 154,188 154,292 292,292" fill="rgba(255,42,42,.16)" stroke="#ff2a2a" stroke-width="2"/>
+        <text id="mv-m" x="226" y="206" text-anchor="middle" fill="#f5a000" font-size="24" font-weight="900" letter-spacing="3">待機</text>
+        <text x="226" y="238" text-anchor="middle" fill="#ffd0d0" font-size="12" font-weight="900" letter-spacing="1">MELCHIOR·1</text>
+        <text class="mc-approve-model" data-role="research" x="226" y="254" text-anchor="middle" fill="#ffb3b3" font-size="9.5" font-weight="700" font-family="monospace">—</text>
+        <polygon points="150,130 172,142 172,160 150,172 128,160 128,142" fill="rgba(10,8,4,.7)" stroke="#f5a000" stroke-width="2.5"/>
+        <text x="150" y="156" text-anchor="middle" fill="#f5a000" font-size="14" font-weight="900" letter-spacing="2">MAGI</text>
+      </svg>
+      <div class="magi-review" style="display:none;margin:6px 2px 2px;border:1px solid #ff2a2a;border-radius:6px;padding:8px;color:#cdeefb;font-size:12.5px;line-height:1.6;background:rgba(0,0,0,.35);"></div>
+      <div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:8px;">
+        <button onclick="sendMaResume('${jobId}','execute')" style="background:#a6e3a1;color:#0a0a0a;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:bold;">▶ 実行</button>
+        <button onclick="maReviewPlan('${jobId}', this)" style="background:#1c2030;color:#7fd3ef;border:1px solid #7fd3ef;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:bold;">🔎 審議</button>
+        <button onclick="sendMaResume('${jobId}','cancel')" style="background:#3a1414;color:#ff8a8a;border:1px solid #ff2a2a;border-radius:6px;padding:6px 14px;cursor:pointer;">✕ 却下</button>
+        <label title="ONにすると納品前にこの環境で実際に起動/実行して動作確認します。" style="display:flex;align-items:center;gap:4px;font-size:12px;color:#cdd6f4;cursor:pointer;margin-left:2px;">
+          <input type="checkbox" ${stc} onchange="setStartupTest(this.checked)"> 🔎 起動テスト
+        </label>
+      </div>
+    </div>`;
+  }
+
+  async function _populateApprovePanel(panel) {
+    try {
+      if (!_magiCfgCache) { const r = await fetch('/multi-agent/config'); _magiCfgCache = await r.json(); }
+      const mode = getAgentMode();
+      const set = (_magiCfgCache && (_magiCfgCache[mode] || _magiCfgCache.economy || _magiCfgCache.quality)) || {};
+      panel.querySelectorAll('.mc-approve-model').forEach(c => {
+        const rc = set[c.dataset.role] || {};
+        c.textContent = rc.model || '—';
+      });
+    } catch (e) { /* 取得失敗時はプレースホルダのまま */ }
+  }
+
+  // 審議: リサーチ役モデルが計画を審査し、承認/否決＋指摘を表示。否決なら再計画ボタンを出す。
+  async function maReviewPlan(jobId, btn) {
+    const panel = btn.closest('.magi-approve'); if (!panel) return;
+    const setV = (id, txt, col) => { const e = panel.querySelector('#' + id); if (e) { e.textContent = txt; e.setAttribute('fill', col); } };
+    const area = panel.querySelector('.magi-review');
+    const old = btn.textContent;
+    btn.disabled = true; btn.textContent = '審議中…';
+    setV('mv-m', '審議中', '#f5a000');
+    try {
+      const r = await fetch('/multi-agent/review-plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: jobId, workspace_scope: currentWorkspaceScope, agent_mode: getAgentMode() }),
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        area.style.display = ''; area.style.borderColor = '#ff2a2a';
+        area.innerHTML = '審議に失敗: ' + _magiEsc(d.error || '');
+        setV('mv-m', '待機', '#f5a000'); btn.disabled = false; btn.textContent = old; return;
+      }
+      const approve = d.verdict === 'approve';
+      if (approve) { setV('mv-b', '承認', '#19d6e6'); setV('mv-c', '承認', '#19d6e6'); setV('mv-m', '承認', '#19d6e6'); }
+      else        { setV('mv-b', '保留', '#f5a000'); setV('mv-c', '保留', '#f5a000'); setV('mv-m', '否決', '#ff3b3b'); }
+      area.style.display = ''; area.style.borderColor = approve ? '#19d6e6' : '#ff2a2a';
+      let html = '<div style="font-weight:900;color:' + (approve ? '#19d6e6' : '#ff6b6b') + ';margin-bottom:4px;">'
+               + (approve ? '■ 審議結果: 承認（このまま実行可）' : '■ 審議結果: 要修正')
+               + ' <span style="opacity:.6;font-weight:400;font-size:11px;">(' + _magiEsc(d.model || '') + ')</span></div>';
+      if (d.summary) html += '<div style="margin-bottom:4px;">' + _magiEsc(d.summary) + '</div>';
+      if (d.points && d.points.length) html += '<ul style="margin:4px 0 0;padding-left:18px;">' + d.points.map(p => '<li>' + _magiEsc(p) + '</li>').join('') + '</ul>';
+      if (!approve) {
+        const fb = ((d.summary ? d.summary + '\n' : '') + (d.points || []).map((p, i) => (i + 1) + '. ' + p).join('\n'));
+        html += '<div style="margin-top:8px;"><button data-fb="' + _magiEscAttr(fb) + '" onclick="sendMaReplan(\'' + jobId + '\', this.dataset.fb)" style="background:#ff2a2a;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:bold;">🔧 この指摘で計画を修正</button></div>';
+      }
+      area.innerHTML = html;
+    } catch (e) {
+      area.style.display = ''; area.innerHTML = '審議エラー: ' + _magiEsc(e); setV('mv-m', '待機', '#f5a000');
+    }
+    btn.disabled = false; btn.textContent = old;
+  }
+
+  // 審議の指摘を既存の再計画(replan)経路に流す → ディスパッチャーが指摘を反映して計画を再提示
+  function sendMaReplan(jobId, feedback) {
+    _maPendingJobId = jobId;
+    _maResumeAction = 'replan';   // LLM分類を経由せず必ず再計画→計画を再提示（プランA）
+    const inputEl = document.getElementById('input');
+    if (inputEl) {
+      inputEl.value = '審議指摘を反映して計画を修正して:\n' + (feedback || '');
       inputEl.dispatchEvent(new Event('input'));
     }
     sendMessage();
@@ -2294,7 +2400,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     document.body.classList.toggle('eva-on', on);
     document.body.classList.toggle('eva-info', !alert);
     const tb = document.getElementById('eva-toggle-btn');
-    if (tb) tb.title = '臨戦モード（演出）: ' + (on ? 'ON' : 'OFF');
+    if (tb) tb.title = 'EVAモード（演出）: ' + (on ? 'ON' : 'OFF');
     const big = document.querySelector('#eva-overlay .eo-big');
     const sub = document.querySelector('#eva-overlay .eo-sub');
     const warn = document.querySelector('#eva-overlay .eo-warn');
@@ -5014,6 +5120,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const trimmedHistory = history.filter(m => m.role !== 'bg_user' && m.role !== 'bg_result').slice(-MAX_API_MESSAGES);
     // 計画確認ペンディング中の場合は job_id を取り出してバーを消す
     const resumeJobId = _maConsumePending();
+    const resumeAction = _maResumeAction; _maResumeAction = '';
 
     try {
       const res = await fetch('/chat', {
@@ -5035,6 +5142,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           team_method: getTeamMethod(),
           startup_test: getStartupTest(),
           resume_job_id: resumeJobId || '',
+          resume_action: resumeAction || '',
         }),
       });
 
@@ -5299,16 +5407,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             // AIメッセージ末尾に実行ボタンを挿入
             const msgEl = getOrCreateAiMsg()?.el || getOrCreateAiMsg();
             if (msgEl) {
-              const btnWrap = document.createElement('div');
-              btnWrap.style.cssText = 'margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
-              btnWrap.innerHTML = `
-                <button onclick="sendMaResume('${data.job_id}','execute')" style="background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:bold;">▶ 実行する</button>
-                <button onclick="sendMaResume('${data.job_id}','cancel')" style="background:#45475a;color:#cdd6f4;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">✕ キャンセル</button>
-                <label title="ONにすると納品前にこの環境で実際に起動/実行して動作確認します。システム変更や他PC向けの構築シェルはOFFのままに（=この環境では実行されません）。ONでも破壊的コマンドは自動で実行拒否します。" style="display:flex;align-items:center;gap:4px;font-size:13px;color:#cdd6f4;cursor:pointer;margin-left:4px;">
-                  <input type="checkbox" ${getStartupTest() ? 'checked' : ''} onchange="setStartupTest(this.checked)"> 🔎 起動テスト
-                </label>
-              `;
-              msgEl.appendChild(btnWrap);
+              const panel = document.createElement('div');
+              panel.innerHTML = _magiApprovePanelHTML(data.job_id);
+              msgEl.appendChild(panel);
+              _populateApprovePanel(panel);
             }
           } else if (data.type === 'answer_done') {
             // plan_ready が来ていない場合はペンディング解除

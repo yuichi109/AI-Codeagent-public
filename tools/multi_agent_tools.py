@@ -155,20 +155,38 @@ async def generate_final_report(
     job_dir を成果物の探索元、out_dir を final-report.md の書き出し先にする
     （スコープ直下を成果物にしつつ制御ファイルは別ディレクトリに置く構成のため）。
     制御用ディレクトリ（.team / jobs 等）は探索から除外する。"""
+    # 成果物は .md だけでなく実コード（html/js/css/py 等）も読む。
+    # 旧実装は *.md のみ読んでいたため、index.html 等が「存在しない」と誤報していた。
+    _CODE_EXTS = {".md", ".txt", ".html", ".htm", ".js", ".mjs", ".css",
+                  ".py", ".ts", ".tsx", ".jsx", ".json", ".sh", ".bash", ".yml", ".yaml"}
+    _PER_FILE_CAP = 6000
+    _TOTAL_CAP = 60000
+    inventory: list[str] = []
     files_content = ""
-    for path in sorted(job_dir.rglob("*.md")):
-        if path.name == "final-report.md":
+    for path in sorted(job_dir.rglob("*")):
+        if not path.is_file():
             continue
         rel = path.relative_to(job_dir)
         if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in rel.parts):
             continue
-        try:
-            files_content += f"\n\n## {rel}\n{path.read_text(encoding='utf-8')}"
-        except Exception:
-            pass
+        if path.name == "final-report.md":
+            continue
+        inventory.append(str(rel))
+        if path.suffix.lower() in _CODE_EXTS and len(files_content) < _TOTAL_CAP:
+            try:
+                txt = path.read_text(encoding="utf-8", errors="ignore")
+                if len(txt) > _PER_FILE_CAP:
+                    txt = txt[:_PER_FILE_CAP] + "\n…（以下省略）"
+                files_content += f"\n\n## {rel}\n{txt}"
+            except Exception:
+                pass
 
-    if not files_content:
+    if not inventory:
         return "成果物ファイルが見つかりませんでした。"
+
+    inv_text = "## 成果物ファイル一覧（実在するファイル＝これらは『存在しない』と書かないこと）\n" + \
+               "\n".join(f"- {n}" for n in inventory)
+    files_content = inv_text + files_content
 
     sys_msg = (
         "あなたはプロジェクト完了報告書を書く専門家です。各エージェントの成果物を読んで、"
@@ -180,6 +198,9 @@ async def generate_final_report(
             "要望を1項目ずつ箇条書きにし、各項目について『対応した/できていない/確認できない』を明示し、"
             "対応した場合は**どのファイルのどこを・どう変えて**満たしたかを具体的に書く。"
             "成果物から要望が満たされたと確認できない場合は、推測で『対応済み』と書かず正直に書くこと（嘘をつかない）。"
+            "ただし『成果物ファイル一覧』に載っているファイルは実在する。一覧にあるファイル（index.html 等）を"
+            "『存在しない・作られていない』と書いてはいけない。存在は一覧を真実として扱い、"
+            "中身が要望を満たすかどうかだけを実コードの内容に基づいて判断すること。"
         )
         user_msg = (
             f"# ユーザーの要望（これにどう応えたかを最優先で報告すること）\n{user_request}\n\n"

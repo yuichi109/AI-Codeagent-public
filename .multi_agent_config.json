@@ -1,20 +1,20 @@
 {
   "economy": {
     "dispatcher": {
-      "preset_id": "azure",
-      "model": "gpt-5.4"
+      "preset_id": "openrouter",
+      "model": "deepseek/deepseek-v4-pro"
     },
     "design": {
-      "preset_id": "azure",
-      "model": "gpt-5.4"
+      "preset_id": "openrouter",
+      "model": "deepseek/deepseek-v4-pro"
     },
     "coding": {
       "preset_id": "openrouter",
       "model": "deepseek/deepseek-v4-flash"
     },
     "debug": {
-      "preset_id": "azure",
-      "model": "gpt-5.4-mini"
+      "preset_id": "openrouter",
+      "model": "deepseek/deepseek-v4-flash"
     },
     "security": {
       "preset_id": "openrouter",

@@ -1979,6 +1979,7 @@ class ChatRequest(BaseModel):
     team_method: str = ""        # "pipeline" | "team" | "single"（新方式）。空なら team_mode から導出
     startup_test: bool = False   # True=納品前にこの環境で起動/実行テストを行う（既定OFF=安全側）
     resume_job_id: str = ""     # 計画確認後の再開ジョブID
+    resume_action: str = ""     # ""=ユーザー返答をLLM分類 / "replan"=審議の修正ボタン＝分類せず強制再計画
 
 
 class MermaidCheckRequest(BaseModel):
@@ -2146,7 +2147,8 @@ async def _interpret_plan_response(user_message: str, plan: dict, async_client, 
         f'{"{"}"action": "execute" | "replan" | "cancel", "notes": "修正内容（replanの場合のみ）"{"}"}\n\n'
         f"判定基準:\n"
         f"- execute: 承認・実行・進めて・OK・やってみて 等\n"
-        f"- replan: 役割の追加/削除/変更を求めている\n"
+        f"- replan: 役割の追加/削除/変更、または計画の修正・やり直し・改善を求めている"
+        f"（「修正して」「直して」「計画し直して」「審議指摘を反映して」等を含む）\n"
         f"- cancel: キャンセル・やめる・不要 等\n"
     )
     resp = await async_client.chat.completions.create(
@@ -2201,9 +2203,15 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             original_task_file = job_dir / "original_task.txt"
             original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
 
-            action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
-            action = action_result.get("action", "execute")
-            notes  = action_result.get("notes", "")
+            if resume_action == "replan":
+                # 審議の「この指摘で計画を修正」ボタン＝LLM分類を経由せず必ず再計画する（プランA）。
+                # 分類ミスで実行に化けるのを防ぐ。指摘内容は user_message に入っている。
+                action = "replan"
+                notes  = user_message
+            else:
+                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
+                action = action_result.get("action", "execute")
+                notes  = action_result.get("notes", "")
 
             if action == "cancel":
                 yield _sse("🚫 了解しました、キャンセルします。\n")
@@ -2337,7 +2345,7 @@ def _prune_agent_jobs(workspace_scope: str, keep: int = 20) -> None:
         pass
 
 
-async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False):
+async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False, resume_action: str = ""):
     """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
     Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
     Phase 2: ユーザー返答を解釈 → 実行（並列＋self-claim＋mailbox）/ 再計画 / キャンセル
@@ -2348,7 +2356,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
     from tools.multi_agent_tools import generate_final_report, new_job_id
     from tools.team_tools import (
         dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
-        verify_task, reconcile_declared_files, update_status_locked as _update_status,
+        verify_task, reconcile_declared_files, reconcile_html_referenced_files,
+        update_status_locked as _update_status,
         find_entry_html, browser_smoke_test, run_acceptance_checks,
         log_attempt, summarize_attempts_md,
     )
@@ -2369,7 +2378,14 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             label = AGENT_ROLE_LABELS.get(t.get("role", ""), t.get("role", ""))
             deps = t.get("depends_on", [])
             dep_s = f" (依存: {', '.join(deps)})" if deps else " (並列可)"
-            out += f"- `{tid}` **{label}**: {t.get('prompt', '')[:70]}{dep_s}\n"
+            files = t.get("files", []) or []
+            files_s = f"　📄 {', '.join(files)}" if files else ""
+            # prompt は空白を畳んで1行化（整形崩れ防止）＋ <,>,& をエスケープする。
+            # `通常の<script>で実装` 等の生HTMLタグが marked でタグ解釈され、以降（t2/t3含む）が
+            # まるごとタグ内に飲み込まれて消える事故を防ぐ。
+            prompt_one = " ".join((t.get('prompt', '') or '').split())
+            prompt_one = prompt_one.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            out += f"- `{tid}` **{label}**{dep_s}{files_s}: {prompt_one}\n"
         return out
 
     # 既存スコープの内容を要約してディスパッチャーに渡す（更地前提を外す＝既存コードベースをその場で直す）
@@ -2612,6 +2628,11 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         # index.html があれば実ブラウザでも検証する。通らなければ強モデルで1回修復→再検証。
         # それでも通らなければ「未完成」として正直に納品する（成功と偽らない）。
         entry_html = find_entry_html(work_dir)
+        # ブラウザが実際に読むファイル（index.htmlの参照先）へ、編集した同名の別コピーを集約する＝
+        # 「テストは通るがブラウザに反映されない（js/game.js が古いまま）」二重化をモデル非依存で解消。
+        _html_merged = reconcile_html_referenced_files(entry_html, work_dir)
+        for _m in _html_merged:
+            yield _sse(f"🧷 反映先を統一: {_m}\n")
         acceptance = plan.get("acceptance", []) or []
 
         async def _run_gate() -> list[str]:
@@ -2712,7 +2733,8 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
     from tools.multi_agent_tools import generate_final_report, new_job_id
     from tools.team_tools import (
         dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
-        verify_task, reconcile_declared_files, update_status_locked as _update_status,
+        verify_task, reconcile_declared_files, reconcile_html_referenced_files,
+        update_status_locked as _update_status,
         find_entry_html, browser_smoke_test, run_acceptance_checks,
         log_attempt, summarize_attempts_md,
     )
@@ -2733,7 +2755,14 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
             label = AGENT_ROLE_LABELS.get(t.get("role", ""), t.get("role", ""))
             deps = t.get("depends_on", [])
             dep_s = f" (依存: {', '.join(deps)})" if deps else " (並列可)"
-            out += f"- `{tid}` **{label}**: {t.get('prompt', '')[:70]}{dep_s}\n"
+            files = t.get("files", []) or []
+            files_s = f"　📄 {', '.join(files)}" if files else ""
+            # prompt は空白を畳んで1行化（整形崩れ防止）＋ <,>,& をエスケープする。
+            # `通常の<script>で実装` 等の生HTMLタグが marked でタグ解釈され、以降（t2/t3含む）が
+            # まるごとタグ内に飲み込まれて消える事故を防ぐ。
+            prompt_one = " ".join((t.get('prompt', '') or '').split())
+            prompt_one = prompt_one.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            out += f"- `{tid}` **{label}**{dep_s}{files_s}: {prompt_one}\n"
         return out
 
     # 既存スコープの内容を要約してディスパッチャーに渡す（更地前提を外す＝既存コードベース対応の土台）
@@ -2937,6 +2966,10 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
 
         # ---- 納品ゲート（指示が無いときだけ静的検証・正直報告は段階3で強化）----
         entry_html = find_entry_html(work_dir)
+        # ブラウザが実際に読むファイル（index.htmlの参照先）へ、編集した同名の別コピーを集約（二重化解消・モデル非依存）。
+        _html_merged = reconcile_html_referenced_files(entry_html, work_dir)
+        for _m in _html_merged:
+            yield _sse(f"🧷 反映先を統一: {_m}\n")
         acceptance = plan.get("acceptance", []) or []
         gate_problems: list[str] = []
         if not startup_test:
@@ -3911,7 +3944,7 @@ async def chat(req: ChatRequest):
         if method == "single" and MULTI_AGENT_TEAM_ENABLED:
             stream = single_team_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test)
         elif method == "team" and MULTI_AGENT_TEAM_ENABLED:
-            stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test)
+            stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test, req.resume_action)
         else:
             stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
     else:
@@ -5167,6 +5200,103 @@ async def ma_config_get():
 async def ma_config_save(body: dict):
     _save_ma_config(body)
     return JSONResponse({"ok": True})
+
+
+@app.post("/multi-agent/review-plan")
+async def ma_review_plan(body: dict):
+    """チーム方式の計画承認画面の「審議」用。リサーチ役モデルに計画の妥当性を審査させ、
+    判定（approve/revise）＋総評＋具体的な指摘を返す。revise の指摘はそのまま再計画に流せる。"""
+    job_id = (body.get("job_id") or "").strip()
+    scope  = (body.get("workspace_scope") or "").strip()
+    mode   = body.get("agent_mode") or "economy"
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id がありません"}, status_code=400)
+
+    # 制御ディレクトリ（.agent-jobs/<scope>/<id>）から plan.json / original_task.txt を探す
+    job_dir = _agent_job_dir(scope, job_id)
+    if not (job_dir / "plan.json").exists():
+        cands = list(ALLOWED_WORK_DIR.glob(f".agent-jobs/*/{job_id}"))
+        job_dir = next((c for c in cands if (c / "plan.json").exists()), job_dir)
+    plan_file = job_dir / "plan.json"
+    if not plan_file.exists():
+        return JSONResponse({"ok": False, "error": "計画が見つかりません"}, status_code=404)
+
+    try:
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
+    except Exception:
+        return JSONResponse({"ok": False, "error": "計画の読み込みに失敗"}, status_code=500)
+    otf = job_dir / "original_task.txt"
+    original_task = otf.read_text(encoding="utf-8") if otf.exists() else ""
+
+    # スコープ内の既存ファイル一覧（HTML参照の取り違え＝二重化バグを審査させるための材料）
+    base_dir = (ALLOWED_WORK_DIR / scope) if scope else ALLOWED_WORK_DIR
+    scope_files = ""
+    try:
+        names = []
+        for p in sorted(base_dir.rglob("*")):
+            rel = p.relative_to(base_dir)
+            if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in rel.parts):
+                continue
+            if p.is_file():
+                names.append(str(rel))
+            if len(names) >= 60:
+                names.append("…（以下略）"); break
+        scope_files = "\n".join(f"- {n}" for n in names)
+    except Exception:
+        pass
+
+    lines = []
+    for tid, t in (plan.get("tasks", {}) or {}).items():
+        lines.append(
+            f"{tid} [{t.get('role','')}] files={t.get('files', [])} "
+            f"depends_on={t.get('depends_on', [])}: {(t.get('prompt','') or '')}"
+        )
+    plan_text = "\n".join(lines) or "（タスクなし）"
+
+    r_cfg    = _load_ma_config(mode).get("research", {}) or {}
+    r_preset = r_cfg.get("preset_id") or _provider_config.get("preset_id", _provider_config["type"])
+    r_model  = r_cfg.get("model") or _provider_config["model"]
+
+    review_prompt = (
+        "あなたはマルチエージェントの実行計画を審査するリサーチ役です。"
+        "以下の『ユーザーの依頼』と『実行計画』を読み、計画が依頼を的確に満たすかを厳しく審査してください。\n\n"
+        f"## ユーザーの依頼\n{original_task or '（不明）'}\n\n"
+        f"## 作業スコープの既存ファイル\n{scope_files or '（なし＝新規作成）'}\n\n"
+        f"## 実行計画（タスク分解）\n{plan_text}\n\n"
+        "## 重点的に見る観点\n"
+        "- 依頼の要件が漏れていないか\n"
+        "- 既存Webアプリの修正なら、index.html が実際に読み込むファイル（例: js/game.js）を対象にしているか。"
+        "ルートや code/ に同名ファイルを新規作成する計画は『ブラウザに反映されない二重化バグ』なので必ず指摘する\n"
+        "- タスクの依存関係・並列性が妥当か（無駄な直列・依存漏れ・衝突）\n"
+        "- 抜け・リスク\n\n"
+        "## 出力（JSONのみ）\n"
+        '{"verdict": "approve" | "revise", "summary": "一文の総評", "points": ["具体的な指摘/修正指示", ...]}\n'
+        "approve=このまま実行してよい。revise=修正すべき。points は revise のとき具体的に書く（approve なら空配列）。"
+    )
+    try:
+        client = _make_async_client_for(r_preset)
+        resp = await client.chat.completions.create(
+            model=r_model,
+            messages=[{"role": "user", "content": review_prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"審議に失敗: {type(e).__name__}: {e}"}, status_code=500)
+
+    verdict = "revise" if str(data.get("verdict", "")).lower().startswith("rev") else "approve"
+    points = data.get("points") or []
+    if not isinstance(points, list):
+        points = [str(points)]
+    return JSONResponse({
+        "ok": True,
+        "verdict": verdict,
+        "summary": data.get("summary", ""),
+        "points": [str(p) for p in points][:8],
+        "model": r_model,
+        "preset": r_preset,
+    })
 
 
 class CleanupRequest(BaseModel):

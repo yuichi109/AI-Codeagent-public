@@ -277,6 +277,97 @@ def reconcile_declared_files(job_dir: Path, task: dict, work_dir: Path | None = 
     return moved
 
 
+def _html_local_refs(html_path: Path) -> list[str]:
+    """index.html が読み込むローカルな .js/.css 参照（<script src> / <link href>）を抽出する。
+    http(s)://・//・data:・# などの外部/非ファイル参照は除外。クエリ/フラグメントは落とす。"""
+    import re as _re
+    try:
+        text = html_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    refs = (_re.findall(r'<script[^>]*\bsrc\s*=\s*["\']([^"\']+)["\']', text, _re.I)
+            + _re.findall(r'<link[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', text, _re.I))
+    out: list[str] = []
+    for r in refs:
+        r = (r or "").strip()
+        if not r or r.startswith(("http://", "https://", "//", "data:", "#", "mailto:")):
+            continue
+        r = r.split("?")[0].split("#")[0]
+        if r.endswith((".js", ".css", ".mjs")):
+            out.append(r)
+    return out
+
+
+def reconcile_html_referenced_files(entry_html: Path | None, work_dir: Path) -> list[str]:
+    """ブラウザが実際に読み込むファイル（index.html の <script src>/<link href>）を「正」とし、
+    エージェントが同名の別コピー（ルートや code/ 配下など）を編集してしまった二重化を機械的に解消する。
+
+    reconcile_declared_files が「宣言パスが空/無いときだけ」集約するのに対し、本関数は
+    **参照先に古い中身が残っていても、より新しい同名コピーがあれば参照先を上書き集約**する。
+    これにより「テストは通るがブラウザに反映されない（js/game.js が古いまま）」を防ぐ＝モデル非依存の保証層。
+
+    安全策: 参照先と同名の非空コピーが work_dir 内に**ちょうど1個**あり、かつ
+    （参照先が存在しない／参照先と内容が異なり参照先より新しい）ときだけ集約する。
+    返り値: 実施した集約の説明（"元 → 参照パス"）リスト。"""
+    if not entry_html or not entry_html.exists():
+        return []
+    base = entry_html.parent
+    wd_res = work_dir.resolve()
+    moved: list[str] = []
+    for ref in _html_local_refs(entry_html):
+        ref_path = (base / ref).resolve()
+        try:
+            ref_path.relative_to(wd_res)
+        except ValueError:
+            continue  # work_dir の外は触らない
+        ref_exists = ref_path.exists() and ref_path.is_file()
+        try:
+            ref_text = ref_path.read_text(encoding="utf-8", errors="ignore") if ref_exists else None
+            ref_mtime = ref_path.stat().st_mtime if ref_exists else -1.0
+        except OSError:
+            continue
+        bn = ref_path.name
+        dups: list[Path] = []
+        for cand in work_dir.rglob(bn):
+            if not cand.is_file() or "__pycache__" in cand.parts:
+                continue
+            if cand.resolve() == ref_path:
+                continue
+            if any(seg in (".agent-jobs", ".team", "jobs", ".git") for seg in cand.parts):
+                continue
+            try:
+                if not cand.read_text(encoding="utf-8", errors="ignore").strip():
+                    continue
+            except OSError:
+                continue
+            dups.append(cand)
+        if len(dups) != 1:
+            continue  # 0=正常 / 複数=曖昧なので動かさない
+        dup = dups[0]
+        try:
+            dup_text = dup.read_text(encoding="utf-8", errors="ignore")
+            dup_mtime = dup.stat().st_mtime
+        except OSError:
+            continue
+        if ref_exists:
+            if dup_text.strip() == (ref_text or "").strip():
+                continue  # 同一内容＝集約不要（害なし）
+            if dup_mtime <= ref_mtime:
+                continue  # 参照先の方が新しい＝編集は参照先に入っている
+        try:
+            ref_path.parent.mkdir(parents=True, exist_ok=True)
+            ref_path.write_text(dup_text, encoding="utf-8")
+            dup.unlink()
+            try:
+                _dup_rel = dup.relative_to(work_dir)
+            except ValueError:
+                _dup_rel = dup
+            moved.append(f"{_dup_rel} → {ref}（HTMLが読む側へ集約）")
+        except OSError:
+            pass
+    return moved
+
+
 def verify_task(job_dir: Path, task: dict, work_dir: Path | None = None) -> list[str]:
     """タスクの検収。問題点を人間可読の文字列リストで返す（空＝合格）。
     ①宣言ファイルの有無/空チェック ②役割別の中身チェック（debug役のテスト合否など）。

@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-06-28（セッション71b）ライブビューにフローティングモードをトグル追加（v1.27.0・feature/multi-agent-team）
+
+> ライブビューに表示モードの切り替えを追加。`docked`（現行＝右ペインにレーン内蔵）と `floating`（看板は右固定のまま、各ワーカーを個別のドラッグ可能な浮遊窓に）。**フロントのみ（index.html）・バックエンド無改変・サーバー再起動不要。** このブランチのみ・main/for_windows 無変更。
+
+- **トグル**: `#tl-header` に表示モードボタン（▭/⧉）＋整列ボタン（▤・floating時のみ）。`tlMode`（localStorage保存）。`docked⇄floating` を `toggleTlMode`/`applyTlMode`。
+- **floating モード**: 看板（MAGI＋カンバン＋凡例）は右ペインに残し、ワーカーは `#tl-float-layer` に `position:fixed` の個別窓（`.tl-fwin`）で表示。EVA枠・稼働中は枠点滅・✕で閉じる。初期位置は自動カスケード。ドラッグはヘッダ `⠿` 掴み（document委譲の mousedown/mousemove/mouseup・位置は `tlFloatPos` に保持）。「整列」で再カスケード。
+- **PC専用**: `@media(max-width:768px)` で `.tl-fwin` 非表示＋`tlEffMode()` がモバイルでは強制 docked にフォールバック。
+- **共通化**: レーンと浮遊窓で `_tlLaneCls`/`_tlMetaHtml`/`_tlRailHtml`/`_tlFeedHtml`/`_tlKanbanHtml`/`_tlLegendHtml` を共用に切り出し。新ラン(plan)で浮遊窓をリセット、ペイン✕で浮遊窓もクリア。
+- **検証**: 静的配信＋合成イベントで、docked⇄floating 切替・浮遊窓2枚生成/カスケード・ドラッグ移動と位置保持・ドッキング復帰でレーン復元・整列ボタン表示制御を確認（コンソールエラー無し）。
+
+---
+
 ## 2026-06-28（セッション71）マルチエージェント・ライブビュー（ワーカーレーン＋ツール実況）（v1.26.0・feature/multi-agent-team）
 
 > マルチエージェント実行中に「どのエージェントが・どのツールを発動して・今どの段階か」を右サイドペインでリアルタイムに見られるライブビューを新設。シングルAIで見えていたツール実況の透明性をマルチへ持ち込む。チャット本流は無改変の純粋な追加レイヤー。**このブランチのみ・main/for_windows 無変更。**

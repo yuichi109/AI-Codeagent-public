@@ -379,6 +379,17 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .tl-kcard { background:#1e1e2e; border:1px solid #313244; border-radius:8px; padding:5px 6px; margin-bottom:6px; font-size:10px; font-family:ui-monospace,monospace; }
   @keyframes tl-blink { 0%,100%{opacity:1} 50%{opacity:.3} }
   .tl-blink { animation:tl-blink 1s ease-in-out infinite; }
+  /* フローティングモード: ワーカー個別窓（PC専用・ドラッグ可） */
+  .tl-fwin { position:fixed; width:286px; background:#181825; border:1px solid #313244; border-radius:10px; box-shadow:0 10px 34px rgba(0,0,0,.65); z-index:8500; overflow:hidden; }
+  .tl-fwin.run { border-color:#f9a825; }
+  .tl-fwin.done { border-color:#2d3b29; }
+  .tl-fwin.fail { border-color:#5a2a2a; }
+  .tl-fhead { display:flex; align-items:center; gap:7px; padding:6px 9px; background:#1e1e2e; border-bottom:1px solid #313244; cursor:move; user-select:none; }
+  .tl-fgrip { color:#6c7086; font-size:13px; letter-spacing:-1px; flex-shrink:0; }
+  .tl-fbody { padding:8px 10px; max-height:260px; overflow-y:auto; }
+  .tl-fx { margin-left:auto; color:#6c7086; cursor:pointer; background:none; border:none; font-size:13px; padding:0 2px; }
+  .tl-fx:hover { color:#f38ba8; }
+  @media (max-width:768px) { .tl-fwin { display:none !important; } }
 
   /* ---- BG Floating Panel ---- */
   #bg-float-pane { display:none; position:fixed; top:80px; right:16px; width:360px; height:500px; background:#1e1e2e; border:1px solid #45475a; border-radius:10px; box-shadow:0 6px 30px rgba(0,0,0,0.6); z-index:9000; flex-direction:column; overflow:hidden; }
@@ -1486,11 +1497,17 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   <div id="team-live-pane">
     <div id="tl-header">
       <span id="tl-title">⚡ MAGI SYSTEM ｜ 多重思考接続</span>
-      <button class="bg-icon-btn" onclick="teamLiveClose()" title="閉じる">✕</button>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <button id="tl-arrange-btn" class="bg-icon-btn" onclick="tlFloatArrange()" title="ワーカー窓を整列" style="display:none;">▤</button>
+        <button id="tl-mode-btn" class="bg-icon-btn" onclick="toggleTlMode()" title="表示モード切替">▭</button>
+        <button class="bg-icon-btn" onclick="teamLiveClose()" title="閉じる">✕</button>
+      </div>
     </div>
     <div id="tl-body"></div>
   </div>
 </div>
+<!-- Team Live: フローティングワーカー窓の置き場（position:fixed なので親は問わない） -->
+<div id="tl-float-layer"></div>
 <!-- BG Floating Panel (fixed position) -->
 <div id="bg-float-pane">
   <div id="bg-float-header">
@@ -1812,7 +1829,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   function _tlEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function resetTeamLive(){ teamLive = { job:'', mode:'', workers:{}, tasks:{} }; }
   function teamLiveOpen(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.add('open'); }
-  function teamLiveClose(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.remove('open'); }
+  function teamLiveClose(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.remove('open'); _tlClearFloat(); }
 
   // 8役 → MAGI三賢者グルーピング（dispatcher=統括 / coding,infra,debug=実装 / research,design,security,docs=知識）
   const TL_MAGI = [
@@ -1832,7 +1849,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       Object.entries(e.tasks||{}).forEach(([tid,t]) => {
         teamLive.tasks[tid] = { tid, role:t.role||'', files:t.files||[], depends_on:t.depends_on||[], state:'pending', worker:'' };
       });
-      teamLiveOpen();
+      _tlClearFloat(); tlFloatPos = {};   // 新ランで浮遊窓をリセット
+      teamLiveOpen(); applyTlMode();
     } else if(e.kind === 'task'){
       const t = teamLive.tasks[e.tid] || (teamLive.tasks[e.tid] = { tid:e.tid, role:e.role||'', files:[], depends_on:[], state:'pending', worker:'' });
       t.state = e.state; if(e.worker) t.worker = e.worker; if(e.role) t.role = e.role;
@@ -1887,50 +1905,50 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     return s;
   }
 
-  function renderTeamLive(){
-    const body = document.getElementById('tl-body'); if(!body) return;
-    const activeRoles = new Set();
-    Object.values(teamLive.tasks).forEach(t => { if(['running','verify','retry','claimed'].includes(t.state)) activeRoles.add(t.role); });
-
-    // --- MAGI賢者 ---
-    let html = _tlMagiSvg(activeRoles);
-
-    // --- ワーカーレーン ---
-    const stageLabel = { 0:'待機', 1:'実行中', 2:'検収', 3:'完了' };
-    Object.values(teamLive.workers).forEach(w => {
-      const stage = TL_STAGE[w.state] ?? 0;
-      const finished = w.state==='done';
-      const laneCls = (w.state==='running'||w.state==='verify'||w.state==='retry') ? 'run'
-                    : (w.state==='done' ? 'done' : ((w.state==='fail'||w.state==='error') ? 'fail' : ''));
-      const stLabel = w.state==='done' ? '✓ 完了' : (w.state==='fail'||w.state==='error' ? '⚠ 未達' : (w.state==='verify' ? '検収中' : (w.state==='idle'||w.state==='' ? '待機' : '実行中')));
-      const stColor = w.state==='done' ? '#a6e3a1' : (w.state==='fail'||w.state==='error' ? '#f38ba8' : (w.state==='idle'||w.state==='' ? '#6c7086' : '#f9a825'));
-      let feed='';
-      (w.feed||[]).forEach(it => {
-        const dot = it.status==='run' ? '#f9a825' : (it.status==='ok' ? '#a6e3a1' : '#f38ba8');
-        const stat = it.status==='run' ? '● 実行中…' : (it.status==='ok' ? '✓' : '✕');
-        feed += `<div class="tl-tool${it.status==='run'?' tl-blink':''}"><span class="tl-dot" style="background:${dot}"></span>`
-          + `<span style="color:#a6adc8">${_tlEsc(getToolStatusText(it.tool, it.args))}</span>`
-          + `<span style="margin-left:auto;color:#6c7086">${stat}</span></div>`;
-      });
-      if(!feed) feed = `<div class="tl-tool" style="color:#6c7086">（ツール待機）</div>`;
-      const init = (w.name||'').replace('agent-','A').toUpperCase();
-      html += `<div class="tl-lane ${laneCls}">`
-        + `<div style="display:flex;align-items:center;gap:9px;">`
-        + `<div class="tl-av" style="background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
-        + `<div style="flex:1;min-width:0">`
-        + `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">`
-        + `<span style="font-weight:600;font-size:12px;color:#cdd6f4">${_tlEsc(w.name)}</span>`
-        + (w.role ? `<span class="tl-rtag" style="background:#2a2440;color:#cba6f7">${_tlEsc(w.role)}</span>` : '')
-        + (w.tid ? `<span style="font-family:ui-monospace,monospace;font-size:10px;color:#a6adc8">${_tlEsc(w.tid)}</span>` : '')
-        + (w.model ? `<span style="font-family:ui-monospace,monospace;font-size:9.5px;color:#6c7086">${_tlEsc(w.model)}</span>` : '')
-        + `</div>`
-        + `<div class="tl-rail">${_tlRail(stage, finished)}<span style="margin-left:5px;color:${stColor}">${stLabel}</span></div>`
-        + `</div></div>`
-        + `<div class="tl-feed">${feed}</div>`
-        + `</div>`;
+  // ---- ワーカー1人分の共通パーツ（レーンと浮遊窓で共用）----
+  function _tlLaneCls(w){
+    return (w.state==='running'||w.state==='verify'||w.state==='retry') ? 'run'
+         : (w.state==='done' ? 'done' : ((w.state==='fail'||w.state==='error') ? 'fail' : ''));
+  }
+  function _tlStInfo(w){
+    const label = w.state==='done' ? '✓ 完了' : (w.state==='fail'||w.state==='error' ? '⚠ 未達' : (w.state==='verify' ? '検収中' : (w.state==='idle'||w.state==='' ? '待機' : '実行中')));
+    const color = w.state==='done' ? '#a6e3a1' : (w.state==='fail'||w.state==='error' ? '#f38ba8' : (w.state==='idle'||w.state==='' ? '#6c7086' : '#f9a825'));
+    return { label, color };
+  }
+  function _tlFeedHtml(w){
+    let feed='';
+    (w.feed||[]).forEach(it => {
+      const dot = it.status==='run' ? '#f9a825' : (it.status==='ok' ? '#a6e3a1' : '#f38ba8');
+      const stat = it.status==='run' ? '● 実行中…' : (it.status==='ok' ? '✓' : '✕');
+      feed += `<div class="tl-tool${it.status==='run'?' tl-blink':''}"><span class="tl-dot" style="background:${dot}"></span>`
+        + `<span style="color:#a6adc8">${_tlEsc(getToolStatusText(it.tool, it.args))}</span>`
+        + `<span style="margin-left:auto;color:#6c7086">${stat}</span></div>`;
     });
-
-    // --- カンバン ---
+    return feed || `<div class="tl-tool" style="color:#6c7086">（ツール待機）</div>`;
+  }
+  function _tlMetaHtml(w){
+    return `<span style="font-weight:600;font-size:12px;color:#cdd6f4">${_tlEsc(w.name)}</span>`
+      + (w.role ? `<span class="tl-rtag" style="background:#2a2440;color:#cba6f7">${_tlEsc(w.role)}</span>` : '')
+      + (w.tid ? `<span style="font-family:ui-monospace,monospace;font-size:10px;color:#a6adc8">${_tlEsc(w.tid)}</span>` : '')
+      + (w.model ? `<span style="font-family:ui-monospace,monospace;font-size:9.5px;color:#6c7086">${_tlEsc(w.model)}</span>` : '');
+  }
+  function _tlRailHtml(w){
+    const stage = TL_STAGE[w.state] ?? 0; const finished = w.state==='done'; const st = _tlStInfo(w);
+    return `<div class="tl-rail">${_tlRail(stage, finished)}<span style="margin-left:5px;color:${st.color}">${st.label}</span></div>`;
+  }
+  function _tlLaneHtml(w){
+    const init = (w.name||'').replace('agent-','A').toUpperCase();
+    return `<div class="tl-lane ${_tlLaneCls(w)}">`
+      + `<div style="display:flex;align-items:center;gap:9px;">`
+      + `<div class="tl-av" style="background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
+      + `<div style="flex:1;min-width:0">`
+      + `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">${_tlMetaHtml(w)}</div>`
+      + _tlRailHtml(w)
+      + `</div></div>`
+      + `<div class="tl-feed">${_tlFeedHtml(w)}</div>`
+      + `</div>`;
+  }
+  function _tlKanbanHtml(){
     const cols = [ {h:'待機',st:[0]}, {h:'実行中',st:[1]}, {h:'検収',st:[2]}, {h:'完了',st:[3]} ];
     let kb = '<div class="tl-kanban">';
     cols.forEach(col => {
@@ -1944,16 +1962,104 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       });
       kb += `<div><p class="tl-col-h">${col.h}</p>${cards||'<div style="color:#45475a;font-size:9px">—</div>'}</div>`;
     });
-    kb += '</div>';
-    html += kb;
-
-    // --- 凡例 ---
-    html += `<div style="display:flex;justify-content:center;gap:14px;margin-top:10px;font-size:9.5px;color:#6c7086">`
+    return kb + '</div>';
+  }
+  function _tlLegendHtml(){
+    return `<div style="display:flex;justify-content:center;gap:14px;margin-top:10px;font-size:9.5px;color:#6c7086">`
       + `<span><span style="color:#a6e3a1">✓</span> 完了</span><span><span style="color:#f9a825">●</span> 実行中</span>`
       + `<span><span style="color:#f38ba8">✕</span> 失敗</span></div>`;
-
-    body.innerHTML = html;
   }
+
+  // ---- 表示モード（docked=レーン内蔵 / floating=ワーカー個別窓・PC専用）----
+  let tlMode = localStorage.getItem('tlMode') || 'docked';
+  let _tlFloatDrag = null;
+  let tlFloatEls = {};   // worker名 -> 窓DOM
+  let tlFloatPos = {};   // worker名 -> {left,top}（ドラッグ位置の保持）
+  function _tlIsMobile(){ return window.matchMedia('(max-width:768px)').matches; }
+  function tlEffMode(){ return _tlIsMobile() ? 'docked' : tlMode; }
+  function _tlClearFloat(){ const layer=document.getElementById('tl-float-layer'); if(layer) layer.innerHTML=''; tlFloatEls={}; }
+  function applyTlMode(){
+    const f = tlEffMode()==='floating';
+    const mb = document.getElementById('tl-mode-btn');
+    if(mb){ mb.textContent = f ? '⧉' : '▭'; mb.title = f ? 'フローティング表示（クリックでドッキング）' : 'ドッキング表示（クリックでフローティング）'; }
+    const ab = document.getElementById('tl-arrange-btn');
+    if(ab) ab.style.display = f ? '' : 'none';
+    if(!f) _tlClearFloat();
+  }
+  function toggleTlMode(){ tlMode = (tlMode==='floating' ? 'docked' : 'floating'); localStorage.setItem('tlMode', tlMode); applyTlMode(); renderTeamLive(); }
+  function tlFloatArrange(){ tlFloatPos = {}; _tlClearFloat(); renderTeamLive(); }
+  function tlFloatClose(name){ const w=teamLive.workers[name]; if(w) w._closed=true; const el=tlFloatEls[name]; if(el){ el.remove(); delete tlFloatEls[name]; } }
+  function _tlFloatWinInner(w){
+    const init = (w.name||'').replace('agent-','A').toUpperCase();
+    return `<div class="tl-fhead">`
+      + `<span class="tl-fgrip">⠿</span>`
+      + `<div class="tl-av" style="width:22px;height:22px;font-size:10px;background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
+      + `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0">${_tlMetaHtml(w)}</div>`
+      + `<button class="tl-fx" title="閉じる" onclick="tlFloatClose('${_tlEsc(w.name)}')">✕</button>`
+      + `</div>`
+      + `<div class="tl-fbody">${_tlRailHtml(w)}<div class="tl-feed">${_tlFeedHtml(w)}</div></div>`;
+  }
+  function _tlRenderFloating(){
+    const layer = document.getElementById('tl-float-layer'); if(!layer) return;
+    const workers = Object.values(teamLive.workers);
+    const names = new Set(workers.map(w=>w.name));
+    Object.keys(tlFloatEls).forEach(n => { if(!names.has(n)){ tlFloatEls[n].remove(); delete tlFloatEls[n]; } });
+    workers.forEach((w, idx) => {
+      if(w._closed) return;
+      let el = tlFloatEls[w.name];
+      if(!el){
+        el = document.createElement('div'); el.dataset.worker = w.name;
+        const pos = tlFloatPos[w.name] || { left: 56 + (idx%3)*30, top: 96 + idx*138 };
+        tlFloatPos[w.name] = pos;
+        el.style.left = pos.left+'px'; el.style.top = pos.top+'px';
+        layer.appendChild(el); tlFloatEls[w.name] = el;
+      }
+      el.className = 'tl-fwin ' + _tlLaneCls(w);
+      el.innerHTML = _tlFloatWinInner(w);
+    });
+  }
+
+  function renderTeamLive(){
+    const body = document.getElementById('tl-body'); if(!body) return;
+    const activeRoles = new Set();
+    Object.values(teamLive.tasks).forEach(t => { if(['running','verify','retry','claimed'].includes(t.state)) activeRoles.add(t.role); });
+    let html = _tlMagiSvg(activeRoles);
+    if(tlEffMode()==='floating'){
+      // 看板（MAGI＋カンバン）は右に固定。ワーカーは個別の浮遊窓へ。
+      html += `<div style="font-size:10px;color:#6c7086;margin:4px 0 8px;text-align:center">各ワーカーは個別ウィンドウに表示中（⠿でドラッグ）</div>`;
+      html += _tlKanbanHtml() + _tlLegendHtml();
+      body.innerHTML = html;
+      _tlRenderFloating();
+    } else {
+      Object.values(teamLive.workers).forEach(w => { html += _tlLaneHtml(w); });
+      html += _tlKanbanHtml() + _tlLegendHtml();
+      body.innerHTML = html;
+    }
+  }
+
+  // フローティング窓のドラッグ（ヘッダ ⠿ を掴んで移動）
+  document.addEventListener('mousedown', e => {
+    const head = e.target.closest && e.target.closest('.tl-fhead'); if(!head) return;
+    if(e.target.closest('button')) return;
+    const win = head.closest('.tl-fwin'); if(!win) return;
+    const r = win.getBoundingClientRect();
+    _tlFloatDrag = { el:win, name:win.dataset.worker, sx:e.clientX, sy:e.clientY, sl:r.left, st:r.top };
+    win.style.zIndex = 8700;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if(!_tlFloatDrag) return; const d=_tlFloatDrag;
+    let nl = d.sl + (e.clientX-d.sx), nt = d.st + (e.clientY-d.sy);
+    nl = Math.max(0, Math.min(nl, window.innerWidth-90));
+    nt = Math.max(0, Math.min(nt, window.innerHeight-40));
+    d.el.style.left = nl+'px'; d.el.style.top = nt+'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if(!_tlFloatDrag) return; const d=_tlFloatDrag;
+    tlFloatPos[d.name] = { left: parseInt(d.el.style.left)||0, top: parseInt(d.el.style.top)||0 };
+    _tlFloatDrag = null;
+  });
+  applyTlMode();
 
   // ---- 設定 ----
   const MAX_VISIBLE_TURNS = 5;   // これより古いターンは折りたたむ

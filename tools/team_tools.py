@@ -848,6 +848,50 @@ def make_team_executor(
 # ----------------------------------------------------------------------------
 # teammate のエージェントループ（mailbox 自動読込みを最初から組み込む）
 # ----------------------------------------------------------------------------
+def _brief_args(tool: str, args: dict) -> dict:
+    """ライブビュー用にツール引数を最小化する（path/command/pattern/query 等を ~80字に切る）。
+    結果本文や巨大な content は載せない（SSE ペイロードを軽く保つ）。"""
+    if not isinstance(args, dict):
+        return {}
+    out: dict = {}
+    for k in ("path", "file_path", "command", "pattern", "query", "url", "glob"):
+        v = args.get(k)
+        if isinstance(v, str) and v:
+            out[k] = v if len(v) <= 80 else v[:80] + "…"
+    return out
+
+
+def _brief_result(result) -> str:
+    """ツール結果を先頭1行・~120字に要約（本文は載せない）。"""
+    s = str(result or "").strip()
+    if not s:
+        return ""
+    first = s.splitlines()[0]
+    return first if len(first) <= 120 else first[:120] + "…"
+
+
+def _result_ok(result) -> bool:
+    """ツール結果が成功かをプロバイダー非依存で判定する。
+    先頭が error/❌/⚠ で始まる、または JSON `{"error": ...}` 形なら失敗扱い。"""
+    s = str(result or "").lstrip()
+    if s.lower().startswith(("error", "❌", "⚠")):
+        return False
+    if s.startswith("{") and '"error"' in s[:120]:
+        return False
+    return True
+
+
+def _emit(on_event: "Callable[[dict], None] | None", payload: dict) -> None:
+    """実況イベントを安全に送出する。on_event 未指定なら何もしない。
+    実況の失敗（キュー満杯・例外）が本処理を絶対に壊さないよう握りつぶす。"""
+    if on_event is None:
+        return
+    try:
+        on_event(payload)
+    except Exception:
+        pass
+
+
 async def run_team_member(
     member_name: str,
     role: str,
@@ -861,6 +905,7 @@ async def run_team_member(
     max_iterations: int | None = None,
     timeout_sec: int | None = None,
     work_dir: Path | None = None,
+    on_event: "Callable[[dict], None] | None" = None,
 ) -> str:
     """1タスクを実行する teammate のループ。ターン冒頭で自分宛 mailbox を機械的に注入する
     （弱いモデルが read_messages を呼び忘れても会話に取り込まれる）。
@@ -920,7 +965,17 @@ async def run_team_member(
                     args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
                     args = {}
-                result = await executor(tc.function.name, args)
+                tool_name = tc.function.name
+                _emit(on_event, {
+                    "kind": "tool", "worker": member_name, "role": role,
+                    "tool": tool_name, "args": _brief_args(tool_name, args),
+                })
+                result = await executor(tool_name, args)
+                _emit(on_event, {
+                    "kind": "tool_done", "worker": member_name, "tool": tool_name,
+                    "ok": _result_ok(result),
+                    "brief": _brief_result(result),
+                })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,

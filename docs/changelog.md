@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-06-28（セッション71）マルチエージェント・ライブビュー（ワーカーレーン＋ツール実況）（v1.26.0・feature/multi-agent-team）
+
+> マルチエージェント実行中に「どのエージェントが・どのツールを発動して・今どの段階か」を右サイドペインでリアルタイムに見られるライブビューを新設。シングルAIで見えていたツール実況の透明性をマルチへ持ち込む。チャット本流は無改変の純粋な追加レイヤー。**このブランチのみ・main/for_windows 無変更。**
+
+### 背景（なぜ）
+- 審議/即応モードの実行中、UIには `🎯 t1 開始 → 完了 ✅` の粗い節目しか出ず、各ワーカーがどのツール（read_file/grep/write_file/run_command…）を叩いているかが `run_team_member()` の中で無言に起きていて見えなかった（`stream:False`＋イベント未送出）。
+
+### バックエンド（イベントの燃料を出す）
+- `tools/team_tools.py` `run_team_member()` に `on_event` フックを追加（引数追加のみ＝既定 None で従来挙動・既存呼び出し無改変）。ツール実行の前後で `tool`/`tool_done` イベントを送出。`_emit`（例外握り潰し）・`_brief_args`/`_brief_result`（ペイロード最小化）・`_result_ok`（`{"error":...}` JSON も失敗判定）を新設。
+- `server.py` `team_agent_stream`（審議）と `single_team_stream`（即応）の**両方**に同じ配線。既存の `asyncio.Queue` にテキスト(従来ナレーション)と構造化イベント(dict)を相乗りさせ、ドレインで `dict→team_event SSE` / `str→answer_chunk(従来通り)` に振り分け。`_sse_team` ヘルパ追加。実行直前に `plan` イベント（workers/tasks/依存）を先出し、worker 内で `task`（running/verify/retry/done/fail/error）を送出。パイプライン(multi_agent_stream)は対象外。
+
+### フロント（#team-live-pane）
+- `index.html` に BG パネルとは別の専用右サイドペイン `#team-live-pane` を新設（BGパネルは流用せず衝突回避）。`team_event` SSE 分岐を追加し、`teamLive` 状態＋`handleTeamEvent`＋`renderTeamLive` でモック準拠に描画：
+  - **MAGI三賢者グルーピング点灯**（BALTHASAR=統括[dispatcher] / CASPER=実装[coding,infra,debug] / MELCHIOR=知識[research,design,security,docs]・稼働役のノードが点灯）
+  - **ワーカーレーン**（アバター・役割タグ・モデル・段階レール[待機→実行中→検収→完了]＋ツール実況リスト・`getToolStatusText` 流用・実行中点滅・✓/●/✕）
+  - **カンバン**（待機/実行中/検収/完了に tid カードを配置）＋凡例
+  - 動的文字列は `_tlEsc` でエスケープ（生HTML混入防止）。モバイルは下に縦積み全幅。
+
+### 検証（実トークンE2E）
+- 静的配信＋プレビューで合成イベント駆動 → レーン/ツール実況/MAGI点灯/カンバン/段階遷移(実行中→検収→完了/未達)を目視確認。
+- 即応モードで実トークン実走 → `team_event` が実 `/chat` 経路で送出（plan×1・task×3・tool×14・tool_done×14、worker/role/実ツール名付き）。チャットナレーション(answer_chunk)は 2697 字で健在＝無回帰。二重化なし（game.js は js/ のみ）。
+- 両 stream は同型配線で審議モードも同じ経路。multi OFF 時はペイン非表示で無回帰。
+
+### 残課題（次回）
+- ブラウザで**審議モードの実トークン実走**を目視（即応は実走確認済み・審議は経路同一だが念のため）。
+- マージ判断（feature/multi-agent-team → main・版数2.0.0 or 現状継続）。
+
+---
+
 ## 2026-06-26（セッション70）実行方式リネーム＋MAGI三賢者図をスケッチ準拠に作り直し（v1.25.1・feature/multi-agent-team）
 
 > 実行方式の名前を中身に合わせて変更し、MAGI 三賢者図をユーザーのスケッチ通り（横長の箱＋45°面取り＋角どうしを結ぶ斜め線）に作り直した。`index.html` のみ。**このブランチのみ・main/for_windows 無変更。**

@@ -2345,6 +2345,12 @@ def _prune_agent_jobs(workspace_scope: str, keep: int = 20) -> None:
         pass
 
 
+def _sse_team(event: dict) -> str:
+    """マルチエージェント・ライブビュー用の構造化SSEイベント。
+    チャット本流の answer_chunk とは別系統（type=team_event）。フロントの #team-live-pane が消費する。"""
+    return f"data: {json.dumps({'type': 'team_event', 'event': event}, ensure_ascii=False)}\n\n"
+
+
 async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False, resume_action: str = ""):
     """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
     Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
@@ -2495,8 +2501,17 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         workers = [f"agent-{i+1}" for i in range(n_workers)]
         yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(workers))}）が空いたタスクから並列で着手します\n\n")
 
+        # ライブビュー（#team-live-pane）の骨格を先出し＝ワーカー/タスク/依存を先に描く
+        _plan_tasks = {tid: {"role": t.get("role", ""), "files": t.get("files", []) or [],
+                             "depends_on": t.get("depends_on", []) or []}
+                       for tid, t in plan.get("tasks", {}).items()}
+        yield _sse_team({"kind": "plan", "job_id": job_id, "mode": "team",
+                         "workers": workers, "tasks": _plan_tasks})
+
         sem = _asyncio.Semaphore(max_parallel)
         queue: _asyncio.Queue = _asyncio.Queue()
+        def emit(d: dict):
+            queue.put_nowait(d)
         # 全タスクが在りうる最大待ち時間（デッドロック保険）
         deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
 
@@ -2518,6 +2533,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                 client    = _make_async_client_for(preset_id)
                 sys_prompt = get_team_member_prompt(role, str(work_dir), name, coworkers)
                 queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
+                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                      "state": "running", "model": model, "preset": preset_id})
                 async with sem:
                     problems: list[str] = []
                     # 実行 → 検収（ファイル有無/空＋中身）→ 未達なら差し戻し再実行。
@@ -2552,6 +2569,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                                     f"上記を解消し、必ずツール（write_file / run_command 等）で成果ファイルを実際に作り直してください。"
                                 )
                                 queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（{attempt}回目）\n")
+                                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                      "state": "retry", "attempt": attempt})
                             # 最終トライは上位モデルへ格上げ（未設定ならディスパッチャーのモデル）。
                             # 前提: ディスパッチャー＝最上位モデル（config の注意書き参照）なので、
                             # フォールバック差し替えは常に「同等か格上げ」になり格下げしない。
@@ -2563,14 +2582,17 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                                     run_model, run_preset = esc_model, esc_preset
                                     escalated = True
                                     queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
+                                    emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                          "state": "running", "model": esc_model, "preset": esc_preset})
                             _attempt_t0 = time.time()
                             await run_team_member(
                                 member_name=name, role=role, system_prompt=sys_prompt,
                                 task_prompt=prompt, all_tools=TOOLS,
                                 base_executor=execute_tool_async, async_client=run_client,
                                 model=run_model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
-                                work_dir=work_dir,
+                                work_dir=work_dir, on_event=emit,
                             )
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "verify"})
                             # 検収の前に、迷子ファイルを宣言パスへ機械的に集約（モデル非依存の保証層）
                             relocated = reconcile_declared_files(job_dir, claimed, work_dir=work_dir)
                             if relocated:
@@ -2591,10 +2613,12 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                             complete_task(job_dir, tid, summary)
                             _update_status(job_dir, role, f"未達 ⚠️（{tid}）")
                             queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{'; '.join(problems)}）\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "fail"})
                         else:
                             complete_task(job_dir, tid, "完了")
                             _update_status(job_dir, role, f"完了（{tid}）")
                             queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "done"})
                     except Exception as e:
                         complete_task(job_dir, tid, f"エラー: {type(e).__name__}: {e}")
                         _update_status(job_dir, role, f"エラー ⚠️（{tid}）")
@@ -2607,6 +2631,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                             result="error", problems=[f"{type(e).__name__}: {e}"],
                         )
                         queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
+                        emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "error"})
                         print(f"[team_agent] {name}/{tid} エラー: {e}")
 
         async def run_all():
@@ -2620,7 +2645,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             item = await queue.get()
             if item is None:
                 break
-            yield _sse(item)
+            # dict=ライブビュー用構造化イベント / str=従来のチャットナレーション（無改変）
+            yield _sse_team(item) if isinstance(item, dict) else _sse(item)
         await runner  # 例外を表に出す
 
         # ---- 納品ゲート（モデル非依存の実行検収）----
@@ -2848,8 +2874,17 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
         workers = [f"agent-{i+1}" for i in range(n_workers)]
         yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(workers))}）が空いたタスクから並列で着手します\n\n")
 
+        # ライブビュー（#team-live-pane）の骨格を先出し
+        _plan_tasks = {tid: {"role": t.get("role", ""), "files": t.get("files", []) or [],
+                             "depends_on": t.get("depends_on", []) or []}
+                       for tid, t in plan.get("tasks", {}).items()}
+        yield _sse_team({"kind": "plan", "job_id": job_id, "mode": "single",
+                         "workers": workers, "tasks": _plan_tasks})
+
         sem = _asyncio.Semaphore(max_parallel)
         queue: _asyncio.Queue = _asyncio.Queue()
+        def emit(d: dict):
+            queue.put_nowait(d)
         deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
 
         async def worker(name: str):
@@ -2870,6 +2905,8 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                 client    = _make_async_client_for(preset_id)
                 sys_prompt = get_team_member_prompt(role, str(work_dir), name, coworkers)
                 queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
+                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                      "state": "running", "model": model, "preset": preset_id})
                 async with sem:
                     problems: list[str] = []
                     max_attempts = MULTI_AGENT_MAX_RETRIES + 1
@@ -2898,6 +2935,8 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                                     f"上記を解消し、必ずツール（write_file / run_command 等）で成果ファイルを実際に作り直してください。"
                                 )
                                 queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（{attempt}回目）\n")
+                                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                      "state": "retry", "attempt": attempt})
                             if is_final and attempt >= 1:
                                 esc_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
                                 esc_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
@@ -2906,14 +2945,17 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                                     run_model, run_preset = esc_model, esc_preset
                                     escalated = True
                                     queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
+                                    emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                          "state": "running", "model": esc_model, "preset": esc_preset})
                             _attempt_t0 = time.time()
                             await run_team_member(
                                 member_name=name, role=role, system_prompt=sys_prompt,
                                 task_prompt=prompt, all_tools=TOOLS,
                                 base_executor=execute_tool_async, async_client=run_client,
                                 model=run_model, job_dir=ctrl_dir, timeout_sec=claimed.get("timeout_sec"),
-                                work_dir=work_dir,
+                                work_dir=work_dir, on_event=emit,
                             )
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "verify"})
                             relocated = reconcile_declared_files(ctrl_dir, claimed, work_dir=work_dir)
                             if relocated:
                                 queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
@@ -2932,13 +2974,16 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                             complete_task(ctrl_dir, tid, summary)
                             _update_status(ctrl_dir, role, f"未達 ⚠️（{tid}）")
                             queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{'; '.join(problems)}）\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "fail"})
                         else:
                             complete_task(ctrl_dir, tid, "完了")
                             _update_status(ctrl_dir, role, f"完了（{tid}）")
                             queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "done"})
                     except Exception as e:
                         complete_task(ctrl_dir, tid, f"エラー: {type(e).__name__}: {e}")
                         _update_status(ctrl_dir, role, f"エラー ⚠️（{tid}）")
+                        emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "error"})
                         log_attempt(
                             ctrl_dir, worker=name, task_id=tid, role=role,
                             attempt=locals().get("attempt", 0) + 1,
@@ -2961,7 +3006,8 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
             item = await queue.get()
             if item is None:
                 break
-            yield _sse(item)
+            # dict=ライブビュー用構造化イベント / str=従来のチャットナレーション（無改変）
+            yield _sse_team(item) if isinstance(item, dict) else _sse(item)
         await runner
 
         # ---- 納品ゲート（指示が無いときだけ静的検証・正直報告は段階3で強化）----

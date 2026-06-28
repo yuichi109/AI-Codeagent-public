@@ -18,7 +18,7 @@
     },
     "security": {
       "preset_id": "openrouter",
-      "model": "deepseek/deepseek-v4-flash"
+      "model": "nvidia/nemotron-3-super-120b-a12b"
     },
     "docs": {
       "preset_id": "azure",

@@ -357,6 +357,29 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #bg-pane-actions { display:flex; gap:6px; align-items:center; }
   #bg-pane-body { overflow-y:auto; flex:1; padding:6px; }
 
+  /* ---- Team Live Pane（マルチエージェント・ライブビュー） ---- */
+  #team-live-pane { display:none; width:360px; min-width:260px; max-width:520px; flex-shrink:0; background:#11111b; border-left:1px solid #313244; flex-direction:column; overflow:hidden; position:relative; z-index:2; }
+  #team-live-pane.open { display:flex; }
+  #tl-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#181825; border-bottom:1px solid #313244; flex-shrink:0; }
+  #tl-title { font-size:12px; font-weight:bold; color:#f38ba8; letter-spacing:.06em; }
+  #tl-body { overflow-y:auto; flex:1; padding:10px; }
+  .tl-lane { background:#181825; border:1px solid #313244; border-radius:11px; padding:10px 11px; margin-bottom:9px; }
+  .tl-lane.run { border-color:#f9a825; }
+  .tl-lane.done { border-color:#2d3b29; }
+  .tl-lane.fail { border-color:#5a2a2a; }
+  .tl-av { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+  .tl-rtag { font-size:10px; padding:1px 7px; border-radius:6px; font-weight:600; }
+  .tl-rail { display:flex; align-items:center; gap:4px; font-size:9px; color:#6c7086; margin-top:3px; }
+  .tl-seg { width:14px; height:3px; border-radius:2px; background:#313244; }
+  .tl-feed { border-top:1px solid #313244; padding-top:6px; margin-top:7px; }
+  .tl-tool { font-family:ui-monospace,monospace; font-size:11px; padding:2px 0; display:flex; align-items:center; gap:6px; }
+  .tl-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .tl-kanban { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; margin-top:8px; }
+  .tl-col-h { font-size:10px; letter-spacing:.06em; color:#a6adc8; margin:0 0 6px; padding-bottom:4px; border-bottom:1px solid #313244; }
+  .tl-kcard { background:#1e1e2e; border:1px solid #313244; border-radius:8px; padding:5px 6px; margin-bottom:6px; font-size:10px; font-family:ui-monospace,monospace; }
+  @keyframes tl-blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .tl-blink { animation:tl-blink 1s ease-in-out infinite; }
+
   /* ---- BG Floating Panel ---- */
   #bg-float-pane { display:none; position:fixed; top:80px; right:16px; width:360px; height:500px; background:#1e1e2e; border:1px solid #45475a; border-radius:10px; box-shadow:0 6px 30px rgba(0,0,0,0.6); z-index:9000; flex-direction:column; overflow:hidden; }
   #bg-float-pane.open { display:flex; }
@@ -927,6 +950,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     #bg-side-pane { width: 100%; max-width: none; min-width: 0;
                     border-left: none; border-top: 1px solid #313244; max-height: 50vh; }
     #bg-side-resize-handle { display: none; }
+    #team-live-pane { width: 100%; max-width: none; min-width: 0;
+                      border-left: none; border-top: 1px solid #313244; max-height: 55vh; }
 
     /* --- BGフローティング：画面内に収める --- */
     #bg-float-pane { right: 12px; width: calc(100vw - 24px); max-width: 360px; }
@@ -1457,6 +1482,14 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     </div>
     <div id="bg-pane-body" class="bg-body"></div>
   </div>
+  <!-- Team Live Pane（マルチエージェント・ライブビュー） -->
+  <div id="team-live-pane">
+    <div id="tl-header">
+      <span id="tl-title">⚡ MAGI SYSTEM ｜ 多重思考接続</span>
+      <button class="bg-icon-btn" onclick="teamLiveClose()" title="閉じる">✕</button>
+    </div>
+    <div id="tl-body"></div>
+  </div>
 </div>
 <!-- BG Floating Panel (fixed position) -->
 <div id="bg-float-pane">
@@ -1770,6 +1803,156 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       }
       default:             return `Running ${name}`;
     }
+  }
+
+  // ===== マルチエージェント・ライブビュー（#team-live-pane）=====
+  // サーバーの team_event（type=team_event）を消費し、ワーカーごとのレーン＋ツール実況＋
+  // 段階レール＋カンバン＋MAGI賢者グルーピング点灯を描く。チャット本流とは独立。
+  let teamLive = { job:'', mode:'', workers:{}, tasks:{} };
+  function _tlEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function resetTeamLive(){ teamLive = { job:'', mode:'', workers:{}, tasks:{} }; }
+  function teamLiveOpen(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.add('open'); }
+  function teamLiveClose(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.remove('open'); }
+
+  // 8役 → MAGI三賢者グルーピング（dispatcher=統括 / coding,infra,debug=実装 / research,design,security,docs=知識）
+  const TL_MAGI = [
+    { key:'BALTHASAR', label:'BALTHASAR・1', sub:'統括', roles:['dispatcher'],                       color:'#f5a000' },
+    { key:'CASPER',    label:'CASPER・3',    sub:'実装', roles:['coding','infra','debug'],           color:'#19d6e6' },
+    { key:'MELCHIOR',  label:'MELCHIOR・2',  sub:'知識', roles:['research','design','security','docs'], color:'#ff3b3b' },
+  ];
+  // タスク状態 → 段階（待機0 / 実行中1 / 検収2 / 完了3）
+  const TL_STAGE = { pending:0, claimed:1, running:1, retry:1, verify:2, done:3, fail:3, error:3 };
+
+  function handleTeamEvent(e){
+    if(!e || !e.kind) return;
+    if(e.kind === 'plan'){
+      resetTeamLive();
+      teamLive.job = e.job_id||''; teamLive.mode = e.mode||'';
+      (e.workers||[]).forEach(w => { teamLive.workers[w] = { name:w, role:'', model:'', tid:'', state:'idle', feed:[], current:null }; });
+      Object.entries(e.tasks||{}).forEach(([tid,t]) => {
+        teamLive.tasks[tid] = { tid, role:t.role||'', files:t.files||[], depends_on:t.depends_on||[], state:'pending', worker:'' };
+      });
+      teamLiveOpen();
+    } else if(e.kind === 'task'){
+      const t = teamLive.tasks[e.tid] || (teamLive.tasks[e.tid] = { tid:e.tid, role:e.role||'', files:[], depends_on:[], state:'pending', worker:'' });
+      t.state = e.state; if(e.worker) t.worker = e.worker; if(e.role) t.role = e.role;
+      const w = teamLive.workers[e.worker];
+      if(w){
+        w.tid = e.tid; w.state = e.state; if(e.role) w.role = e.role; if(e.model) w.model = e.model;
+        if(['done','fail','error'].includes(e.state)) w.current = null;
+      }
+    } else if(e.kind === 'tool'){
+      const w = teamLive.workers[e.worker]; if(!w) return;
+      const item = { tool:e.tool, args:e.args||{}, status:'run' };
+      w.feed.push(item); if(w.feed.length>8) w.feed = w.feed.slice(-8);
+      w.current = item;
+    } else if(e.kind === 'tool_done'){
+      const w = teamLive.workers[e.worker]; if(!w) return;
+      for(let i=w.feed.length-1;i>=0;i--){ if(w.feed[i].tool===e.tool && w.feed[i].status==='run'){ w.feed[i].status = e.ok?'ok':'ng'; break; } }
+    }
+    renderTeamLive();
+  }
+
+  function _tlMagiSvg(activeRoles){
+    let nodes='', lines='';
+    const pos = [ {x:160,y:8}, {x:50,y:96}, {x:270,y:96} ];  // BAL上 / CAS下左 / MEL下右
+    TL_MAGI.forEach((m, i) => {
+      const lit = m.roles.some(r => activeRoles.has(r));
+      const p = pos[i];
+      const stroke = lit ? m.color : '#45475a';
+      const fill = lit ? m.color+'33' : '#181825';
+      const tcol = lit ? m.color : '#7f849c';
+      const blink = lit ? ' class="tl-blink"' : '';
+      nodes += `<g${blink}><rect x="${p.x}" y="${p.y}" width="140" height="28" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="${lit?1.8:1.2}"/>`
+        + `<text x="${p.x+70}" y="${p.y+13}" text-anchor="middle" fill="${tcol}" font-size="10.5" font-weight="600">${m.label}</text>`
+        + `<text x="${p.x+70}" y="${p.y+23}" text-anchor="middle" fill="${lit?m.color:'#6c7086'}" font-size="8">${m.sub}${lit?' ●稼働':''}</text></g>`;
+    });
+    lines = `<g stroke="#45475a" stroke-width="1.4">`
+      + `<line x1="230" y1="36" x2="230" y2="74"/>`
+      + `<line x1="230" y1="84" x2="120" y2="96"/>`
+      + `<line x1="230" y1="84" x2="340" y2="96"/></g>`
+      + `<circle cx="230" cy="79" r="8" fill="#f5a000"/><text x="230" y="82" text-anchor="middle" fill="#11111b" font-size="7" font-weight="700">MAGI</text>`;
+    return `<svg viewBox="0 0 460 130" style="width:100%;height:115px;margin-bottom:8px;">${lines}${nodes}</svg>`;
+  }
+
+  function _tlRail(stage, finished){
+    let s='';
+    for(let i=0;i<4;i++){
+      let c='#313244';
+      if(finished){ c = '#a6e3a1'; }
+      else if(i < stage){ c='#a6e3a1'; }
+      else if(i === stage){ c='#f9a825'; }
+      s += `<span class="tl-seg" style="background:${c}"></span>`;
+    }
+    return s;
+  }
+
+  function renderTeamLive(){
+    const body = document.getElementById('tl-body'); if(!body) return;
+    const activeRoles = new Set();
+    Object.values(teamLive.tasks).forEach(t => { if(['running','verify','retry','claimed'].includes(t.state)) activeRoles.add(t.role); });
+
+    // --- MAGI賢者 ---
+    let html = _tlMagiSvg(activeRoles);
+
+    // --- ワーカーレーン ---
+    const stageLabel = { 0:'待機', 1:'実行中', 2:'検収', 3:'完了' };
+    Object.values(teamLive.workers).forEach(w => {
+      const stage = TL_STAGE[w.state] ?? 0;
+      const finished = w.state==='done';
+      const laneCls = (w.state==='running'||w.state==='verify'||w.state==='retry') ? 'run'
+                    : (w.state==='done' ? 'done' : ((w.state==='fail'||w.state==='error') ? 'fail' : ''));
+      const stLabel = w.state==='done' ? '✓ 完了' : (w.state==='fail'||w.state==='error' ? '⚠ 未達' : (w.state==='verify' ? '検収中' : (w.state==='idle'||w.state==='' ? '待機' : '実行中')));
+      const stColor = w.state==='done' ? '#a6e3a1' : (w.state==='fail'||w.state==='error' ? '#f38ba8' : (w.state==='idle'||w.state==='' ? '#6c7086' : '#f9a825'));
+      let feed='';
+      (w.feed||[]).forEach(it => {
+        const dot = it.status==='run' ? '#f9a825' : (it.status==='ok' ? '#a6e3a1' : '#f38ba8');
+        const stat = it.status==='run' ? '● 実行中…' : (it.status==='ok' ? '✓' : '✕');
+        feed += `<div class="tl-tool${it.status==='run'?' tl-blink':''}"><span class="tl-dot" style="background:${dot}"></span>`
+          + `<span style="color:#a6adc8">${_tlEsc(getToolStatusText(it.tool, it.args))}</span>`
+          + `<span style="margin-left:auto;color:#6c7086">${stat}</span></div>`;
+      });
+      if(!feed) feed = `<div class="tl-tool" style="color:#6c7086">（ツール待機）</div>`;
+      const init = (w.name||'').replace('agent-','A').toUpperCase();
+      html += `<div class="tl-lane ${laneCls}">`
+        + `<div style="display:flex;align-items:center;gap:9px;">`
+        + `<div class="tl-av" style="background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
+        + `<div style="flex:1;min-width:0">`
+        + `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">`
+        + `<span style="font-weight:600;font-size:12px;color:#cdd6f4">${_tlEsc(w.name)}</span>`
+        + (w.role ? `<span class="tl-rtag" style="background:#2a2440;color:#cba6f7">${_tlEsc(w.role)}</span>` : '')
+        + (w.tid ? `<span style="font-family:ui-monospace,monospace;font-size:10px;color:#a6adc8">${_tlEsc(w.tid)}</span>` : '')
+        + (w.model ? `<span style="font-family:ui-monospace,monospace;font-size:9.5px;color:#6c7086">${_tlEsc(w.model)}</span>` : '')
+        + `</div>`
+        + `<div class="tl-rail">${_tlRail(stage, finished)}<span style="margin-left:5px;color:${stColor}">${stLabel}</span></div>`
+        + `</div></div>`
+        + `<div class="tl-feed">${feed}</div>`
+        + `</div>`;
+    });
+
+    // --- カンバン ---
+    const cols = [ {h:'待機',st:[0]}, {h:'実行中',st:[1]}, {h:'検収',st:[2]}, {h:'完了',st:[3]} ];
+    let kb = '<div class="tl-kanban">';
+    cols.forEach(col => {
+      let cards='';
+      Object.values(teamLive.tasks).forEach(t => {
+        const tstage = TL_STAGE[t.state] ?? 0;
+        if(!col.st.includes(tstage)) return;
+        const bad = (t.state==='fail'||t.state==='error');
+        cards += `<div class="tl-kcard"><div style="color:${bad?'#f38ba8':'#cdd6f4'}">${_tlEsc(t.tid)}${bad?' ⚠':''}</div>`
+          + `<div style="color:#6c7086;font-size:9px">${_tlEsc(t.role||'')}</div></div>`;
+      });
+      kb += `<div><p class="tl-col-h">${col.h}</p>${cards||'<div style="color:#45475a;font-size:9px">—</div>'}</div>`;
+    });
+    kb += '</div>';
+    html += kb;
+
+    // --- 凡例 ---
+    html += `<div style="display:flex;justify-content:center;gap:14px;margin-top:10px;font-size:9.5px;color:#6c7086">`
+      + `<span><span style="color:#a6e3a1">✓</span> 完了</span><span><span style="color:#f9a825">●</span> 実行中</span>`
+      + `<span><span style="color:#f38ba8">✕</span> 失敗</span></div>`;
+
+    body.innerHTML = html;
   }
 
   // ---- 設定 ----
@@ -5202,7 +5385,9 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           if (!line.startsWith('data: ')) continue;
           let data;
           try { data = JSON.parse(line.slice(6)); } catch { continue; }
-          if (data.type === 'tool_start') {
+          if (data.type === 'team_event') {
+            handleTeamEvent(data.event);
+          } else if (data.type === 'tool_start') {
             genPhase = data.name; updateGenStatus();
             updateStatusLine(statusEl, getToolStatusText(data.name, data.args));
             finalAnswer = '';

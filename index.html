@@ -1387,6 +1387,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           <label>作業スコープ</label>
           <select id="snew-scope"><option value="">workspace 全体</option></select>
         </div>
+        <div class="sched-field">
+          <label>実行モデル（無人実行なので重要なタスクは賢いモデルを固定推奨）</label>
+          <select id="snew-model"><option value="">（チャットの現在モデル）</option></select>
+        </div>
         <button class="sched-btn primary" id="snew-submit" onclick="schedSubmitTask()">タスクを登録</button>
         <span id="snew-msg" style="margin-left:10px;font-size:12px;"></span>
       </div>
@@ -2613,8 +2617,11 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   }
 
   // ボタンから直接実行・キャンセルを送信（job_id を DOM に持つので変数消失の心配なし）
+  // ボタンは意図が明確なので resume_action で確定指示を送る＝バックエンドの LLM 分類を経由しない。
+  // （却下なのに弱いモデルが「実行」と誤判定してジョブが走り出す事故を防ぐ）
   function sendMaResume(jobId, action) {
     _maPendingJobId = jobId;
+    _maResumeAction = action;   // 'execute' | 'cancel'（バックエンドが分類せず直接従う）
     const inputEl = document.getElementById('input');
     if (inputEl) {
       inputEl.value = action === 'cancel' ? 'キャンセル' : '実行して';
@@ -8790,7 +8797,7 @@ function schedTab(page) {
   document.querySelectorAll('.sched-page').forEach(p =>
     p.classList.toggle('active', p.id === 'sched-page-' + page));
   if (page === 'templates') schedLoadTemplates();
-  if (page === 'new') { schedFillTemplateSelect(); schedFillScopeSelect(); }
+  if (page === 'new') { schedFillTemplateSelect(); schedFillScopeSelect(); schedFillModelSelect(); }
 }
 
 // 作業スコープのプルダウンを workspace サブフォルダで埋める
@@ -8804,6 +8811,40 @@ async function schedFillScopeSelect(selected = '') {
   } catch (e) {}
   sel.innerHTML = '<option value="">workspace 全体</option>' +
     dirs.map(d => `<option value="${_bgEsc(d)}">📁 ${_bgEsc(d)}</option>`).join('');
+  sel.value = selected || '';
+}
+
+// 実行モデルのプルダウンを /rerun-models（プロバイダー横断）で埋める。
+// selected は 'preset_id::model'。未指定なら「チャットの現在モデル」。
+async function schedFillModelSelect(selected = '') {
+  const sel = document.getElementById('snew-model');
+  if (!sel) return;
+  let models = [];
+  try {
+    const r = await fetch('/rerun-models');
+    models = (await r.json()).models || [];
+  } catch (e) {}
+  sel.innerHTML = '<option value="">（チャットの現在モデル）</option>';
+  const groups = {};
+  models.forEach(m => { (groups[m.provider] = groups[m.provider] || []).push(m); });
+  const multi = Object.keys(groups).length > 1;
+  Object.entries(groups).forEach(([prov, list]) => {
+    let container = sel;
+    if (multi) { const og = document.createElement('optgroup'); og.label = prov; sel.appendChild(og); container = og; }
+    list.forEach(m => {
+      const v = `${m.preset_id}::${m.model}`;
+      const o = document.createElement('option');
+      o.value = v; o.textContent = m.model;
+      if (v === selected) o.selected = true;
+      container.appendChild(o);
+    });
+  });
+  // 保存済みの指定が現在の一覧に無い（プロバイダー無効化など）場合も、選択を失わないよう保持表示
+  if (selected && !models.some(m => `${m.preset_id}::${m.model}` === selected)) {
+    const o = document.createElement('option');
+    o.value = selected; o.textContent = selected + '（現在利用不可）'; o.selected = true;
+    sel.appendChild(o);
+  }
   sel.value = selected || '';
 }
 
@@ -8822,7 +8863,7 @@ function schedSetEditMode(on) {
 function schedCancelEdit() {
   _schedEditId = null;
   schedSetEditMode(false);
-  ['snew-name', 'snew-scope'].forEach(id => document.getElementById(id).value = '');
+  ['snew-name', 'snew-scope', 'snew-model'].forEach(id => document.getElementById(id).value = '');
   schedSetDays([0, 1, 2, 3, 4, 5, 6]);  // 曜日チェックを毎日に戻す
   document.getElementById('snew-msg').textContent = '';
 }
@@ -8961,8 +9002,9 @@ async function schedLoadTasks() {
       const runs = (await rr.json()).runs || [];
       runsHtml = runs.slice(0, 5).map(run => {
         const when = (run.scheduled_at || '').replace('T', ' ').slice(5, 16);
-        return `<span class="sched-run-chip ${run.status}" title="${run.status}">
-          ${when} ${run.status}
+        const mdl = run.actual_model ? ` · 🤖 ${_bgEsc(run.actual_model)}` : '';
+        return `<span class="sched-run-chip ${run.status}" title="${run.status}${run.actual_model ? ' / ' + _bgEsc(run.actual_model) : ''}">
+          ${when} ${run.status}${mdl}
           <a href="#" onclick="schedClearRun(${run.id});return false;" style="color:#6c7086;margin-left:4px;" title="フラグ解除">✕</a>
         </span>`;
       }).join('');
@@ -8989,7 +9031,7 @@ async function schedLoadTasks() {
           <button class="sched-btn" onclick="schedEditTask(${t.id})">編集</button>
           <button class="sched-btn danger" onclick="schedDeleteTask(${t.id})">削除</button>
         </div>
-        <div class="r-meta">📋 ${_bgEsc(t.template || '?')}　/　🔁 ${recurDesc}　/　⏭ 次回: ${nextStr}</div>
+        <div class="r-meta">📋 ${_bgEsc(t.template || '?')}　/　🔁 ${recurDesc}　/　⏭ 次回: ${nextStr}${t.model_ref ? '　/　🤖 ' + _bgEsc(t.model_ref) : ''}</div>
         ${runsHtml ? `<div class="r-runs">${runsHtml}</div>` : ''}
       </div>`);
   }
@@ -9020,6 +9062,7 @@ async function schedEditTask(id) {
   if (task.interval_hours != null) document.getElementById('snew-interval').value = task.interval_hours;
   if (task.run_at) document.getElementById('snew-runat').value = task.run_at.slice(0, 16);
   await schedFillScopeSelect(task.workspace_scope || '');
+  await schedFillModelSelect(task.model_ref || '');
   schedSetEditMode(true);
 }
 
@@ -9031,7 +9074,8 @@ async function schedSubmitTask() {
   if (!name) { msg.style.color = '#f38ba8'; msg.textContent = 'タスク名は必須です'; return; }
   if (!template_id) { msg.style.color = '#f38ba8'; msg.textContent = 'テンプレを選択してください'; return; }
   const payload = { name, template_id, recurrence_type,
-    workspace_scope: document.getElementById('snew-scope').value.trim() };
+    workspace_scope: document.getElementById('snew-scope').value.trim(),
+    model_ref: document.getElementById('snew-model').value };
   if (recurrence_type === 'daily' || recurrence_type === 'weekly')
     payload.time_of_day = document.getElementById('snew-time').value;
   if (recurrence_type === 'daily') {

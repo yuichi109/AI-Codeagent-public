@@ -388,29 +388,103 @@ _async_worker_proc: subprocess.Popen | None = None  # set in lifespan
 _scheduler_task: "asyncio.Task | None" = None  # set in lifespan
 
 
-def _create_job_from_task(task: dict) -> str:
-    """テンプレ指示文を BG ジョブとして登録し job_id を返す（副作用なし）。"""
+def _provider_label(cfg: dict) -> str:
+    """provider_config を 'プロバイダー名 / モデル' 形式の人間可読ラベルにする。"""
+    who = cfg.get("name") or cfg.get("preset_id") or cfg.get("type", "?")
+    return f"{who} / {cfg.get('model', '?')}"
+
+
+def _resolve_model_ref(model_ref: str | None) -> dict | None:
+    """
+    'preset_id::model' を BG ジョブ用の provider_config dict に解決する。
+    指定が無効・該当プロバイダーの認証情報が無い場合は None（=フォールバック判断は呼び出し側）。
+    """
+    if not model_ref or "::" not in model_ref:
+        return None
+    preset_id, _, model = model_ref.partition("::")
+    preset_id, model = preset_id.strip(), model.strip()
+    if not preset_id or not model:
+        return None
+    base = {"model": model, "preset_id": preset_id, "tools_enabled": True}
+    if preset_id == "azure":
+        if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
+            return None
+        base.update(type="azure", url=AZURE_OPENAI_ENDPOINT,
+                    api_key=AZURE_OPENAI_API_KEY, name="Azure OpenAI")
+        return base
+    if preset_id.startswith("foundry"):
+        inst = next((i for i in FOUNDRY_INSTANCES if i["id"] == preset_id), None)
+        if not inst:
+            return None
+        base.update(type="foundry", url=inst["endpoint"],
+                    api_key=inst["api_key"], name=inst["name"])
+        return base
+    if preset_id == "gemini":
+        if not GEMINI_API_KEY:
+            return None
+        base.update(type="gemini", url="", api_key=GEMINI_API_KEY, name="Google Gemini")
+        return base
+    if preset_id == "openai":
+        if not OPENAI_API_KEY:
+            return None
+        base.update(type="openai", url="", api_key=OPENAI_API_KEY, name="OpenAI")
+        return base
+    if preset_id == "groq":
+        if not GROQ_API_KEY:
+            return None
+        base.update(type="groq", url="", api_key=GROQ_API_KEY, name="Groq")
+        return base
+    if preset_id == "openrouter":
+        if not OPENROUTER_API_KEY:
+            return None
+        base.update(type="openrouter", url="", api_key=OPENROUTER_API_KEY, name="OpenRouter")
+        return base
+    return None
+
+
+def _create_job_from_task(task: dict) -> tuple[str, str]:
+    """
+    テンプレ指示文を BG ジョブとして登録し (job_id, 実行モデルラベル) を返す（副作用なし）。
+
+    task.model_ref ('preset_id::model') が指定され解決できればそのモデルで実行。
+    指定があるが使えない場合は (c) チャットモデルにフォールバックし「代替」をラベルに明記する。
+    未指定はチャットモデルで実行（後方互換）。
+    """
     prompt = task.get("template_prompt") or ""
     if not prompt:
         raise RuntimeError(f"テンプレ未設定 task_id={task.get('id')}")
-    return _create_async_job(
+    model_ref = (task.get("model_ref") or "").strip()
+    cfg = _resolve_model_ref(model_ref)
+    if cfg is not None:
+        provider = cfg
+        actual_model = _provider_label(cfg)
+    elif model_ref:
+        # 指定はあるが解決不可 → フォールバックして実行し、何が起きたか履歴に残す（(c)）
+        provider = dict(_provider_config)
+        actual_model = f"{_provider_label(_provider_config)}（指定 {model_ref} が使用不可のため代替）"
+    else:
+        provider = dict(_provider_config)
+        actual_model = _provider_label(_provider_config)
+    job_id = _create_async_job(
         message=prompt,
-        provider_config=dict(_provider_config),
+        provider_config=provider,
         max_turns=ASYNC_MAX_TURNS,
         workspace_scope=task.get("workspace_scope") or "",
     )
+    return job_id, actual_model
 
 
-def _scheduler_create_job(task: dict) -> str:
-    """スケジューラー発火時のコールバック。ジョブ登録＋once タスクの自動無効化。"""
-    job_id = _create_job_from_task(task)
+def _scheduler_create_job(task: dict) -> tuple[str, str]:
+    """スケジューラー発火時のコールバック。ジョブ登録＋once タスクの自動無効化。
+    (job_id, 実行モデルラベル) を返す。"""
+    job_id, actual_model = _create_job_from_task(task)
     # 1回限りのタスクは発火後に無効化する
     if task.get("recurrence_type") == "once":
         try:
             schedule_db.set_enabled(task["id"], False)
         except Exception:
             pass
-    return job_id
+    return job_id, actual_model
 
 
 def _win_kill_worker_then_exit():
@@ -531,7 +605,7 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
                          time_of_day: str = None, day_of_week=None,
                          days_of_week=None,
                          interval_hours: int = None, run_at: str = None,
-                         workspace_scope: str = "") -> dict:
+                         workspace_scope: str = "", model_ref: str = None) -> dict:
     """
     定時タスクを登録する。template_name で実行内容テンプレートを指定する。
     recurrence_type: daily(毎日) / weekly(毎週) / once(1回) / hourly(毎時) / interval(N時間ごと)
@@ -539,6 +613,8 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
     daily で特定曜日のみ実行したい場合は days_of_week に '月,火,水,木,金' や '0,1,2,3,4'
     を渡す（未指定なら毎日）。土日を除くなら平日5日を指定する。
     once は run_at='YYYY-MM-DDTHH:MM:SS'。interval は interval_hours が必要。
+    model_ref は実行モデルを 'preset_id::model' 形式で固定したい場合に指定（未指定はチャットの
+    現在モデルで実行）。利用可能な値は /rerun-models の一覧（preset_id::model）に準拠する。
     """
     tpl = schedule_db.get_template_by_name(template_name)
     if not tpl:
@@ -549,7 +625,7 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
             time_of_day=time_of_day, day_of_week=_coerce_dow(day_of_week),
             days_of_week=_coerce_dow_list(days_of_week),
             interval_hours=interval_hours, run_at=run_at,
-            workspace_scope=workspace_scope or "",
+            workspace_scope=workspace_scope or "", model_ref=model_ref,
         )
     except ValueError as e:
         return {"error": str(e)}
@@ -2161,10 +2237,11 @@ async def _interpret_plan_response(user_message: str, plan: dict, async_client, 
     try:
         return json.loads(resp.choices[0].message.content or "{}")
     except Exception:
-        return {"action": "execute", "notes": ""}
+        # 判定不能なら安全側＝勝手に実行しない（却下扱い）。ユーザーはボタンで明示できる。
+        return {"action": "cancel", "notes": ""}
 
 
-async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = ""):
+async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", resume_action: str = ""):
     """マルチエージェントモード:
     Phase 1 (resume_job_id なし): ディスパッチャー → 計画表示 → 停止（plan_ready イベント）
     Phase 2 (resume_job_id あり): ユーザー返答を解釈 → 実行 / 再計画 / キャンセル
@@ -2208,6 +2285,9 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                 # 分類ミスで実行に化けるのを防ぐ。指摘内容は user_message に入っている。
                 action = "replan"
                 notes  = user_message
+            elif resume_action in ("execute", "cancel"):
+                # 承認パネルのボタンは意図が明確。LLM分類を挟まず確定指示を信じる。
+                action, notes = resume_action, ""
             else:
                 action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
                 action = action_result.get("action", "execute")
@@ -2552,9 +2632,15 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             original_task_file = job_dir / "original_task.txt"
             original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
 
-            action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
-            action = action_result.get("action", "execute")
-            notes  = action_result.get("notes", "")
+            # 承認パネルのボタン（▶実行 / ✕却下）は意図が明確なので、LLM分類を経由せず
+            # resume_action をそのまま信じる。却下なのに弱いモデルが execute に誤分類して
+            # ジョブが走り出す事故を防ぐ。自由入力の返答のみ分類にかける。
+            if resume_action in ("execute", "cancel"):
+                action, notes = resume_action, ""
+            else:
+                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
+                action = action_result.get("action", "execute")
+                notes  = action_result.get("notes", "")
 
             if action == "cancel":
                 yield _sse("🚫 了解しました、キャンセルします。\n")
@@ -4116,7 +4202,7 @@ async def chat(req: ChatRequest):
         elif method == "team" and MULTI_AGENT_TEAM_ENABLED:
             stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test, req.resume_action)
         else:
-            stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
+            stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.resume_action)
         # --- C案: 実行をリクエストから切り離して永続化（リロード/クラッシュ後も結果を失わない）---
         # ドライバ（独立タスク）が stream を完走させ SSE をディスクへ保存。クライアントが切れても
         # 後処理まで終わって結果が残る。HTTP レスポンスは購読者として中継するだけ。
@@ -4365,6 +4451,7 @@ class TaskRequest(BaseModel):
     interval_hours: int | None = None
     run_at: str | None = None
     workspace_scope: str = ""
+    model_ref: str | None = None
     enabled: bool = True
 
 
@@ -4378,6 +4465,7 @@ class TaskUpdateRequest(BaseModel):
     interval_hours: int | None = None
     run_at: str | None = None
     workspace_scope: str | None = None
+    model_ref: str | None = None
     enabled: bool | None = None
 
 
@@ -4441,6 +4529,7 @@ async def schedule_task_create_ep(req: TaskRequest):
             day_of_week=req.day_of_week, days_of_week=req.days_of_week,
             interval_hours=req.interval_hours,
             run_at=req.run_at, workspace_scope=req.workspace_scope,
+            model_ref=req.model_ref,
             enabled=req.enabled,
         )
     except ValueError as e:
@@ -4477,11 +4566,12 @@ async def schedule_task_run_now_ep(task_id: int):
     if task is None:
         return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
     try:
-        job_id = _create_job_from_task(task)
+        job_id, actual_model = _create_job_from_task(task)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     # 実行記録に残す（マイクロ秒精度で occurrence の衝突を回避）。結果通知ポーリングが拾う。
-    schedule_db.claim_occurrence(task_id, datetime.now().isoformat(), "executed", job_id=job_id)
+    schedule_db.claim_occurrence(task_id, datetime.now().isoformat(), "executed",
+                                 job_id=job_id, actual_model=actual_model)
     return JSONResponse({"job_id": job_id, "status": "started"})
 
 
@@ -4518,8 +4608,9 @@ async def schedule_run_decide_ep(run_id: int, req: RunDecideRequest):
             schedule_db.decide_run(run_id, "failed")
             return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
         try:
-            job_id = _scheduler_create_job(task)
+            job_id, actual_model = _scheduler_create_job(task)
             schedule_db.decide_run(run_id, "executed", job_id=job_id)
+            schedule_db.set_run_actual_model(run_id, actual_model)
             return JSONResponse({"id": run_id, "status": "executed", "job_id": job_id})
         except Exception as e:
             schedule_db.decide_run(run_id, "failed")

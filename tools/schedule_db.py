@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     run_at          TEXT,
     anchor_at       TEXT,
     workspace_scope TEXT NOT NULL DEFAULT '',
+    model_ref       TEXT,
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
     scheduled_at TEXT NOT NULL,
     status       TEXT NOT NULL,
     job_id       TEXT,
+    actual_model TEXT,
     decided_at   TEXT,
     UNIQUE(task_id, scheduled_at)
 );
@@ -83,6 +85,13 @@ def _migrate(conn: sqlite3.Connection):
     ).fetchall()}
     if "days_of_week" not in cols:
         conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN days_of_week TEXT")
+    if "model_ref" not in cols:
+        conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN model_ref TEXT")
+    run_cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(task_runs)"
+    ).fetchall()}
+    if "actual_model" not in run_cols:
+        conn.execute("ALTER TABLE task_runs ADD COLUMN actual_model TEXT")
 
 
 def _now() -> str:
@@ -168,7 +177,7 @@ def template_in_use(template_id: int) -> int:
 _TASK_FIELDS = (
     "name", "template_id", "recurrence_type", "time_of_day", "day_of_week",
     "days_of_week", "interval_hours", "run_at", "anchor_at", "workspace_scope",
-    "enabled",
+    "model_ref", "enabled",
 )
 
 
@@ -177,6 +186,7 @@ def create_task(name: str, template_id: int, recurrence_type: str,
                 days_of_week: str | None = None,
                 interval_hours: int | None = None, run_at: str | None = None,
                 anchor_at: str | None = None, workspace_scope: str = "",
+                model_ref: str | None = None,
                 enabled: bool = True) -> int:
     if recurrence_type not in RECURRENCE_TYPES:
         raise ValueError(f"不正な recurrence_type: {recurrence_type}")
@@ -189,11 +199,11 @@ def create_task(name: str, template_id: int, recurrence_type: str,
             """INSERT INTO scheduled_tasks
                (name, template_id, recurrence_type, time_of_day, day_of_week,
                 days_of_week, interval_hours, run_at, anchor_at, workspace_scope,
-                enabled, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                model_ref, enabled, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, template_id, recurrence_type, time_of_day, day_of_week,
              days_of_week, interval_hours, run_at, anchor_at, workspace_scope,
-             1 if enabled else 0, ts, ts),
+             model_ref, 1 if enabled else 0, ts, ts),
         )
         return cur.lastrowid
 
@@ -260,7 +270,8 @@ def delete_task(task_id: int):
 # ---------------------------------------------------------------------------
 
 def claim_occurrence(task_id: int, scheduled_at: str, status: str,
-                     job_id: str | None = None) -> int | None:
+                     job_id: str | None = None,
+                     actual_model: str | None = None) -> int | None:
     """
     その回（task_id × scheduled_at）の実行権を原子的に確保する。
     UNIQUE 制約 + INSERT OR IGNORE により、既に記録があれば None（=他が確保済み or 決定済み）。
@@ -272,9 +283,9 @@ def claim_occurrence(task_id: int, scheduled_at: str, status: str,
     with _connect() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO task_runs "
-            "(task_id, scheduled_at, status, job_id, decided_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (task_id, scheduled_at, status, job_id, decided),
+            "(task_id, scheduled_at, status, job_id, actual_model, decided_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (task_id, scheduled_at, status, job_id, actual_model, decided),
         )
         return cur.lastrowid if cur.rowcount == 1 else None
 
@@ -300,6 +311,14 @@ def set_run_job(run_id: int, job_id: str):
     with _connect() as conn:
         conn.execute(
             "UPDATE task_runs SET job_id=? WHERE id=?", (job_id, run_id)
+        )
+
+
+def set_run_actual_model(run_id: int, actual_model: str):
+    """その回で実際に使われたモデル（指定が使えず代替した旨も含む）を記録する。"""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE task_runs SET actual_model=? WHERE id=?", (actual_model, run_id)
         )
 
 

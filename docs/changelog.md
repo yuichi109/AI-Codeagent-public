@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-06-30（セッション74）スケジューラーのタスクごとモデル指定＋審議モード却下バグ修正（v1.29.0・feature/multi-agent-team）
+
+> 定時タスクは無人実行なので「後で空振りが分かる」のが痛い → 重要タスクほど賢いモデルを固定したいというユーザー要望に対応。タスクごとに実行モデルを指定でき、実行履歴に「実際に動いたモデル」も残るようにした。加えて、審議モードで計画を**却下したのにジョブが進行してしまうバグ**を修正。**このブランチのみ・main/for_windows 無変更。**
+
+### スケジューラー: タスクごとのモデル指定（クロスプロバイダー）
+- **スキーマ**（tools/schedule_db.py）：`scheduled_tasks.model_ref`（`preset_id::model` 形式）と `task_runs.actual_model` を追加。`_migrate()` で既存DBに後方互換 ALTER（days_of_week と同じ流儀）。`create_task(model_ref=)`、`claim_occurrence(actual_model=)`、`set_run_actual_model()` 追加、`_TASK_FIELDS` に model_ref（update_task が自動対応）。
+- **解決ロジック**（server.py）：`_resolve_model_ref('preset_id::model')` がプロバイダー別に type/url/api_key を組んで BG ジョブ用 provider_config を返す（認証情報が無い・不正なら None）。`_provider_label(cfg)` で「プロバイダー名 / モデル」ラベル化。
+- **発火**：`_create_job_from_task()` を `(job_id, 実行モデルラベル)` 返却に変更。指定が解決できればそのモデルで実行／**指定があるが使えない場合はチャットモデルにフォールバックしつつ「（指定 X が使用不可のため代替）」を履歴に明記**（合意仕様(c)＝黙って代替でも失敗扱いでもなく、動かすが何が起きたか残す）／未指定はチャットモデル（後方互換）。`_scheduler_create_job` も同タプル。run-now・取りこぼし実行・スケジューラー `_fire` の3経路すべてで actual_model を記録（`_fire` は旧 str 返却も isinstance で許容）。
+- **API**：TaskRequest/TaskUpdateRequest に `model_ref`。自然言語ツール `schedule_task_create(model_ref=)` も対応。`/schedule/tasks` は model_ref を同梱。
+- **UI**（index.html）：新規/編集フォームに「実行モデル」プルダウン（`/rerun-models` 横断・既定「（チャットの現在モデル）」・利用不可になった指定値は「（現在利用不可）」で選択保持）＝`schedFillModelSelect()`。submit/edit/reset に配線。タスク一覧 meta に `🤖 固定モデル`、実行履歴チップに `🤖 実際に動いたモデル` を表示。
+- **検証**：backend py_compile・migration実DB適用・`_resolve_model_ref` 全ケース・DB往復（model_ref保存/actual_model記録）・サーバー再起動200・`/rerun-models`・`/schedule/tasks`(model_ref同梱)。static-preview でフォーム描画/関数定義/グループ化/選択保持/利用不可フォールバック/コンソール無エラー＋スクショ目視。**ユーザー実機テストOK**。
+
+### 審議モード: 計画却下なのにジョブが走り出すバグ修正
+- **原因**：①却下ボタンが「キャンセル」という"テキスト"を送り、バックエンドの LLM 分類（`_interpret_plan_response`・ディスパッチャーモデル）に判定を委ねていた＝弱いモデルだと「キャンセル」を「実行」と誤分類してジョブが走り出す。②分類失敗時のフォールバックが `execute`＝判定不能でも黙って実行。
+- **修正**：修正ボタン(replan)が既に使う `resume_action` の確定指示方式を実行/却下にも適用。フロントの ▶実行 / ✕却下 ボタンが `resume_action`（execute/cancel）を明示送信し、`team_agent_stream`・`multi_agent_stream` の Phase2 が **execute/cancel は分類せず直接従う**（自由入力の返答だけ分類）。分類失敗時フォールバックを `execute`→`cancel`（勝手に走らせない）に変更。
+- **付随**：`multi_agent_stream`（旧パイプライン・塩漬け）が引数に無い `resume_action` を参照していた潜在 NameError を、引数追加＋呼び出し側で渡すよう是正。
+- **検証**：ユーザー実機テストOK（却下→「🚫キャンセルします」で停止しジョブ不発、その後の実行→正常進行）。
+
+---
+
 ## 2026-06-29（セッション73）マルチ実行のリロード/クラッシュ復元（v1.28.0・feature/multi-agent-team）
 
 > マルチ実行中にブラウザをリロード/クラッシュすると、裏のワーカーは完走するのに**後処理（反映先統一・納品ゲート・最終報告書）が接続断でスキップ**され、画面も「開始」で固まって結果が見えなかった。実行をリクエストから切り離して永続化し、リロード/クラッシュ後でも結果を取り戻せるようにした（ユーザー選択＝最小案C・結果を失わない）。**既存の stream 本体は無改修＝回帰リスク最小。このブランチのみ・main/for_windows 無変更。**

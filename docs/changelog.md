@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-29（セッション73）マルチ実行のリロード/クラッシュ復元（v1.28.0・feature/multi-agent-team）
+
+> マルチ実行中にブラウザをリロード/クラッシュすると、裏のワーカーは完走するのに**後処理（反映先統一・納品ゲート・最終報告書）が接続断でスキップ**され、画面も「開始」で固まって結果が見えなかった。実行をリクエストから切り離して永続化し、リロード/クラッシュ後でも結果を取り戻せるようにした（ユーザー選択＝最小案C・結果を失わない）。**既存の stream 本体は無改修＝回帰リスク最小。このブランチのみ・main/for_windows 無変更。**
+
+### バックエンド（server.py・既存 team/single/pipeline stream は無改修）
+- **実行を独立タスクへ切り離し**：`/chat` のマルチ分岐が `team_agent_stream`/`single_team_stream`/`multi_agent_stream` を**バックグラウンドのドライバ `_drive_team_run` で回す**。ドライバが SSE チャンクを逐次ディスク（`workspace/.agent-runs/<run_id>.sse`）へ保存しつつ、接続中クライアントへ中継。**クライアントが切れてもドライバは生き残り後処理まで完走**して成果物・`final-report.md`・実況ログを残す。HTTP レスポンスは購読者として中継するだけ（`_relay_team_run`）。先頭で `run_started{run_id}` を1イベント送る。
+- **run レジストリ**：`_TEAM_RUNS`（run_id→subs/status）。`_run_sse_path`/`_run_meta_path`/`_write_run_meta`/`_prune_team_runs`（直近30件保持）。`run_id` はサーバー採番（uuid 先頭12桁）。
+- **復元EP** `GET /multi-agent/runs/{run_id}`：保存済み SSE ログをパースし `message`（answer_chunk 連結）/`team_events`（ライブビュー再生用）/`plan_ready`/`status`/`meta` を返す。未知 run_id は 404。
+- 注：サーバーは systemd で常駐＝ブラウザクラッシュ後も run は生存。ディスク保存なのでサーバー再起動後も最終結果は復元可能。
+
+### フロント（index.html・既存の受信ループは無改修＝低リスク）
+- `run_started` を受けたら `localStorage.activeTeamRun` に run_id 保持。`answer_done`（正常完了）と明示的な停止で破棄。
+- **ページ読込時 `restoreActiveTeamRun()`**：未完了 run があれば復元EPを叩き、`team_events` を既存 `handleTeamEvent` で再生（ライブビュー復元）＋本文を新ターンに描画。完了済み=「復元しました」バナー＋run破棄／実行中=「まだ実行中」バナー＋「🔄更新」ボタンで再取得（run保持）。24h超の run は破棄。
+- 復元は受信ループを再利用せず別経路（保存ログ→組み立て→再生）にしたため、通常チャットの描画に一切手を入れていない。
+
+### 検証
+- サーバー再起動 HTTP200・`/multi-agent/runs/<未知>`=404・合成 `.sse` を置いて復元EPが message/team_events/status を正しく組み立てるのを確認。
+- フロント：静的配信でスクリプト無エラー読込・新関数定義・restore-render を fetch スタブで通し、完了/実行中の両ケース（バナー・更新ボタン・run破棄/保持・ライブビューpane点灯・markdown描画）を確認。
+- **未実施＝実トークンの実走で、実際にリロードして後処理完走＋画面復元を目視**（次回・経路は検証済みと同一）。
+
+---
+
 ## 2026-06-29（セッション72）NERV外装＋並列強化＋役割固定ワーカー＋凡例色一致（v1.27.1〜1.27.4・feature/multi-agent-team）
 
 > ライブビューのフローティング窓を NERV ターミナル風に刷新し、マルチエージェントの「複数体が実際に並列で働く」を実現するため dispatcher の並列分解強化＋ワーカーの役割固定を入れた。さらに凡例と実物の状態色の不一致を解消。**このブランチのみ・main/for_windows 無変更。**

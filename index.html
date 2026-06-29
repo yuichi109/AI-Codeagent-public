@@ -1840,6 +1840,58 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   function teamLiveOpen(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.add('open'); }
   function teamLiveClose(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.remove('open'); _tlClearFloat(); }
 
+  // ===== マルチ実行のリロード/クラッシュ復元（サーバーの永続化ログから結果を取り戻す）=====
+  const TEAM_RUN_KEY = 'activeTeamRun';
+  function _saveActiveRun(runId, req){ if(!runId) return; try{ localStorage.setItem(TEAM_RUN_KEY, JSON.stringify({run_id:runId, request:req||'', ts:Date.now()})); }catch(e){} }
+  function _clearActiveRun(){ try{ localStorage.removeItem(TEAM_RUN_KEY); }catch(e){} }
+  function _getActiveRun(){ try{ return JSON.parse(localStorage.getItem(TEAM_RUN_KEY)||'null'); }catch(e){ return null; } }
+
+  // ページ読込時、未完了の run_id があればサーバーから結果を取り戻して画面に復元する
+  async function restoreActiveTeamRun(){
+    const a = _getActiveRun();
+    if(!a || !a.run_id) return;
+    if(a.ts && Date.now()-a.ts > 24*3600*1000){ _clearActiveRun(); return; }   // 24h超は破棄
+    let data;
+    try{
+      const r = await fetch(`/multi-agent/runs/${encodeURIComponent(a.run_id)}`);
+      if(r.status === 404){ _clearActiveRun(); return; }
+      if(!r.ok) return;
+      data = await r.json();
+    }catch(e){ return; }
+    // ライブビュー復元（保存済みイベント列を既存ハンドラで再生）
+    if(data.team_events && data.team_events.length){
+      resetTeamLive();
+      data.team_events.forEach(ev => { try{ handleTeamEvent(ev); }catch(e){} });
+    }
+    // 復元バナー＋本文を新しいターンとして差し込む
+    const running = (data.status === 'running');
+    const turnEl = createTurnEl();
+    if(a.request) appendMsg(turnEl, 'user', a.request);
+    const note = document.createElement('div');
+    note.className = 'restore-note';
+    note.style.cssText = 'margin:4px 0;padding:6px 10px;border-radius:8px;font-size:12px;'
+      + (running ? 'background:rgba(245,160,0,.12);color:#f5a000;border:1px solid rgba(245,160,0,.35);'
+                 : 'background:rgba(25,214,120,.10);color:#19d678;border:1px solid rgba(25,214,120,.30);');
+    note.textContent = running
+      ? '↩️ 前回のマルチ実行を復元（まだ実行中です。完了後に「更新」で最新結果を取得）'
+      : '↩️ 前回のマルチ実行を復元しました（完了済み）';
+    turnEl.appendChild(note);
+    if(running){
+      const btn = document.createElement('button');
+      btn.textContent = '🔄 更新';
+      btn.style.cssText = 'margin:2px 0 6px;padding:4px 10px;font-size:12px;cursor:pointer;border-radius:6px;';
+      btn.onclick = () => { turnEl.remove(); restoreActiveTeamRun(); };
+      turnEl.appendChild(btn);
+    }
+    if(data.message){
+      const ai = appendMsg(turnEl, 'ai', '');
+      setAiContent(ai, stripThink(data.message));
+    }
+    const chatEl = document.getElementById('chat');
+    if(chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+    if(!running) _clearActiveRun();   // 完了したら追跡終了
+  }
+
   // 8役 → MAGI三賢者グルーピング（dispatcher=統括 / coding,infra,debug=実装 / research,design,security,docs=知識）
   const TL_MAGI = [
     { key:'BALTHASAR', label:'BALTHASAR・1', sub:'統括', roles:['dispatcher'],                       color:'#f5a000' },
@@ -5521,6 +5573,9 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           try { data = JSON.parse(line.slice(6)); } catch { continue; }
           if (data.type === 'team_event') {
             handleTeamEvent(data.event);
+          } else if (data.type === 'run_started') {
+            // マルチ実行が永続化された。run_id を保持し、リロード/クラッシュ後の復元に使う
+            _saveActiveRun(data.run_id, text);
           } else if (data.type === 'tool_start') {
             genPhase = data.name; updateGenStatus();
             updateStatusLine(statusEl, getToolStatusText(data.name, data.args));
@@ -5742,6 +5797,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
               _populateApprovePanel(panel);
             }
           } else if (data.type === 'answer_done') {
+            // マルチ実行が正常完了したので復元用 run_id を破棄
+            _clearActiveRun();
             // plan_ready が来ていない場合はペンディング解除
             if (!_maPendingJobId) { _updatePlanConfirmUI(false); _updateContinueUI(false); }
             // 読み上げ
@@ -5777,6 +5834,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       }
     } catch(e) {
       if (e.name === 'AbortError') {
+        // ユーザーが停止＝この画面では復元しない（裏のドライバは完走するが追跡をやめる）
+        _clearActiveRun();
         setAiContent(getOrCreateAiMsg(), (finalAnswer ? stripThink(finalAnswer) : '') + ' [停止]');
       } else {
         getOrCreateAiMsg().textContent = `エラー: ${e.message}`;
@@ -5805,6 +5864,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 
   // ---- 起動時復元 ----
   loadHistory();
+  restoreActiveTeamRun();   // 未完了のマルチ実行があれば結果を取り戻す（リロード/クラッシュ復元）
   updateScopeBar();
   initInboxButton();
   fetch('/version').then(r => r.json()).then(d => {

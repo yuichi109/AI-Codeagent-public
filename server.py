@@ -2374,6 +2374,105 @@ def _build_role_workers(plan: dict, max_parallel: int) -> list[tuple[str, str]]:
     return workers or [("general-1", "")]
 
 
+# =====================================================================
+# マルチエージェント実行の永続化（リロード/クラッシュ後も結果を失わない・C案）
+# 既存の team_agent_stream / single_team_stream / multi_agent_stream は無改修。
+# /chat はこれらをバックグラウンドのドライバ（_drive_team_run）で回し、SSE チャンクを
+# ディスク（workspace/.agent-runs/<run_id>.sse）へ逐次保存する。クライアントが切れても
+# ドライバは生き残り、後処理（反映先統一・納品ゲート・最終報告書）まで完走して結果を残す。
+# リロード/クラッシュ後は GET /multi-agent/runs/<run_id> で保存ログから結果を復元する。
+# =====================================================================
+_TEAM_RUNS: dict[str, dict] = {}          # run_id -> {"subs": set[asyncio.Queue], "status": str}
+_RUNS_DIR = ALLOWED_WORK_DIR / ".agent-runs"
+
+
+def _run_sse_path(run_id: str) -> Path:
+    return _RUNS_DIR / f"{run_id}.sse"
+
+
+def _run_meta_path(run_id: str) -> Path:
+    return _RUNS_DIR / f"{run_id}.meta.json"
+
+
+def _prune_team_runs(keep: int = 30) -> None:
+    """直近 keep 件だけ残し、古い実行ログ（.sse / .meta.json）を削除する。"""
+    if not _RUNS_DIR.is_dir():
+        return
+    try:
+        metas = sorted(_RUNS_DIR.glob("*.meta.json"), key=lambda p: p.stat().st_mtime)
+        for m in (metas[:-keep] if keep > 0 else metas):
+            rid = m.name[:-len(".meta.json")]
+            m.unlink(missing_ok=True)
+            _run_sse_path(rid).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_run_meta(run_id: str, **fields) -> None:
+    try:
+        _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        p = _run_meta_path(run_id)
+        cur: dict = {}
+        if p.exists():
+            try:
+                cur = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                cur = {}
+        cur.update(fields)
+        p.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def _drive_team_run(run_id: str, stream, meta: dict) -> None:
+    """stream（team/single/pipeline）を最後まで消費し、SSE チャンクをディスクへ保存しつつ
+    接続中のクライアントへ中継する独立タスク。クライアント切断後も生き残り、後処理まで完走する。"""
+    _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    _write_run_meta(
+        run_id, status="running", started_at=datetime.now().isoformat(),
+        request=meta.get("request", ""), mode=meta.get("mode", ""), scope=meta.get("scope", ""),
+    )
+    status = "done"
+
+    def _fanout(chunk: str) -> None:
+        run = _TEAM_RUNS.get(run_id)
+        if run:
+            for q in list(run["subs"]):
+                q.put_nowait(chunk)
+
+    try:
+        with _run_sse_path(run_id).open("a", encoding="utf-8") as f:
+            async for chunk in stream:
+                try:
+                    f.write(chunk)
+                    f.flush()
+                except OSError:
+                    pass
+                _fanout(chunk)
+    except Exception as e:
+        status = "failed"
+        import traceback
+        print("[team-run] driver error:", traceback.format_exc())
+        err = "data: " + json.dumps(
+            {"type": "answer_chunk", "content": f"\n❌ 実行エラー: {type(e).__name__}: {e}"},
+            ensure_ascii=False,
+        ) + "\n\n"
+        try:
+            with _run_sse_path(run_id).open("a", encoding="utf-8") as f:
+                f.write(err)
+        except OSError:
+            pass
+        _fanout(err)
+    finally:
+        _write_run_meta(run_id, status=status, finished_at=datetime.now().isoformat())
+        run = _TEAM_RUNS.get(run_id)
+        if run:
+            run["status"] = status
+            for q in list(run["subs"]):
+                q.put_nowait(None)
+        _prune_team_runs()
+
+
 async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False, resume_action: str = ""):
     """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
     Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
@@ -4018,12 +4117,94 @@ async def chat(req: ChatRequest):
             stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test, req.resume_action)
         else:
             stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
+        # --- C案: 実行をリクエストから切り離して永続化（リロード/クラッシュ後も結果を失わない）---
+        # ドライバ（独立タスク）が stream を完走させ SSE をディスクへ保存。クライアントが切れても
+        # 後処理まで終わって結果が残る。HTTP レスポンスは購読者として中継するだけ。
+        run_id = uuid.uuid4().hex[:12]
+        _TEAM_RUNS[run_id] = {"subs": set(), "status": "running"}
+        _run_meta = {"request": (req.message or "")[:200], "mode": method, "scope": req.workspace_scope or ""}
+        asyncio.create_task(_drive_team_run(run_id, stream, _run_meta))
+
+        async def _relay_team_run():
+            q: asyncio.Queue = asyncio.Queue()
+            run = _TEAM_RUNS.get(run_id)
+            if run is not None:
+                run["subs"].add(q)
+            # フロントはこの run_id を localStorage に保持し、リロード時に復元へ使う
+            yield "data: " + json.dumps({"type": "run_started", "run_id": run_id}, ensure_ascii=False) + "\n\n"
+            try:
+                while True:
+                    item = await q.get()
+                    if item is None:
+                        break
+                    yield item
+            finally:
+                r = _TEAM_RUNS.get(run_id)
+                if r is not None:
+                    r["subs"].discard(q)
+                    # 完了済みでもう誰も見ていなければレジストリから外す（ディスクには残る）
+                    if r.get("status") != "running" and not r["subs"]:
+                        _TEAM_RUNS.pop(run_id, None)
+
+        return StreamingResponse(_relay_team_run(), media_type="text/event-stream")
     else:
         # mode を優先解釈（後方互換: 旧 bypass_approval フラグも auto 扱いで尊重）
         plan_mode = (req.mode == "plan")
         bypass = (req.mode == "auto") or req.bypass_approval
         stream = agent_stream(req.message, req.history, req.images, bypass, req.no_think, req.workspace_scope, plan_mode, req.reasoning_effort)
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@app.get("/multi-agent/runs/{run_id}")
+async def get_team_run(run_id: str):
+    """リロード/クラッシュ後の結果復元用。保存済み SSE ログから、最終メッセージ・
+    ライブビュー用イベント列・状態を組み立てて返す。実行中なら status='running'。"""
+    if not run_id or "/" in run_id or ".." in run_id:
+        return JSONResponse({"error": "bad run_id"}, status_code=400)
+    meta: dict = {}
+    mp = _run_meta_path(run_id)
+    if mp.exists():
+        try:
+            meta = json.loads(mp.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    sse = _run_sse_path(run_id)
+    run = _TEAM_RUNS.get(run_id)
+    if not sse.exists():
+        if run is None and not meta:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({
+            "status": (run.get("status") if run else None) or meta.get("status") or "running",
+            "message": "", "team_events": [], "plan_ready": None, "meta": meta,
+        })
+    message_parts: list[str] = []
+    team_events: list[dict] = []
+    plan_ready = None
+    try:
+        for line in sse.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("data: "):
+                continue
+            try:
+                d = json.loads(line[6:])
+            except Exception:
+                continue
+            t = d.get("type")
+            if t == "answer_chunk":
+                message_parts.append(d.get("content", ""))
+            elif t == "team_event":
+                team_events.append(d.get("event", {}))
+            elif t == "plan_ready":
+                plan_ready = {"job_id": d.get("job_id", ""), "roles": d.get("roles", [])}
+    except OSError:
+        pass
+    status = (run.get("status") if run else None) or meta.get("status") or "done"
+    return JSONResponse({
+        "status": status,
+        "message": "".join(message_parts),
+        "team_events": team_events,
+        "plan_ready": plan_ready,
+        "meta": meta,
+    })
 
 
 # -----------------------------------------------------------------------

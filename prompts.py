@@ -887,34 +887,49 @@ AGENT_SYSTEM_PROMPTS: dict[str, str] = {
 ユーザーの指示を分析し、並列実行できるよう**依存関係つきのタスク**をJSON形式で返してください。
 
 ## 出力フォーマット（JSONのみ・余計なテキスト不要）
+★この例は意図的に「coding を複数に割って並列で走らせる」形にしてある。真似ること。
+設計(t1)は1つ、実装(t2/t3/t4)は**部分ごとに分けて全部 t1 だけに依存**＝同時に走る。最後の結合/テスト(t5)だけ全実装に依存。
 {{
   "max_parallel": 5,
   "tasks": {{
     "t1": {{
       "role": "design",
-      "prompt": "設計エージェントへの具体的な指示",
+      "prompt": "全体設計を design.md にまとめる。モジュール分割（盤面ロジック / 描画 / 入力）と各ファイルの責務・関数シグネチャを決める。",
       "depends_on": [],
       "files": ["design.md"],
       "timeout_sec": 180
     }},
     "t2": {{
       "role": "coding",
-      "prompt": "コーディングエージェントへの指示。design.md を参照すること。",
+      "prompt": "盤面ロジックを js/board.js に実装。design.md を参照。他の実装タスクとファイルは重複させない。",
       "depends_on": ["t1"],
-      "files": ["code/app.py"],
+      "files": ["js/board.js"],
       "timeout_sec": 300
     }},
     "t3": {{
+      "role": "coding",
+      "prompt": "描画を js/render.js に実装。design.md を参照。",
+      "depends_on": ["t1"],
+      "files": ["js/render.js"],
+      "timeout_sec": 300
+    }},
+    "t4": {{
+      "role": "coding",
+      "prompt": "入力処理を js/input.js に実装。design.md を参照。",
+      "depends_on": ["t1"],
+      "files": ["js/input.js"],
+      "timeout_sec": 300
+    }},
+    "t5": {{
       "role": "debug",
-      "prompt": "デバッグエージェントへの指示。code/ をテストすること。",
-      "depends_on": ["t2"],
+      "prompt": "全実装を結合して動作確認。コアロジックを node/python で実際に呼んでテストし、結果を test-result.md に書く。",
+      "depends_on": ["t2", "t3", "t4"],
       "files": ["test-result.md"],
       "timeout_sec": 600
     }}
   }},
   "acceptance": [
-    {{"cmd": "python3 code/app.py --selftest", "kind": "run", "expect_exit": 0}},
-    {{"cmd": "python3 code/server.py", "kind": "startup", "startup_sec": 3}}
+    {{"cmd": "node code/selftest.js", "kind": "run", "expect_exit": 0}}
   ]
 }}
 
@@ -937,6 +952,11 @@ AGENT_SYSTEM_PROMPTS: dict[str, str] = {
 ## チーム方式の設計指針（並列性を最大化すること）
 - タスクIDは t1, t2, ... の連番。各タスクに **role / prompt / depends_on / files / timeout_sec** を必ず付ける。
 - **depends_on**: 先に完了している必要のあるタスクIDだけを入れる。独立して進められるタスクは [] にする。
+- **★coding を1つの巨大タスクにまとめないこと（並列化の肝・最重要）。**
+  複数体のワーカーが控えているのに `design → coding(1個) → debug` の**一本鎖**にすると、構造上ずっと1体しか動けず残りは遊ぶ。
+  成果物に分離できる部分（画面/描画・コアロジック・入力・データ・各画面・各機能・複数ファイル等）が**少しでもあれば、部分ごとに別々の coding タスクへ割り**、
+  すべて設計タスクだけに `depends_on` を張る（互いには依存させない）。こうすると agent-2・agent-3 も同時に実装に入る。
+  **1ファイルに収まる本当に小さい実装のときだけ** coding を1つにしてよい。迷ったら割る方を選ぶ。
 - **互いに独立な同種作業（例: 複数ファイルの実装）は、決して直列に依存させないこと。**
   例: add.py / subtract.py / multiply.py / divide.py の4実装は、共通の設計(design)だけに依存させ、
   4つとも `depends_on: ["<設計タスクID>"]` にする（×t4→t5→t6 のように鎖でつながない）。こうすると並列で走る。

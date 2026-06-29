@@ -2351,6 +2351,29 @@ def _sse_team(event: dict) -> str:
     return f"data: {json.dumps({'type': 'team_event', 'event': event}, ensure_ascii=False)}\n\n"
 
 
+# 役割固定ワーカー割り当て: coding/infra は独立タスク数だけ並列、他役割は1体。
+# モデルは役割で決まるので、ワーカー＝役割に固定すると「同じ agent が全工程をやる」現象を防ぎ、
+# design→coding→debug が自然に別エージェントへ渡る。coding だけ複数体で並列性を維持する。
+_PARALLEL_ROLES = {"coding", "infra"}
+
+
+def _build_role_workers(plan: dict, max_parallel: int) -> list[tuple[str, str]]:
+    """plan のタスクから役割固定ワーカーを構築する。返り値 [(worker_name, bound_role), ...]。
+    coding/infra は「その役割の独立タスク数」だけ並列ワーカーを立てる（上限 max_parallel）。
+    他役割は1体（直列でよい工程）。worker_name は `<役割>-<連番>`。"""
+    tasks = plan.get("tasks", {}) or {}
+    role_counts: dict[str, int] = {}
+    for t in tasks.values():
+        r = (t.get("role") or "general")
+        role_counts[r] = role_counts.get(r, 0) + 1
+    workers: list[tuple[str, str]] = []
+    for role, cnt in role_counts.items():
+        k = max(1, min(cnt, max_parallel)) if role in _PARALLEL_ROLES else 1
+        for i in range(k):
+            workers.append((f"{role}-{i+1}", role))
+    return workers or [("general-1", "")]
+
+
 async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False, resume_action: str = ""):
     """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
     Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
@@ -2497,16 +2520,17 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         # 設定値を天井とし、計画が大きい値を出しても超えさせない。タスク数より多くは立てない。
         max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
         n_tasks = len(plan.get("tasks", {}))
-        n_workers = max(1, min(max_parallel, n_tasks))
-        workers = [f"agent-{i+1}" for i in range(n_workers)]
-        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(workers))}）が空いたタスクから並列で着手します\n\n")
+        worker_specs = _build_role_workers(plan, max_parallel)   # [(name, role), ...] 役割固定・coding は複数
+        worker_names = [w[0] for w in worker_specs]
+        n_workers = len(worker_names)
+        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(worker_names))}）が担当（役割）ごとに着手します\n\n")
 
         # ライブビュー（#team-live-pane）の骨格を先出し＝ワーカー/タスク/依存を先に描く
         _plan_tasks = {tid: {"role": t.get("role", ""), "files": t.get("files", []) or [],
                              "depends_on": t.get("depends_on", []) or []}
                        for tid, t in plan.get("tasks", {}).items()}
         yield _sse_team({"kind": "plan", "job_id": job_id, "mode": "team",
-                         "workers": workers, "tasks": _plan_tasks})
+                         "workers": worker_names, "tasks": _plan_tasks})
 
         sem = _asyncio.Semaphore(max_parallel)
         queue: _asyncio.Queue = _asyncio.Queue()
@@ -2515,10 +2539,10 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         # 全タスクが在りうる最大待ち時間（デッドロック保険）
         deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
 
-        async def worker(name: str):
-            coworkers = [w for w in workers if w != name]
+        async def worker(name: str, bound_role: str):
+            coworkers = [w for w in worker_names if w != name]
             while time.time() < deadline:
-                claimed = claim_task(job_dir, name)   # role=None: 役割を問わず実行可能なものを取る
+                claimed = claim_task(job_dir, name, role=bound_role)   # 役割固定: 自分の役割のタスクだけ取る
                 if claimed.get("none"):
                     if claimed.get("pending_remain"):
                         await _asyncio.sleep(2)   # 依存待ち
@@ -2636,7 +2660,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
 
         async def run_all():
             try:
-                await _asyncio.gather(*[worker(w) for w in workers])
+                await _asyncio.gather(*[worker(n, r) for n, r in worker_specs])
             finally:
                 queue.put_nowait(None)
 
@@ -2870,16 +2894,17 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
         init_team_job(plan, ctrl_dir)
         max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
         n_tasks = len(plan.get("tasks", {}))
-        n_workers = max(1, min(max_parallel, n_tasks))
-        workers = [f"agent-{i+1}" for i in range(n_workers)]
-        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(workers))}）が空いたタスクから並列で着手します\n\n")
+        worker_specs = _build_role_workers(plan, max_parallel)   # [(name, role), ...] 役割固定・coding は複数
+        worker_names = [w[0] for w in worker_specs]
+        n_workers = len(worker_names)
+        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(worker_names))}）が担当（役割）ごとに着手します\n\n")
 
         # ライブビュー（#team-live-pane）の骨格を先出し
         _plan_tasks = {tid: {"role": t.get("role", ""), "files": t.get("files", []) or [],
                              "depends_on": t.get("depends_on", []) or []}
                        for tid, t in plan.get("tasks", {}).items()}
         yield _sse_team({"kind": "plan", "job_id": job_id, "mode": "single",
-                         "workers": workers, "tasks": _plan_tasks})
+                         "workers": worker_names, "tasks": _plan_tasks})
 
         sem = _asyncio.Semaphore(max_parallel)
         queue: _asyncio.Queue = _asyncio.Queue()
@@ -2887,10 +2912,10 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
             queue.put_nowait(d)
         deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
 
-        async def worker(name: str):
-            coworkers = [w for w in workers if w != name]
+        async def worker(name: str, bound_role: str):
+            coworkers = [w for w in worker_names if w != name]
             while time.time() < deadline:
-                claimed = claim_task(ctrl_dir, name)
+                claimed = claim_task(ctrl_dir, name, role=bound_role)   # 役割固定: 自分の役割のタスクだけ取る
                 if claimed.get("none"):
                     if claimed.get("pending_remain"):
                         await _asyncio.sleep(2)
@@ -2997,7 +3022,7 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
 
         async def run_all():
             try:
-                await _asyncio.gather(*[worker(w) for w in workers])
+                await _asyncio.gather(*[worker(n, r) for n, r in worker_specs])
             finally:
                 queue.put_nowait(None)
 

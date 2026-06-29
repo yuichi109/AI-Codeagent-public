@@ -379,16 +379,25 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .tl-kcard { background:#1e1e2e; border:1px solid #313244; border-radius:8px; padding:5px 6px; margin-bottom:6px; font-size:10px; font-family:ui-monospace,monospace; }
   @keyframes tl-blink { 0%,100%{opacity:1} 50%{opacity:.3} }
   .tl-blink { animation:tl-blink 1s ease-in-out infinite; }
-  /* フローティングモード: ワーカー個別窓（PC専用・ドラッグ可） */
-  .tl-fwin { position:fixed; width:286px; background:#181825; border:1px solid #313244; border-radius:10px; box-shadow:0 10px 34px rgba(0,0,0,.65); z-index:8500; overflow:hidden; }
-  .tl-fwin.run { border-color:#f9a825; }
-  .tl-fwin.done { border-color:#2d3b29; }
-  .tl-fwin.fail { border-color:#5a2a2a; }
-  .tl-fhead { display:flex; align-items:center; gap:7px; padding:6px 9px; background:#1e1e2e; border-bottom:1px solid #313244; cursor:move; user-select:none; }
-  .tl-fgrip { color:#6c7086; font-size:13px; letter-spacing:-1px; flex-shrink:0; }
+  /* フローティングモード: ワーカー個別窓（PC専用・ドラッグ可／NERVターミナル風） */
+  .tl-fwin { position:fixed; width:286px; background:#0c0a08; border:1px solid #5a3408; border-radius:0; box-shadow:0 0 0 1px rgba(245,160,0,.12),0 10px 30px rgba(0,0,0,.7); z-index:8500; overflow:hidden; font-family:ui-monospace,Menlo,monospace; clip-path:polygon(0 0,100% 0,100% calc(100% - 15px),calc(100% - 15px) 100%,0 100%); }
+  .tl-fwin.run  { border-color:#ff6b00; box-shadow:0 0 0 1px rgba(255,107,0,.30),0 10px 30px rgba(0,0,0,.75); }
+  .tl-fwin.done { border-color:#2e6b3a; box-shadow:0 0 0 1px rgba(61,224,138,.18),0 10px 30px rgba(0,0,0,.75); }
+  .tl-fwin.fail { border-color:#7a2e2e; box-shadow:0 0 0 1px rgba(243,139,168,.18),0 10px 30px rgba(0,0,0,.75); }
+  .tl-fhead { display:flex; align-items:center; gap:7px; padding:6px 9px; background:#160f06; color:#ffb060; border-bottom:1px solid #5a3408; cursor:move; user-select:none; font-size:11px; font-weight:700; letter-spacing:.5px; }
+  .tl-fwin.run  .tl-fhead { background:#ff6b00; color:#1a0e02; border-bottom-color:#ff6b00; }
+  .tl-fwin.done .tl-fhead { background:#143620; color:#9ff0bd; border-bottom-color:#2e6b3a; }
+  .tl-fwin.fail .tl-fhead { background:#3a1414; color:#f5b8c4; border-bottom-color:#7a2e2e; }
+  .tl-fgrip { color:inherit; opacity:.55; font-size:13px; letter-spacing:-1px; flex-shrink:0; }
+  .tl-fav { width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; background:rgba(0,0,0,.45); color:inherit; }
+  .tl-fwin.run .tl-fav { background:#1a0e02; color:#ff6b00; }
+  .tl-fname { font-weight:700; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tl-fmagi { font-size:10px; font-weight:700; letter-spacing:0; opacity:.85; flex-shrink:0; }
   .tl-fbody { padding:8px 10px; max-height:260px; overflow-y:auto; }
-  .tl-fx { margin-left:auto; color:#6c7086; cursor:pointer; background:none; border:none; font-size:13px; padding:0 2px; }
-  .tl-fx:hover { color:#f38ba8; }
+  .tl-fmeta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:8px; font-size:10px; color:#7d756a; }
+  .tl-fmeta .tl-rtag { color:#cba6f7; border:1px solid #5a3a7a; background:none; }
+  .tl-fx { color:inherit; opacity:.7; cursor:pointer; background:none; border:none; font-size:13px; padding:0 2px; line-height:1; }
+  .tl-fx:hover { opacity:1; }
   @media (max-width:768px) { .tl-fwin { display:none !important; } }
 
   /* ---- BG Floating Panel ---- */
@@ -1922,7 +1931,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       const stat = it.status==='run' ? '● 実行中…' : (it.status==='ok' ? '✓' : '✕');
       feed += `<div class="tl-tool${it.status==='run'?' tl-blink':''}"><span class="tl-dot" style="background:${dot}"></span>`
         + `<span style="color:#a6adc8">${_tlEsc(getToolStatusText(it.tool, it.args))}</span>`
-        + `<span style="margin-left:auto;color:#6c7086">${stat}</span></div>`;
+        + `<span style="margin-left:auto;color:${dot}">${stat}</span></div>`;
     });
     return feed || `<div class="tl-tool" style="color:#6c7086">（ツール待機）</div>`;
   }
@@ -1937,7 +1946,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     return `<div class="tl-rail">${_tlRail(stage, finished)}<span style="margin-left:5px;color:${st.color}">${st.label}</span></div>`;
   }
   function _tlLaneHtml(w){
-    const init = (w.name||'').replace('agent-','A').toUpperCase();
+    const init = _tlInit(w);
     return `<div class="tl-lane ${_tlLaneCls(w)}">`
       + `<div style="display:flex;align-items:center;gap:9px;">`
       + `<div class="tl-av" style="background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
@@ -1989,15 +1998,34 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   function toggleTlMode(){ tlMode = (tlMode==='floating' ? 'docked' : 'floating'); localStorage.setItem('tlMode', tlMode); applyTlMode(); renderTeamLive(); }
   function tlFloatArrange(){ tlFloatPos = {}; _tlClearFloat(); renderTeamLive(); }
   function tlFloatClose(name){ const w=teamLive.workers[name]; if(w) w._closed=true; const el=tlFloatEls[name]; if(el){ el.remove(); delete tlFloatEls[name]; } }
+  function _tlMagiLabel(w){
+    const r = (w.role||'').toLowerCase();
+    const m = TL_MAGI.find(x => x.roles.includes(r));
+    return m ? m.label : '';
+  }
+  function _tlInit(w){
+    const name = w.name || '';
+    const num = (name.match(/(\d+)\s*$/) || ['',''])[1];
+    const m = TL_MAGI.find(x => x.roles.includes((w.role||'').toLowerCase()));
+    const ini = m ? m.key[0] : ((name.replace(/[^A-Za-z]/g,'')[0]) || 'A').toUpperCase();
+    return (ini + num) || name.toUpperCase();
+  }
+  function _tlFloatMetaHtml(w){
+    return (w.role ? `<span class="tl-rtag">${_tlEsc(w.role)}</span>` : '')
+      + (w.tid ? `<span>${_tlEsc(w.tid)}</span>` : '')
+      + (w.model ? `<span>${_tlEsc(w.model)}</span>` : '');
+  }
   function _tlFloatWinInner(w){
-    const init = (w.name||'').replace('agent-','A').toUpperCase();
+    const init = _tlInit(w);
+    const magi = _tlMagiLabel(w);
     return `<div class="tl-fhead">`
       + `<span class="tl-fgrip">⠿</span>`
-      + `<div class="tl-av" style="width:22px;height:22px;font-size:10px;background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
-      + `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0">${_tlMetaHtml(w)}</div>`
+      + `<div class="tl-fav">${_tlEsc(init)}</div>`
+      + `<span class="tl-fname">${_tlEsc(w.name)}</span>`
+      + (magi ? `<span class="tl-fmagi">${_tlEsc(magi)}</span>` : '')
       + `<button class="tl-fx" title="閉じる" onclick="tlFloatClose('${_tlEsc(w.name)}')">✕</button>`
       + `</div>`
-      + `<div class="tl-fbody">${_tlRailHtml(w)}<div class="tl-feed">${_tlFeedHtml(w)}</div></div>`;
+      + `<div class="tl-fbody"><div class="tl-fmeta">${_tlFloatMetaHtml(w)}</div>${_tlRailHtml(w)}<div class="tl-feed">${_tlFeedHtml(w)}</div></div>`;
   }
   function _tlRenderFloating(){
     const layer = document.getElementById('tl-float-layer'); if(!layer) return;

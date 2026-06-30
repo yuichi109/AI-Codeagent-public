@@ -4107,7 +4107,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     wrapper.className = `msg-wrapper ${cls}-wrapper`;
     const label = document.createElement('div');
     label.className = 'msg-role-label';
-    label.textContent = cls === 'user' ? 'You' : (_currentProviderName + (_currentModel ? ` (${shortModel(_currentModel)})` : ''));
+    label.textContent = cls === 'user' ? 'You' : (_currentProviderName + (_currentModel ? ` (${_currentModel})` : ''));
     wrapper.appendChild(label);
     const d = document.createElement('div');
     d.className = `msg ${cls}`;
@@ -5277,11 +5277,6 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         labelEl.innerHTML = (PROVIDER_SVG[_currentProviderType] || PROVIDER_SVG.openai_compatible) + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_currentProviderName}</span>`;
       }
     } catch(e) { /* 無視 */ }
-  }
-
-  function shortModel(name) {
-    if (!name) return '';
-    return name.length > 20 ? name.slice(0, 20) + '…' : name;
   }
 
   async function fetchProviderModels() {

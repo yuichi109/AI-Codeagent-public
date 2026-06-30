@@ -27,6 +27,9 @@
 - **ライブビューが開かない不具合（v1.28.0 の起動レース）**: `/chat` のマルチ分岐が `create_task(_drive_team_run)` でドライバを先に起動し、その後に `_relay_team_run` が購読キューを登録していた。ドライバは購読者ゼロの一瞬に最初のチャンク（**ペインを開く `plan` team_event**）を fan-out するため、ライブ視聴側だけ取りこぼし→右ペインが開かなかった（ディスクには残るので復元では見えていた）。修正＝**購読キューを `create_task` より前に `_TEAM_RUNS[run_id]["subs"]` へ登録**しレースを解消。即応(single)も同経路で同時に解消。保存SSE解析で team_event 43件(plan含む)送出を確認済み＝原因はフロント未受信と確定。**ユーザー実機OK**。
 - **MAGI箱のモデル名が後ろで切れる**: 審議パネル(`.mc-approve-model`)・EVA(`#eva-overlay .mc-model`)とも SVG `<text>` にフル名を入れていたが、長い名前が箱(viewBox)からはみ出し端でクリップされていた。修正＝`_fitSvgModelText(el, 98)` 新設＝はみ出す時だけ `textLength`+`lengthAdjust="spacingAndGlyphs"` で横圧縮して**全文表示**、短い名前は等倍のまま。両パネルに適用。静的プレビューで長/短/超長3ケースとも箱内・viewBox内に収まり短名は非伸長を確認。
 
+### 追補 v1.29.2: 応答ヘッダーのモデル名が「…」で切れる修正
+- AIターン上部のラベル `プロバイダー (モデル)` の初期表示が `shortModel()`（20文字で `…` 切り）を使っていたため「OPENROUTER (NVIDIA/NEMOTRON-3-NA…)」のように切れていた（ライブ更新・履歴復元側は元々全文）。修正＝初期ラベルも `_currentModel` を**全文表示**に。未使用化した `shortModel()` は削除（デッドコード除去）。`.msg-role-label` に省略CSSは無く、唯一の切り詰めは shortModel だったため、これで全経路で全文表示。
+
 ---
 
 ## 2026-06-29（セッション73）マルチ実行のリロード/クラッシュ復元（v1.28.0・feature/multi-agent-team）

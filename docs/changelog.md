@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-06-30（セッション75）統計ダッシュボード 第1弾＝モデル別利用割合（v1.30.0・feature/multi-agent-team）
+
+> 無人実行（スケジューラー/BG）が空振りしてないか・コスト感・どのモデルがどれだけ使われたかを一覧で見たい、というユーザー要望に対応する統計ダッシュボードの着手。**最重要要件＝肥大化させない**（自分以外の人にも気兼ねなく使ってほしい）ため、生ログは一切ためず**日次ロールアップだけを別DB `stats.db` に蓄積**する設計。第1の軸として合意した「**モデル別利用割合**」から実装。**このブランチのみ・main/for_windows 無変更。**
+
+### 統計DB（tools/stats_db.py・新規・別DB data/stats.db に隔離）
+- schedule_db と同流儀（別DB・WAL・`init_db()`）。既存の schedule.db / jobs.db には一切触れない。
+- **テーブルは `usage_daily` 1枚のみ**：`(day, provider, model)` を主キーにした集計行。`requests`/`prompt_tokens`/`completion_tokens`/`total_tokens` を持つ。
+- **肥大化回避の核**：`record_usage()` は **UPSERT 増分**（`ON CONFLICT(day,provider,model) DO UPDATE`）＝呼ばれた回数に比例して行が増えず、行数は「その日に使ったモデル数」だけ増える（10モデル×365日×5年≈18,000行＝数MB）。生ログは残さない。
+- **ハードキャップ**：`MAX_USAGE_ROWS=50000` 超で古い日からまとめて自動トリム（`_trim()`・既存 prune 文化と同流儀）。通常は到達しない安全弁。
+- 集計API用関数：`model_breakdown(days)`（モデル別・降順）／`daily_series(days)`（日別推移）／`totals(days)`（期間合計・NULLは0正規化）。`days=0/None` で全期間。
+
+### 記録の配線（server.py・チャット経路）
+- 既存の `token_usage` SSE 送出地点（最終chunkで usage が来る所）で `stats_db.record_usage(provider_type, 実応答モデル, prompt/completion/total)` を呼ぶ。**OpenRouter フォールバックで実際に応答したモデル（`_turn_served`）を記録**＝指定と実体がズレても実態が残る。統計失敗で応答を止めないよう try/except で握りつぶす。
+- 起動時に `stats_db.init_db()`（SCHEDULER_ENABLED に依存せず常時）。
+- **API**：`GET /stats/usage?days=30`（0=全期間）が `{totals, breakdown, daily}` を返す。
+- **既知の範囲**：今回の記録はチャット経路のみ。BG/定時（agent_core）は usage を取っていないため未記録＝次段で拡張予定。
+
+### ダッシュボードUI（index.html・📊 ヘッダーボタン → モーダル）
+- ヘッダー（定時⏰の隣）に `📊 利用統計` ボタン。モーダルは期間プルダウン（7/30/90日・全期間）と割合の基準切替（**呼び出し回数 / トークン量**）を持つ。
+- サマリーカード4枚（利用モデル数・呼び出し回数・合計トークン・入力/出力）＋**モデル別の利用割合を横棒バー**で表示（プロバイダー名チップ・実数・%）。Chart.js等の外部依存なし＝**純CSSバーでオフライン安全**。色は10色パレット循環。`_statsFmt()` で k/M 丸め、`_statsEsc()` でモデル名エスケープ。
+- 数値は `loadStats()`（API取得）→ `renderStats()`（描画）。基準切替は再fetchせず再描画のみ。
+
+### BG/定時（無人実行）の記録（agent_core.py）— 動機の本丸
+- チャットだけ記録では「無人実行が空振りしてないか・コスト感」という**本来の動機が満たせない**ため、BGワーカー（async_worker 別プロセス）の LLM ループにも記録を追加。`create_kwargs["stream_options"]={"include_usage": True}` を付け、最終chunkの usage で `stats_db.record_usage()`。OpenRouter は `chunk.model`（実応答モデル `_turn_served`）を記録。統計失敗で BG ジョブを止めないよう try/except。
+- **別プロセス安全**：BGワーカーは init_db を呼ばないため、`stats_db` に**遅延初期化**（`_initialized` フラグ＋`_ensure_init()`）を追加し、`record_usage()` 初回でスキーマを保証。SQLite WAL でサーバー/ワーカーの並行書き込みも安全。
+
+### 日別の推移グラフ（index.html）
+- モーダルに「日別の推移」セクションを追加。API が既に返している `daily`（日×合計）を**純SVG/CSSの縦棒**で表示（基準切替＝回数/トークンに連動・hover でツールチップ）。`_renderDailyChart(metric)` を `renderStats()` から呼ぶ。
+
+### 検証
+- stats_db ロールアップを単体テスト（UPSERT 増分・breakdown/totals/daily の集計値一致）。**遅延初期化**を別プロセス相当（init_db 未呼び出し）で record_usage→自動スキーマ生成を確認。サーバー再起動 active・ログ無エラー・`/stats/usage` 200（空DBで0・シード後に正しい集計）。static-preview に curl 検証済みJSONを注入し `renderStats()` 実行＝モデルバー・**日別棒7本**（06-24〜06-30・相対高さ/ツールチップ一致）・割合 62.5/25/12.5%（回数）⇄37.3/34.8/28.0%（トークン）一致、コンソール無エラー、**スクショ目視OK**。検証後にシードを削除し本番 stats.db はクリーン状態（実利用で蓄積開始）。
+
+### 残（次々段・roadmap に整理）
+- 推定コスト（単価表を config/.env に）／ジョブ成否率・平均所要時間（jobs.db）／スケジューラー代替フォールバック率（task_runs.actual_model）／Power BI 連携用 CSV/Excel エクスポート。
+
+---
+
 ## 2026-06-30（セッション74）スケジューラーのタスクごとモデル指定＋審議モード却下バグ修正（v1.29.0・feature/multi-agent-team）
 
 > 定時タスクは無人実行なので「後で空振りが分かる」のが痛い → 重要タスクほど賢いモデルを固定したいというユーザー要望に対応。タスクごとに実行モデルを指定でき、実行履歴に「実際に動いたモデル」も残るようにした。加えて、審議モードで計画を**却下したのにジョブが進行してしまうバグ**を修正。**このブランチのみ・main/for_windows 無変更。**

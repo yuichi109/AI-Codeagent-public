@@ -55,6 +55,7 @@ from tools.background_tools import run_background, check_background, kill_backgr
 from tools.rag_tools import rag_save, rag_search, rag_update_status, rag_list
 from tools.image_tools import generate_image, edit_image, watermark_image
 from tools.notify_tools import send_email
+from tools import stats_db
 
 # -----------------------------------------------------------------------
 # Tool registry (no show_mermaid_batch_refine_dialog — server-only UI tool)
@@ -1151,6 +1152,8 @@ async def run_agent(
         if tools_enabled:
             create_kwargs["tools"] = TOOLS
             create_kwargs["tool_choice"] = "auto"
+        # 利用統計用にトークン使用量を取得（チャット経路と同様）。
+        create_kwargs["stream_options"] = {"include_usage": True}
 
         # 推論エフォート（思考の深さ）: BG/定時は UI がないため .env の REASONING_EFFORT_BG で全体既定を決める（既定 medium）。
         # reasoning 非対応モデルに送ると 400 になるため、対応モデルのみに適用する。
@@ -1180,8 +1183,27 @@ async def run_agent(
 
         content_parts: list[str] = []
         tool_calls_map: dict[int, dict] = {}
+        _turn_served = provider_config.get("model", "")  # 実応答モデル（既定=指定モデル）
 
         async for chunk in stream:
+            # OpenRouter フォールバックで別モデルが応答したら実体を記録する
+            if provider_config.get("type") == "openrouter":
+                _served = getattr(chunk, "model", "") or ""
+                if _served:
+                    _turn_served = _served
+            # トークン使用量（最終chunk）→ 利用統計にロールアップ記録。
+            # 統計失敗で BG ジョブを止めないよう握りつぶす。
+            if getattr(chunk, "usage", None):
+                try:
+                    stats_db.record_usage(
+                        provider_config.get("type", "unknown"),
+                        _turn_served or provider_config.get("model", "unknown"),
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens,
+                    )
+                except Exception:
+                    pass
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta

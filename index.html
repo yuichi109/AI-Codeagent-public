@@ -589,6 +589,36 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .sched-inline { display:flex; gap:10px; } .sched-inline > * { flex:1; }
   .sched-toggle { font-size:12px; }
   .sched-empty { color:#6c7086; font-size:13px; text-align:center; padding:18px; }
+  /* ---- 統計ダッシュボード ---- */
+  #stats-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:210; align-items:center; justify-content:center; }
+  #stats-overlay.open { display:flex; }
+  #stats-modal { background:#1e1e2e; border:1px solid #313244; border-radius:12px; width:820px; max-width:96vw; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+  #stats-header { padding:14px 20px; border-bottom:1px solid #313244; font-size:15px; font-weight:bold; display:flex; align-items:center; gap:10px; }
+  #stats-header .sp { flex:1; }
+  #stats-close { background:#313244; color:#cdd6f4; border:none; border-radius:6px; width:28px; height:28px; cursor:pointer; font-size:14px; }
+  #stats-close:hover { background:#45475a; }
+  #stats-range { background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:5px 9px; font-size:12px; }
+  #stats-metric { background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:5px 9px; font-size:12px; }
+  #stats-body { padding:16px 20px; overflow-y:auto; flex:1; }
+  .stats-cards { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+  .stats-card { flex:1; min-width:120px; background:#181825; border:1px solid #313244; border-radius:10px; padding:12px 14px; }
+  .stats-card .sc-val { font-size:22px; font-weight:bold; color:#89b4fa; }
+  .stats-card .sc-lbl { font-size:11px; color:#9399b2; margin-top:3px; }
+  .stats-sec-title { font-size:13px; font-weight:bold; color:#cdd6f4; margin:6px 0 12px; }
+  .stats-bar-row { margin-bottom:11px; }
+  .stats-bar-head { display:flex; align-items:baseline; gap:8px; font-size:12px; margin-bottom:4px; }
+  .stats-bar-head .bh-model { font-weight:bold; color:#cdd6f4; word-break:break-all; }
+  .stats-bar-head .bh-prov { font-size:10px; color:#6c7086; background:#313244; padding:1px 6px; border-radius:5px; }
+  .stats-bar-head .bh-pct { margin-left:auto; color:#9399b2; font-variant-numeric:tabular-nums; }
+  .stats-bar-head .bh-val { color:#6c7086; font-variant-numeric:tabular-nums; }
+  .stats-bar-track { height:10px; background:#11111b; border-radius:5px; overflow:hidden; }
+  .stats-bar-fill { height:100%; border-radius:5px; transition:width 0.4s; }
+  .stats-empty { color:#6c7086; font-size:13px; text-align:center; padding:30px; }
+  .stats-daily-chart { display:flex; align-items:flex-end; gap:3px; height:120px; padding:4px 0; }
+  .stats-dbar-wrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0; }
+  .stats-dbar { width:100%; max-width:26px; background:#89b4fa; border-radius:3px 3px 0 0; transition:height 0.4s; }
+  .stats-dbar-lbl { font-size:9px; color:#6c7086; margin-top:4px; white-space:nowrap; transform:rotate(-0deg); }
+  .stats-dbar-wrap:hover .stats-dbar { background:#a6c4ff; }
   /* ---- ワークスペーススコープバー ---- */
   #workspace-scope-bar { padding: 3px 20px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 8px; font-size: 12px; flex-shrink: 0; transition: background 0.4s, border-color 0.4s; }
   #workspace-scope-bar.scoped { background: linear-gradient(90deg, #0d1f0f 0%, #181825 70%); border-bottom-color: #40a840; }
@@ -1042,6 +1072,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     <span class="hgrp">
       <button id="todo-btn" class="cbtn" data-tip="タスクリスト" onclick="toggleTodoPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span id="todo-badge"></span></button>
       <button id="schedule-btn" class="cbtn" data-tip="定時実行スケジューラー" onclick="openScheduleModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span id="schedule-badge"></span></button>
+      <button id="stats-btn" class="cbtn" data-tip="利用統計ダッシュボード" onclick="openStatsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button>
       <button id="tts-btn" class="cbtn" data-tip="AIの返答を読み上げ" onclick="toggleTTS()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
       <button id="cleanup-btn" class="cbtn" data-tip="ワークスペース掃除・保護リスト編集" onclick="openCleanupDirect()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12.6 9 23l-5-1-1-5L13.4 6.6"/><path d="M13.4 6.6 17 3l4 4-3.6 3.6z"/><line x1="6" y1="14" x2="10" y2="18"/></svg></button>
     </span>
@@ -1410,6 +1441,33 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         <span id="stpl-msg" style="margin-left:10px;font-size:12px;"></span>
         <div id="sched-template-list" style="margin-top:16px;"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 統計ダッシュボード -->
+<div id="stats-overlay" onclick="if(event.target===this)closeStatsModal()">
+  <div id="stats-modal">
+    <div id="stats-header">📊 利用統計
+      <select id="stats-range" onchange="loadStats()">
+        <option value="7">直近7日</option>
+        <option value="30" selected>直近30日</option>
+        <option value="90">直近90日</option>
+        <option value="0">全期間</option>
+      </select>
+      <select id="stats-metric" onchange="renderStats()">
+        <option value="requests" selected>呼び出し回数で割合</option>
+        <option value="total_tokens">トークン量で割合</option>
+      </select>
+      <span class="sp"></span>
+      <button id="stats-close" onclick="closeStatsModal()">✕</button>
+    </div>
+    <div id="stats-body">
+      <div class="stats-cards" id="stats-cards"></div>
+      <div class="stats-sec-title">モデル別の利用割合</div>
+      <div id="stats-breakdown"><div class="stats-empty">読み込み中…</div></div>
+      <div class="stats-sec-title" style="margin-top:20px;">日別の推移</div>
+      <div id="stats-daily"></div>
     </div>
   </div>
 </div>
@@ -8769,6 +8827,106 @@ document.addEventListener('mousemove', e => {
 window._pendingBgCards = null;
 // 復元したBGカードにも再実行バーを付ける（再実行リスト取得後に後追い）
 if (typeof refreshRerunModels === 'function') refreshRerunModels();
+
+// ===========================================================================
+// 統計ダッシュボード UI（第1の軸＝モデル別利用割合）
+// ===========================================================================
+let _statsData = null;
+const _STATS_COLORS = ['#89b4fa','#a6e3a1','#f9e2af','#f38ba8','#cba6f7','#94e2d5','#fab387','#74c7ec','#eba0ac','#b4befe'];
+
+function openStatsModal() {
+  document.getElementById('stats-overlay').classList.add('open');
+  loadStats();
+}
+function closeStatsModal() {
+  document.getElementById('stats-overlay').classList.remove('open');
+}
+function _statsEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _statsFmt(n) {
+  n = n || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k';
+  return String(n);
+}
+async function loadStats() {
+  const days = document.getElementById('stats-range').value;
+  const box = document.getElementById('stats-breakdown');
+  box.innerHTML = '<div class="stats-empty">読み込み中…</div>';
+  try {
+    const r = await fetch('/stats/usage?days=' + encodeURIComponent(days));
+    _statsData = await r.json();
+  } catch (e) {
+    box.innerHTML = '<div class="stats-empty">統計の取得に失敗しました。</div>';
+    return;
+  }
+  renderStats();
+}
+function renderStats() {
+  if (!_statsData) return;
+  const t = _statsData.totals || {};
+  const cards = document.getElementById('stats-cards');
+  cards.innerHTML = [
+    ['利用モデル数', _statsFmt(t.models)],
+    ['呼び出し回数', _statsFmt(t.requests)],
+    ['合計トークン', _statsFmt(t.total_tokens)],
+    ['入力 / 出力', _statsFmt(t.prompt_tokens) + ' / ' + _statsFmt(t.completion_tokens)],
+  ].map(([lbl, val]) =>
+    '<div class="stats-card"><div class="sc-val">' + val + '</div><div class="sc-lbl">' + lbl + '</div></div>'
+  ).join('');
+
+  const metric = document.getElementById('stats-metric').value;  // requests | total_tokens
+  const rows = (_statsData.breakdown || []);
+  const box = document.getElementById('stats-breakdown');
+  if (!rows.length) {
+    box.innerHTML = '<div class="stats-empty">まだ利用データがありません。チャットで何回かやり取りすると記録されます。</div>';
+    return;
+  }
+  _renderDailyChart(metric);
+  const sum = rows.reduce((a, r) => a + (r[metric] || 0), 0) || 1;
+  const max = Math.max.apply(null, rows.map(r => r[metric] || 0)) || 1;
+  box.innerHTML = rows.map((r, i) => {
+    const val = r[metric] || 0;
+    const pct = (val / sum * 100);
+    const width = (val / max * 100);
+    const color = _STATS_COLORS[i % _STATS_COLORS.length];
+    const valLabel = metric === 'requests'
+      ? (_statsFmt(val) + ' 回')
+      : (_statsFmt(val) + ' tok');
+    return '<div class="stats-bar-row">' +
+      '<div class="stats-bar-head">' +
+        '<span class="bh-model">' + _statsEsc(r.model || '不明') + '</span>' +
+        '<span class="bh-prov">' + _statsEsc(r.provider || '') + '</span>' +
+        '<span class="bh-val">' + valLabel + '</span>' +
+        '<span class="bh-pct">' + pct.toFixed(1) + '%</span>' +
+      '</div>' +
+      '<div class="stats-bar-track"><div class="stats-bar-fill" style="width:' + width + '%;background:' + color + '"></div></div>' +
+    '</div>';
+  }).join('');
+}
+
+function _renderDailyChart(metric) {
+  const days = (_statsData && _statsData.daily) || [];
+  const box = document.getElementById('stats-daily');
+  if (!box) return;
+  if (!days.length) {
+    box.innerHTML = '<div class="stats-empty">まだ推移データがありません。</div>';
+    return;
+  }
+  const max = Math.max.apply(null, days.map(d => d[metric] || 0)) || 1;
+  const unit = metric === 'requests' ? '回' : 'tok';
+  box.innerHTML = '<div class="stats-daily-chart">' + days.map(d => {
+    const v = d[metric] || 0;
+    const h = Math.max(2, v / max * 100);
+    const mmdd = (d.day || '').slice(5);  // MM-DD
+    const tip = mmdd + ' : ' + _statsFmt(v) + ' ' + unit;
+    return '<div class="stats-dbar-wrap" title="' + _statsEsc(tip) + '">' +
+      '<div class="stats-dbar" style="height:' + h + '%"></div>' +
+      '<div class="stats-dbar-lbl">' + _statsEsc(mmdd) + '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
 
 // ===========================================================================
 // 定時実行スケジューラー UI

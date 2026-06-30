@@ -84,6 +84,7 @@ from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SE
 from config import MULTI_AGENT_TEAM_ENABLED, MULTI_AGENT_MAX_PARALLEL, MULTI_AGENT_TIMEOUT_SEC as _MA_TIMEOUT_SEC
 from config import MULTI_AGENT_MAX_RETRIES, MULTI_AGENT_ESCALATE_PRESET, MULTI_AGENT_ESCALATE_MODEL
 from tools import schedule_db
+from tools import stats_db
 from tools.scheduler import scheduler_loop as _scheduler_loop
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup, archive_workspace
@@ -331,6 +332,12 @@ async def lifespan(app: FastAPI):
         text=True, encoding="utf-8",
     )
     print(f"[INFO] async_worker 起動 PID={_async_worker_proc.pid}", flush=True)
+
+    # 統計 DB 初期化（利用統計のロールアップ蓄積）。別DB stats.db に隔離。
+    try:
+        stats_db.init_db()
+    except Exception as e:
+        print(f"[WARN] stats_db 初期化失敗: {e}", flush=True)
 
     # 定時実行スケジューラー起動（in-process asyncio タスク）
     global _scheduler_task
@@ -3532,6 +3539,18 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             # トークン使用量（最終chunk）
             if chunk.usage:
                 yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens})}\n\n"
+                # 利用統計にロールアップ記録（モデル別の利用割合・別DB stats.db）。
+                # 統計失敗で応答を止めないよう握りつぶす。
+                try:
+                    stats_db.record_usage(
+                        _provider_config.get("type", "unknown"),
+                        _turn_served or _provider_config.get("model", "unknown"),
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens,
+                    )
+                except Exception:
+                    pass
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -4618,6 +4637,24 @@ async def schedule_run_decide_ep(run_id: int, req: RunDecideRequest):
             return JSONResponse({"error": str(e)}, status_code=500)
 
     return JSONResponse({"error": "action は 'run' か 'skip'"}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# 統計ダッシュボード（利用統計・モデル別利用割合）
+# ---------------------------------------------------------------------------
+@app.get("/stats/usage")
+async def stats_usage(days: int = 30):
+    """
+    利用統計の集計を返す。days で期間指定（0 で全期間）。
+    第1の軸＝モデル別利用割合（breakdown）。サマリー・日別推移も同梱。
+    """
+    d = None if days <= 0 else days
+    return JSONResponse({
+        "days": days,
+        "totals": stats_db.totals(d),
+        "breakdown": stats_db.model_breakdown(d),
+        "daily": stats_db.daily_series(d),
+    })
 
 
 @app.get("/async-agent/mcp-tools")

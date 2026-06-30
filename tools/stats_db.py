@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS usage_daily (
     model             TEXT NOT NULL,   -- 実応答モデル名
     requests          INTEGER NOT NULL DEFAULT 0,  -- LLM 呼び出し回数
     prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    cached_tokens     INTEGER NOT NULL DEFAULT 0,   -- prompt_tokens のうちキャッシュ読込だった分
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     total_tokens      INTEGER NOT NULL DEFAULT 0,
     updated_at        TEXT NOT NULL,
@@ -58,7 +59,17 @@ def init_db():
     global _initialized
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
     _initialized = True
+
+
+def _migrate(conn: sqlite3.Connection):
+    """既存DBへの後方互換マイグレーション（不足カラムを追加）。"""
+    cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(usage_daily)"
+    ).fetchall()}
+    if "cached_tokens" not in cols:
+        conn.execute("ALTER TABLE usage_daily ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
 
 
 def _ensure_init():
@@ -71,6 +82,25 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def cached_tokens_from_usage(usage) -> int:
+    """
+    OpenAI/Azure/OpenRouter 互換 usage オブジェクトから
+    キャッシュ読込トークン数を取り出す（無ければ 0）。
+    形：usage.prompt_tokens_details.cached_tokens（dict 形式も許容）。
+    """
+    try:
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details is None and isinstance(usage, dict):
+            details = usage.get("prompt_tokens_details")
+        if details is None:
+            return 0
+        if isinstance(details, dict):
+            return int(details.get("cached_tokens") or 0)
+        return int(getattr(details, "cached_tokens", 0) or 0)
+    except Exception:
+        return 0
+
+
 def _today() -> str:
     return date.today().isoformat()
 
@@ -81,18 +111,21 @@ def _today() -> str:
 
 def record_usage(provider: str, model: str,
                  prompt_tokens: int = 0, completion_tokens: int = 0,
-                 total_tokens: int = 0, day: str | None = None) -> None:
+                 total_tokens: int = 0, cached_tokens: int = 0,
+                 day: str | None = None) -> None:
     """
     1回の LLM 呼び出しぶんの利用を、その日の集計行に足し込む（UPSERT 増分）。
 
     生ログは残さない＝呼ばれても行が増えるのは「その日に初めて使ったモデル」のときだけ。
     数値が壊れた入力（None など）でも落ちないようガードする。
+    cached_tokens は prompt_tokens のうちキャッシュ読込だった分（≤ prompt_tokens）。
     """
     provider = (provider or "unknown").strip() or "unknown"
     model = (model or "unknown").strip() or "unknown"
     p = int(prompt_tokens or 0)
     c = int(completion_tokens or 0)
     t = int(total_tokens or 0) or (p + c)
+    cached = min(int(cached_tokens or 0), p)  # 念のため prompt を超えないよう丸める
     d = day or _today()
     ts = _now()
     _ensure_init()
@@ -100,17 +133,41 @@ def record_usage(provider: str, model: str,
         conn.execute(
             """INSERT INTO usage_daily
                    (day, provider, model, requests,
-                    prompt_tokens, completion_tokens, total_tokens, updated_at)
-               VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+                    prompt_tokens, cached_tokens, completion_tokens, total_tokens, updated_at)
+               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
                ON CONFLICT(day, provider, model) DO UPDATE SET
                    requests          = requests + 1,
                    prompt_tokens     = prompt_tokens + excluded.prompt_tokens,
+                   cached_tokens     = cached_tokens + excluded.cached_tokens,
                    completion_tokens = completion_tokens + excluded.completion_tokens,
                    total_tokens      = total_tokens + excluded.total_tokens,
                    updated_at        = excluded.updated_at""",
-            (d, provider, model, p, c, t, ts),
+            (d, provider, model, p, cached, c, t, ts),
         )
         _trim(conn)
+
+
+def record_response_usage(provider: str, response, fallback_model: str | None = None) -> None:
+    """
+    非ストリーミングの ChatCompletion レスポンスから利用を記録する。
+    マルチAI（dispatcher / 役割ワーカー / 最終レポート）は stream=False で呼ぶため、
+    response.usage がそのまま取れる。response.model（実応答モデル）を優先して記録。
+    呼び出し側を壊さないよう失敗は握りつぶす。
+    """
+    try:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return
+        model = getattr(response, "model", None) or fallback_model or "unknown"
+        record_usage(
+            provider, model,
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            total_tokens=getattr(usage, "total_tokens", 0) or 0,
+            cached_tokens=cached_tokens_from_usage(usage),
+        )
+    except Exception:
+        pass
 
 
 def _trim(conn: sqlite3.Connection):
@@ -151,6 +208,7 @@ def model_breakdown(days: int | None = 30) -> list[dict]:
         "SELECT provider, model, "
         "SUM(requests) AS requests, "
         "SUM(prompt_tokens) AS prompt_tokens, "
+        "SUM(cached_tokens) AS cached_tokens, "
         "SUM(completion_tokens) AS completion_tokens, "
         "SUM(total_tokens) AS total_tokens "
         "FROM usage_daily "
@@ -192,6 +250,7 @@ def totals(days: int | None = 30) -> dict:
         "COUNT(DISTINCT provider || '/' || model) AS models, "
         "SUM(requests) AS requests, "
         "SUM(prompt_tokens) AS prompt_tokens, "
+        "SUM(cached_tokens) AS cached_tokens, "
         "SUM(completion_tokens) AS completion_tokens, "
         "SUM(total_tokens) AS total_tokens "
         "FROM usage_daily "
@@ -204,6 +263,8 @@ def totals(days: int | None = 30) -> dict:
         row = conn.execute(sql, params).fetchone()
         d = dict(row) if row else {}
     # NULL（データ無し）を 0 に正規化
-    for k in ("models", "requests", "prompt_tokens", "completion_tokens", "total_tokens"):
+    for k in ("models", "requests", "prompt_tokens", "cached_tokens", "completion_tokens", "total_tokens"):
         d[k] = d.get(k) or 0
+    # キャッシュヒット率（prompt に占めるキャッシュ読込の割合）
+    d["cache_hit_rate"] = round(d["cached_tokens"] / d["prompt_tokens"] * 100, 1) if d["prompt_tokens"] else 0.0
     return d

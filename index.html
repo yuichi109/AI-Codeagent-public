@@ -603,7 +603,11 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .stats-cards { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
   .stats-card { flex:1; min-width:120px; background:#181825; border:1px solid #313244; border-radius:10px; padding:12px 14px; }
   .stats-card .sc-val { font-size:22px; font-weight:bold; color:#89b4fa; }
+  .stats-card .sc-val.sc-good { color:#a6e3a1; }
+  .stats-card .sc-val.sc-mid { color:#f9e2af; }
+  .stats-card .sc-val.sc-low { color:#f38ba8; }
   .stats-card .sc-lbl { font-size:11px; color:#9399b2; margin-top:3px; }
+  .stats-bar-head .bh-cache { font-size:10px; color:#94e2d5; background:#1e2b2b; padding:1px 6px; border-radius:5px; }
   .stats-sec-title { font-size:13px; font-weight:bold; color:#cdd6f4; margin:6px 0 12px; }
   .stats-bar-row { margin-bottom:11px; }
   .stats-bar-head { display:flex; align-items:baseline; gap:8px; font-size:12px; margin-bottom:4px; }
@@ -8867,13 +8871,16 @@ function renderStats() {
   if (!_statsData) return;
   const t = _statsData.totals || {};
   const cards = document.getElementById('stats-cards');
+  const cacheRate = (t.cache_hit_rate != null ? t.cache_hit_rate : 0);
+  const cacheCls = cacheRate >= 50 ? 'sc-good' : (cacheRate >= 20 ? 'sc-mid' : 'sc-low');
   cards.innerHTML = [
-    ['利用モデル数', _statsFmt(t.models)],
-    ['呼び出し回数', _statsFmt(t.requests)],
-    ['合計トークン', _statsFmt(t.total_tokens)],
-    ['入力 / 出力', _statsFmt(t.prompt_tokens) + ' / ' + _statsFmt(t.completion_tokens)],
-  ].map(([lbl, val]) =>
-    '<div class="stats-card"><div class="sc-val">' + val + '</div><div class="sc-lbl">' + lbl + '</div></div>'
+    ['利用モデル数', _statsFmt(t.models), ''],
+    ['呼び出し回数', _statsFmt(t.requests), ''],
+    ['合計トークン', _statsFmt(t.total_tokens), ''],
+    ['入力 / 出力', _statsFmt(t.prompt_tokens) + ' / ' + _statsFmt(t.completion_tokens), ''],
+    ['キャッシュ率', cacheRate + '%', cacheCls],
+  ].map(([lbl, val, cls]) =>
+    '<div class="stats-card"><div class="sc-val ' + cls + '">' + val + '</div><div class="sc-lbl">' + lbl + '</div></div>'
   ).join('');
 
   const metric = document.getElementById('stats-metric').value;  // requests | total_tokens
@@ -8894,10 +8901,15 @@ function renderStats() {
     const valLabel = metric === 'requests'
       ? (_statsFmt(val) + ' 回')
       : (_statsFmt(val) + ' tok');
+    const cr = (r.prompt_tokens > 0) ? Math.round((r.cached_tokens || 0) / r.prompt_tokens * 100) : null;
+    const cacheChip = (cr != null)
+      ? '<span class="bh-cache" title="入力トークンのうちキャッシュ読込だった割合">💾 ' + cr + '%</span>'
+      : '';
     return '<div class="stats-bar-row">' +
       '<div class="stats-bar-head">' +
         '<span class="bh-model">' + _statsEsc(r.model || '不明') + '</span>' +
         '<span class="bh-prov">' + _statsEsc(r.provider || '') + '</span>' +
+        cacheChip +
         '<span class="bh-val">' + valLabel + '</span>' +
         '<span class="bh-pct">' + pct.toFixed(1) + '%</span>' +
       '</div>' +

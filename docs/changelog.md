@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-30（セッション75 続き）統計ダッシュボード：キャッシュ可視化＋マルチAI記録（v1.31.0・feature/multi-agent-team）
+
+> 「キャッシュがちゃんと使われているか可視化したい」「マルチAIの消費も乗せたい」というユーザー要望に対応。実機でダッシュボードに 98回/54.7%キャッシュ率/マルチAIぶん込みで反映されることを確認済み。**このブランチのみ・main/for_windows 無変更。**
+
+### キャッシュ可視化（v1.31.0 前半）
+- `usage.prompt_tokens_details.cached_tokens` を拾う共通関数 `stats_db.cached_tokens_from_usage()`（オブジェクト/dict両対応）。
+- `stats_db.usage_daily` に `cached_tokens` 列＋後方互換マイグレーション（`_migrate`）。`record_usage(cached_tokens=)` で増分。`totals()` が `cache_hit_rate`（cached÷prompt）を返す。
+- 記録：チャット（server.py token_usage 地点）・BG/定時（agent_core.py）の両方で cached を記録。`token_usage` SSE にも `cached` を追加。**OpenRouter は extra_body に `usage:{include:true}` を追加**（両経路）＝詳細usageを応答に含めさせないと cached が取れないため。
+- UI（index.html）：サマリーに**キャッシュ率カード**（≥50%緑/20-50%黄/<20%赤）、モデル別バーに**💾キャッシュ率チップ**。
+- 調査メモ：OpenRouter のキャッシュは**配信プロバイダー依存**。`nvidia/nemotron-3-nano-30b-a3b` と `nemotron-3-super-120b-a12b` は配信全社（DeepInfra/Novita/Nebius/DekaLLM/DigitalOcean）が非対応で 0% が正しい。`deepseek-v4-flash/pro`・`nemotron-3-ultra-550b` は対応。0% はバグではない。
+
+### マルチAIの利用記録（v1.31.0 後半）— 計測漏れの解消
+- 問題：マルチAI（審議/即応のチーム実行）は `tools/multi_agent_tools.py` と `tools/team_tools.py` 経由で LLM を呼び、計測を入れた2箇所（チャットstream・BGワーカー）を通らず**ダッシュボードに乗っていなかった**。並列ワーカーが何度も呼ぶ＝最も消費する経路なのに漏れていた。
+- 修正：これらは全て `stream=False` で `response.usage` が直接取れるので、`stats_db.record_response_usage(provider, response, model)`（非ストリーミング用ヘルパー・自己防御つき）を5経路に追加：`dispatch_task` / `run_sub_agent`（反復ごと）/ `generate_final_report` / `run_team_member`（反復ごと）/ `dispatch_team_task`。
+- プロバイダー軸：server.py に `_preset_to_provider_type(preset_id)` を追加し、各呼び出し側で preset_id を `azure/foundry/openrouter/...` に正規化して渡す＝チャット/BGと同じ provider 軸へ合流。クロスプロバイダー（タスクごと別プロバイダー）でも正確。各関数に `provider: str="multi"` 引数を追加。
+- 検証：一時DB＋fakeレスポンスで record_response_usage 2件加算・`response.model` 優先・usage=None安全・provider正規化OK。再起動エラーなし。**実機スクショで反映確認**。
+
+### ⚠️ 既知の未対応（次回調査）
+- **審議モードで使った Gemini が記録されない**（ユーザー実機で確認）。原因候補＝まだ計測していない `.create()` 呼び出し（`_interpret_plan_response` ＝計画応答の解釈・その他 server.py の未計測 create 群）。審議の途中ステップが別経路で Gemini を呼んでいる可能性。次回 `chat.completions.create` を全箇所 grep して計測済みと突き合わせ、漏れに同じパターンで記録を追加する。
+
+### ⚠️ 反省（恒久ルール化）
+- このセッション中、検証の後片付けで本番 `data/stats.db` に `DELETE FROM usage_daily` を**2回**実行し、ユーザーの実利用データ（日次ロールアップ）を消した。**以降、統計の検証は一時DB（stats_test.db）に対してのみ行い、本番DBには READ 以外触らない。**
+
+---
+
 ## 2026-06-30（セッション75）統計ダッシュボード 第1弾＝モデル別利用割合（v1.30.0・feature/multi-agent-team）
 
 > 無人実行（スケジューラー/BG）が空振りしてないか・コスト感・どのモデルがどれだけ使われたかを一覧で見たい、というユーザー要望に対応する統計ダッシュボードの着手。**最重要要件＝肥大化させない**（自分以外の人にも気兼ねなく使ってほしい）ため、生ログは一切ためず**日次ロールアップだけを別DB `stats.db` に蓄積**する設計。第1の軸として合意した「**モデル別利用割合**」から実装。**このブランチのみ・main/for_windows 無変更。**

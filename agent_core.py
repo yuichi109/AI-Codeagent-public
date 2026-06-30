@@ -1169,7 +1169,7 @@ async def run_agent(
         # reasoning は対応モデルのみ OR 側で効き、非対応なら無視される。
         if provider_config.get("type") == "openrouter":
             _main = provider_config.get("model", "")
-            _extra = {"reasoning": {"effort": _eff}}
+            _extra = {"reasoning": {"effort": _eff}, "usage": {"include": True}}
             if OPENROUTER_FALLBACK_MODELS:
                 _extra["models"] = ([_main] + [m for m in OPENROUTER_FALLBACK_MODELS if m != _main])[:3]
                 _extra["route"] = "fallback"
@@ -1201,6 +1201,7 @@ async def run_agent(
                         prompt_tokens=chunk.usage.prompt_tokens,
                         completion_tokens=chunk.usage.completion_tokens,
                         total_tokens=chunk.usage.total_tokens,
+                        cached_tokens=stats_db.cached_tokens_from_usage(chunk.usage),
                     )
                 except Exception:
                     pass

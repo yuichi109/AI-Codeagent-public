@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Awaitable
 
 import config
+from tools import stats_db
 
 # 役割ごとに使えるツール名のリスト
 AGENT_ALLOWED_TOOLS: dict[str, list[str]] = {
@@ -34,6 +35,7 @@ async def dispatch_task(
     async_client,
     model: str,
     job_dir: Path,
+    provider: str = "multi",
 ) -> dict:
     """
     ディスパッチャーLLMを呼んでJSONタスク計画を生成する。
@@ -50,6 +52,7 @@ async def dispatch_task(
         ],
         response_format={"type": "json_object"},
     )
+    stats_db.record_response_usage(provider, response, model)
 
     raw = response.choices[0].message.content or "{}"
     try:
@@ -77,6 +80,7 @@ async def run_sub_agent(
     job_dir: Path,
     max_iterations: int | None = None,
     timeout_sec: int | None = None,
+    provider: str = "multi",
 ) -> str:
     """
     役割別agenticループ。
@@ -117,6 +121,7 @@ async def run_sub_agent(
             create_kwargs["tools"] = allowed_tools
 
         response = await async_client.chat.completions.create(**create_kwargs)
+        stats_db.record_response_usage(provider, response, model)
         msg = response.choices[0].message
 
         # メッセージをそのまま追加（model_dump は openai v1 以降で使用可）
@@ -150,6 +155,7 @@ async def generate_final_report(
     job_dir: Path,
     out_dir: Path | None = None,
     user_request: str = "",
+    provider: str = "multi",
 ) -> str:
     """全成果物ファイルを読んで最終レポートを生成する。
     job_dir を成果物の探索元、out_dir を final-report.md の書き出し先にする
@@ -217,6 +223,7 @@ async def generate_final_report(
         ],
         stream=False,
     )
+    stats_db.record_response_usage(provider, response, model)
 
     report = response.choices[0].message.content or "最終報告書の生成に失敗しました。"
     ((out_dir or job_dir) / "final-report.md").write_text(report, encoding="utf-8")

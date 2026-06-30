@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 import config
+from tools import stats_db
 
 
 def _is_rate_limit_error(e: Exception) -> bool:
@@ -906,6 +907,7 @@ async def run_team_member(
     timeout_sec: int | None = None,
     work_dir: Path | None = None,
     on_event: "Callable[[dict], None] | None" = None,
+    provider: str = "multi",
 ) -> str:
     """1タスクを実行する teammate のループ。ターン冒頭で自分宛 mailbox を機械的に注入する
     （弱いモデルが read_messages を呼び忘れても会話に取り込まれる）。
@@ -955,6 +957,7 @@ async def run_team_member(
             create_kwargs["tools"] = allowed
 
         response = await _create_with_backoff(async_client, create_kwargs)
+        stats_db.record_response_usage(provider, response, model)
         msg = response.choices[0].message
         messages.append(msg.model_dump(exclude_unset=True))
 
@@ -998,7 +1001,8 @@ async def run_team_member(
     return final_text
 
 
-async def dispatch_team_task(user_message: str, async_client, model: str, job_dir: Path) -> dict:
+async def dispatch_team_task(user_message: str, async_client, model: str, job_dir: Path,
+                             provider: str = "multi") -> dict:
     """チーム方式用のディスパッチャー。depends_on / files / role を持つ plan.json を生成する。"""
     from prompts import get_agent_system_prompt
 
@@ -1010,6 +1014,7 @@ async def dispatch_team_task(user_message: str, async_client, model: str, job_di
         ],
         response_format={"type": "json_object"},
     )
+    stats_db.record_response_usage(provider, response, model)
     raw = response.choices[0].message.content or "{}"
     try:
         plan = json.loads(raw)

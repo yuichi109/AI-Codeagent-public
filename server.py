@@ -2308,7 +2308,8 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             if action == "replan":
                 yield _sse("🔄 計画を修正中...\n\n")
                 revised_message = original_task + (f"\n\n【修正指示】{notes}" if notes else "")
-                plan = await dispatch_task(revised_message, d_client, d_model, job_dir)
+                plan = await dispatch_task(revised_message, d_client, d_model, job_dir,
+                                           provider=_preset_to_provider_type(d_preset))
                 plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 
                 roles = plan.get("roles", [])
@@ -2341,7 +2342,8 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             yield _sse(f"🤖 **マルチエージェントモード** (job: `{job_id}`)\n\n")
             yield _sse("📋 タスク分解中...\n")
 
-            plan = await dispatch_task(user_message, d_client, d_model, job_dir)
+            plan = await dispatch_task(user_message, d_client, d_model, job_dir,
+                                       provider=_preset_to_provider_type(d_preset))
             (job_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
             (job_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 
@@ -2385,6 +2387,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                     model=model,
                     job_dir=job_dir,
                     timeout_sec=task.get("timeout_sec"),
+                    provider=_preset_to_provider_type(preset_id),
                 )
                 yield _sse(f"  → 完了 ✅\n\n")
             except Exception as e:
@@ -2392,7 +2395,8 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                 print(f"[multi_agent] {role} エラー: {e}")
 
         yield _sse("📄 最終報告書を生成中...\n\n")
-        report = await generate_final_report(d_client, d_model, job_dir)
+        report = await generate_final_report(d_client, d_model, job_dir,
+                                             provider=_preset_to_provider_type(d_preset))
         yield _sse(f"---\n\n{report}\n\n")
         scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
         yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
@@ -2657,7 +2661,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             if action == "replan":
                 yield _sse("🔄 計画を修正中...\n\n")
                 revised_message = original_task + (f"\n\n【修正指示】{notes}" if notes else "")
-                plan = await dispatch_team_task(revised_message, d_client, d_model, job_dir)
+                plan = await dispatch_team_task(revised_message, d_client, d_model, job_dir,
+                                                provider=_preset_to_provider_type(d_preset))
                 plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
                 yield _sse(_plan_lines(plan))
                 yield _sse("\nこの内容でよろしいですか？\n")
@@ -2690,7 +2695,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                     "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
                 )
             _d_t0 = time.time()
-            plan = await dispatch_team_task(dispatch_input, d_client, d_model, base_dir)
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, base_dir,
+                                            provider=_preset_to_provider_type(d_preset))
             # 試行ログに「誰がタスク分解したか（ディスパッチャー＝上位モデル）」を先頭行として残す
             log_attempt(job_dir, worker="dispatcher", task_id="—", role="dispatch",
                         preset_id=d_preset, model=d_model, result="ok",
@@ -2807,6 +2813,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                                 base_executor=execute_tool_async, async_client=run_client,
                                 model=run_model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
                                 work_dir=work_dir, on_event=emit,
+                                provider=_preset_to_provider_type(run_preset),
                             )
                             emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "verify"})
                             # 検収の前に、迷子ファイルを宣言パスへ機械的に集約（モデル非依存の保証層）
@@ -2921,6 +2928,7 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
                         base_executor=execute_tool_async,
                         async_client=_make_async_client_for(fix_preset), model=fix_model,
                         job_dir=job_dir, work_dir=work_dir,
+                        provider=_preset_to_provider_type(fix_preset),
                     )
                     gate_problems = await _run_gate()
                 except Exception as fe:
@@ -2935,7 +2943,8 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
         yield _sse("\n📄 最終報告書を生成中...\n\n")
         # 成果物はスコープ(work_dir)から読み、報告書(final-report.md)は制御側(job_dir)に書く。
         # ユーザーの要望(original_task)を渡し「要望→どう対応したか」を冒頭に書かせる。
-        report = await generate_final_report(d_client, d_model, work_dir, out_dir=job_dir, user_request=original_task)
+        report = await generate_final_report(d_client, d_model, work_dir, out_dir=job_dir, user_request=original_task,
+                                             provider=_preset_to_provider_type(d_preset))
         if gate_problems:
             # 動かないものを「成功」と偽らない。先頭に未完成バナーと実エラーを明示。
             detail = "\n".join(f"- {p.splitlines()[0]}" for p in gate_problems[:5])
@@ -3050,7 +3059,8 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                 f"現在スコープにあるファイル:\n{scope_note}"
             )
             ctrl_dir.mkdir(parents=True, exist_ok=True)
-            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir)
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir,
+                                            provider=_preset_to_provider_type(d_preset))
             (ctrl_dir / "original_task.txt").write_text(original_task + f"\n\n追加指示: {user_message}", encoding="utf-8")
             (ctrl_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
             yield _sse(_plan_lines(plan) + "\n")
@@ -3073,7 +3083,8 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                     "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
                 )
             _d_t0 = time.time()
-            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir)
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir,
+                                            provider=_preset_to_provider_type(d_preset))
             # 試行ログに「誰がタスク分解したか（ディスパッチャー＝上位モデル）」を先頭行として残す
             log_attempt(ctrl_dir, worker="dispatcher", task_id="—", role="dispatch",
                         preset_id=d_preset, model=d_model, result="ok",
@@ -3171,6 +3182,7 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                                 base_executor=execute_tool_async, async_client=run_client,
                                 model=run_model, job_dir=ctrl_dir, timeout_sec=claimed.get("timeout_sec"),
                                 work_dir=work_dir, on_event=emit,
+                                provider=_preset_to_provider_type(run_preset),
                             )
                             emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "verify"})
                             relocated = reconcile_declared_files(ctrl_dir, claimed, work_dir=work_dir)
@@ -3511,6 +3523,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             _extra = {
                 "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": True},
                 "reasoning": {"effort": _eff},
+                # 詳細usage（cached_tokens 等）を応答に含めさせる＝キャッシュ可視化に必要
+                "usage": {"include": True},
             }
             # モデル間フォールバック: メインが失敗/レート制限時に順に別モデルへ。
             # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
@@ -3538,7 +3552,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         yield f"data: {json.dumps({'type': 'fallback_model', 'model': _served, 'requested': _main})}\n\n"
             # トークン使用量（最終chunk）
             if chunk.usage:
-                yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens})}\n\n"
+                _cached = stats_db.cached_tokens_from_usage(chunk.usage)
+                yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens, 'cached': _cached})}\n\n"
                 # 利用統計にロールアップ記録（モデル別の利用割合・別DB stats.db）。
                 # 統計失敗で応答を止めないよう握りつぶす。
                 try:
@@ -3548,6 +3563,7 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         prompt_tokens=chunk.usage.prompt_tokens,
                         completion_tokens=chunk.usage.completion_tokens,
                         total_tokens=chunk.usage.total_tokens,
+                        cached_tokens=_cached,
                     )
                 except Exception:
                     pass
@@ -5438,6 +5454,19 @@ def _save_ma_config(cfg: dict):
         _MA_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         print(f"[ma_config] save failed: {e}")
+
+
+def _preset_to_provider_type(preset_id: str) -> str:
+    """preset_id（azure / foundry2 / openrouter ...）を統計用プロバイダー種別へ正規化する。
+    マルチAIの利用記録を、チャット/BG と同じ provider 軸に合流させるため。"""
+    pid = (preset_id or "").strip()
+    if not pid:
+        return "multi"
+    if pid.startswith("foundry"):
+        return "foundry"
+    if pid in ("azure", "gemini", "openai", "groq", "openrouter"):
+        return pid
+    return pid  # ローカル等はそのまま
 
 
 def _make_async_client_for(preset_id: str):

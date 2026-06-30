@@ -2677,6 +2677,16 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     </div>`;
   }
 
+  // MAGI箱のSVGテキストにモデル名を入れる。長くて箱からはみ出す名前は端で切れて
+  // しまうので、はみ出す時だけ横方向に圧縮(textLength)して「全文」を表示する。短い名前は等倍のまま。
+  function _fitSvgModelText(el, boxW) {
+    el.removeAttribute('textLength'); el.removeAttribute('lengthAdjust');
+    let w = 0;
+    try { w = el.getComputedTextLength(); } catch (e) { /* 非表示等で測れない */ }
+    if (!w) w = (el.textContent || '').length * 5.4;   // 概算: monospace font-size9 ≈ 5.4px/字
+    if (w > boxW) { el.setAttribute('textLength', boxW); el.setAttribute('lengthAdjust', 'spacingAndGlyphs'); }
+  }
+
   async function _populateApprovePanel(panel) {
     try {
       if (!_magiCfgCache) { const r = await fetch('/multi-agent/config'); _magiCfgCache = await r.json(); }
@@ -2685,6 +2695,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       panel.querySelectorAll('.mc-approve-model').forEach(c => {
         const rc = set[c.dataset.role] || {};
         c.textContent = rc.model || '—';
+        c.title = (rc.preset_id ? rc.preset_id + ' / ' : '') + (rc.model || '');
+        _fitSvgModelText(c, 98);
       });
     } catch (e) { /* 取得失敗時はプレースホルダのまま */ }
   }
@@ -2814,6 +2826,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         const rc = set[roles[i]] || {};
         c.textContent = rc.model || '—';
         c.title = (rc.preset_id ? rc.preset_id + ' / ' : '') + (rc.model || '');
+        _fitSvgModelText(c, 98);
       });
     } catch (e) { /* 取得失敗時はプレースホルダのまま */ }
   }

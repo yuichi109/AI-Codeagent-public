@@ -4207,15 +4207,16 @@ async def chat(req: ChatRequest):
         # ドライバ（独立タスク）が stream を完走させ SSE をディスクへ保存。クライアントが切れても
         # 後処理まで終わって結果が残る。HTTP レスポンスは購読者として中継するだけ。
         run_id = uuid.uuid4().hex[:12]
-        _TEAM_RUNS[run_id] = {"subs": set(), "status": "running"}
+        # 購読キューを「ドライバ起動より前」に登録する。create_task で起こすドライバは
+        # 購読者ゼロの瞬間に最初のチャンク（ペインを開く plan team_event 等）を fan-out しうる。
+        # 先に subs へ入れておけば、その早期イベントもキューに溜まり取りこぼさない（ライブビューが出ない不具合の修正）。
+        _relay_q: asyncio.Queue = asyncio.Queue()
+        _TEAM_RUNS[run_id] = {"subs": {_relay_q}, "status": "running"}
         _run_meta = {"request": (req.message or "")[:200], "mode": method, "scope": req.workspace_scope or ""}
         asyncio.create_task(_drive_team_run(run_id, stream, _run_meta))
 
         async def _relay_team_run():
-            q: asyncio.Queue = asyncio.Queue()
-            run = _TEAM_RUNS.get(run_id)
-            if run is not None:
-                run["subs"].add(q)
+            q: asyncio.Queue = _relay_q
             # フロントはこの run_id を localStorage に保持し、リロード時に復元へ使う
             yield "data: " + json.dumps({"type": "run_started", "run_id": run_id}, ensure_ascii=False) + "\n\n"
             try:

@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-07-01（セッション76）審議モードの統計計測漏れ修正＋「この指摘で計画を修正」がキャンセルされるバグ修正（v1.31.1・feature/multi-agent-team）
+
+> 前回セッションの引き継ぎ（審議モードの Gemini が統計に記録されない）を調査・修正。加えてユーザー実機報告（審議パネルの「🔧 この指摘で計画を修正」を押すと計画修正依頼を出しているのにキャンセル扱いになる）も同時に修正。**このブランチのみ・main/for_windows 無変更。両方とも実機確認OK。**
+
+### 統計計測漏れの修正（3経路）
+- `chat.completions.create` を server.py 全箇所 grep → マルチエージェント関連で計測漏れが3箇所。
+  1. `/multi-agent/review-plan`（審議パネルのリサーチ役審査＝MELCHIOR）：ユーザー報告の本丸。
+  2. `_interpret_plan_response`（承認パネルでの execute/replan/cancel 判定）：引数に `preset_id` を追加し呼び出し2箇所を更新。
+  3. 即応型（single）の最終報告書生成。
+- いずれも `stream=False` の非ストリーミング呼び出しで、既存の `stats_db.record_response_usage(_preset_to_provider_type(preset), resp, model)` パターンを追加。
+- `classify_bg`/`mermaid_check`/`editor/complete`/`editor/chat` は審議モードと無関係の別系統のため今回は対象外（未計測のまま）。
+
+### 「この指摘で計画を修正」がキャンセルされるバグ修正
+- 原因：審議（チーム方式・`team_agent_stream`）の Phase2 分岐に、即応型（`multi_agent_stream`）にはある「`resume_action == "replan"` なら LLM分類を経由せず必ず再計画」の分岐が**欠けていた**。`replan` が `else`（LLM分類）に落ち、修正指示の文面を弱いモデル（DeepSeek-V4-Flash）が `cancel` と誤判定していた。
+- 再計画そのものの処理（`if action == "replan"`）はすでに存在しており、入口の分岐だけが漏れていた。
+- 修正：即応型と同じ構造に揃え、`resume_action == "replan"` を最優先で確定させるガードを追加（`server.py` `team_agent_stream`）。
+
 ## 2026-06-30（セッション75 続き）統計ダッシュボード：キャッシュ可視化＋マルチAI記録（v1.31.0・feature/multi-agent-team）
 
 > 「キャッシュがちゃんと使われているか可視化したい」「マルチAIの消費も乗せたい」というユーザー要望に対応。実機でダッシュボードに 98回/54.7%キャッシュ率/マルチAIぶん込みで反映されることを確認済み。**このブランチのみ・main/for_windows 無変更。**
@@ -22,8 +39,8 @@
 - プロバイダー軸：server.py に `_preset_to_provider_type(preset_id)` を追加し、各呼び出し側で preset_id を `azure/foundry/openrouter/...` に正規化して渡す＝チャット/BGと同じ provider 軸へ合流。クロスプロバイダー（タスクごと別プロバイダー）でも正確。各関数に `provider: str="multi"` 引数を追加。
 - 検証：一時DB＋fakeレスポンスで record_response_usage 2件加算・`response.model` 優先・usage=None安全・provider正規化OK。再起動エラーなし。**実機スクショで反映確認**。
 
-### ⚠️ 既知の未対応（次回調査）
-- **審議モードで使った Gemini が記録されない**（ユーザー実機で確認）。原因候補＝まだ計測していない `.create()` 呼び出し（`_interpret_plan_response` ＝計画応答の解釈・その他 server.py の未計測 create 群）。審議の途中ステップが別経路で Gemini を呼んでいる可能性。次回 `chat.completions.create` を全箇所 grep して計測済みと突き合わせ、漏れに同じパターンで記録を追加する。
+### ⚠️ 既知の未対応 → セッション76で解消
+- ~~審議モードで使った Gemini が記録されない~~ → **セッション76（v1.31.1）で修正済み**。詳細は上記参照。
 
 ### ⚠️ 反省（恒久ルール化）
 - このセッション中、検証の後片付けで本番 `data/stats.db` に `DELETE FROM usage_daily` を**2回**実行し、ユーザーの実利用データ（日次ロールアップ）を消した。**以降、統計の検証は一時DB（stats_test.db）に対してのみ行い、本番DBには READ 以外触らない。**

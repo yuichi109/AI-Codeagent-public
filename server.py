@@ -2218,7 +2218,7 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
         print(err)  # uvicornログに出力
 
 
-async def _interpret_plan_response(user_message: str, plan: dict, async_client, model: str) -> dict:
+async def _interpret_plan_response(user_message: str, plan: dict, async_client, model: str, preset_id: str = "") -> dict:
     """ユーザーの返答から action (execute / replan / cancel) を判定する"""
     from prompts import AGENT_ROLE_LABELS
     roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in plan.get("roles", []))
@@ -2241,6 +2241,10 @@ async def _interpret_plan_response(user_message: str, plan: dict, async_client, 
         temperature=0,
         max_completion_tokens=200,
     )
+    try:
+        stats_db.record_response_usage(_preset_to_provider_type(preset_id), resp, model)
+    except Exception:
+        pass
     try:
         return json.loads(resp.choices[0].message.content or "{}")
     except Exception:
@@ -2296,7 +2300,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                 # 承認パネルのボタンは意図が明確。LLM分類を挟まず確定指示を信じる。
                 action, notes = resume_action, ""
             else:
-                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
+                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model, d_preset)
                 action = action_result.get("action", "execute")
                 notes  = action_result.get("notes", "")
 
@@ -2643,13 +2647,19 @@ async def team_agent_stream(user_message: str, agent_mode: str = "balance", work
             original_task_file = job_dir / "original_task.txt"
             original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
 
-            # 承認パネルのボタン（▶実行 / ✕却下）は意図が明確なので、LLM分類を経由せず
-            # resume_action をそのまま信じる。却下なのに弱いモデルが execute に誤分類して
-            # ジョブが走り出す事故を防ぐ。自由入力の返答のみ分類にかける。
-            if resume_action in ("execute", "cancel"):
+            # 承認パネルのボタン（▶実行 / ✕却下 / 🔧この指摘で計画を修正）は意図が明確なので、
+            # LLM分類を経由せず resume_action をそのまま信じる。却下なのに弱いモデルが execute に
+            # 誤分類してジョブが走り出す事故、修正なのに cancel に化ける事故を防ぐ（プランA）。
+            # 自由入力の返答のみ分類にかける。
+            if resume_action == "replan":
+                # 審議の「この指摘で計画を修正」ボタン＝LLM分類を経由せず必ず再計画する。
+                # 指摘内容は user_message に入っている。
+                action = "replan"
+                notes  = user_message
+            elif resume_action in ("execute", "cancel"):
                 action, notes = resume_action, ""
             else:
-                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
+                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model, d_preset)
                 action = action_result.get("action", "execute")
                 notes  = action_result.get("notes", "")
 
@@ -3304,6 +3314,7 @@ async def single_team_stream(user_message: str, agent_mode: str = "balance", wor
                     ],
                     stream=False,
                 )
+                stats_db.record_response_usage(_preset_to_provider_type(d_preset), resp, d_model)
                 report = resp.choices[0].message.content or ""
             except Exception as re:
                 report = f"（報告書生成に失敗: {type(re).__name__}）"
@@ -5691,6 +5702,7 @@ async def ma_review_plan(body: dict):
             response_format={"type": "json_object"},
             temperature=0,
         )
+        stats_db.record_response_usage(_preset_to_provider_type(r_preset), resp, r_model)
         data = json.loads(resp.choices[0].message.content or "{}")
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"審議に失敗: {type(e).__name__}: {e}"}, status_code=500)

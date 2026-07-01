@@ -55,8 +55,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .gl-project-meta { font-size: 10px; color: #45475a; margin-top: 4px; display: flex; gap: 8px; align-items: center; }
   .gl-badge { padding: 1px 5px; border-radius: 3px; background: #313244; color: #6c7086; }
   #gitlab-status { padding: 24px 16px; text-align: center; color: #6c7086; font-size: 13px; }
-  #chat-wrapper { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; }
-  #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; }
+  #chat-wrapper { flex: 1; display: flex; flex-direction: row; overflow: hidden; min-height: 0; position: relative; }
+  #chat { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; position: relative; z-index: 1; }
   .turn { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; width: 100%; max-width: 860px; }
   /* 別モデルで再実行（各ターン下・普段は薄く、ホバーで点灯） */
   .rerun-bar { display: flex; align-items: center; gap: 6px; margin-left: 16px; opacity: 0; transition: opacity .12s; }
@@ -122,9 +122,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #input-box:focus-within { border-color: #89b4fa; }
   #input { background: transparent; border: none; color: #cdd6f4; font-size: 14px; outline: none; resize: none; line-height: 1.5; max-height: 200px; overflow-y: auto; padding: 0; width: 100%; }
   #image-preview-area { display: flex; gap: 8px; flex-wrap: wrap; }
-  #input-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  #input-left { display: flex; align-items: center; gap: 4px; }
-  #input-right { display: flex; align-items: center; gap: 6px; }
+  #input-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; row-gap: 8px; }
+  #input-left { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 6px; }
+  /* gen-status は入力欄の外（直上）へ出したので送信/停止は圧迫されない。flex-wrap は万一の保険（通常は1行） */
+  #input-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
   /* 統一アイコンボタン（添付・コード・直接保存・生成元画像・マイク） */
   .cbtn { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; background: transparent; color: #a6adc8; border: none; border-radius: 8px; cursor: pointer; transition: background 0.15s, color 0.15s; flex-shrink: 0; }
   .cbtn:hover { background: #45475a; color: #cdd6f4; }
@@ -179,9 +180,101 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #ma-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; background: transparent; color: #a6adc8; border: 1px solid #45475a; border-radius: 8px 0 0 8px; cursor: pointer; font-size: 12px; line-height: 1.4; transition: color 0.2s, border-color 0.2s; white-space: nowrap; }
   #ma-btn svg { width: 15px; height: 15px; }
   #ma-btn:hover { color: #cdd6f4; border-color: #6c7086; }
-  #ma-btn.active { color: #cba6f7; border-color: #cba6f7; font-weight: bold; }
-  #maq-dd .dd-btn { border-radius: 0 8px 8px 0; border-left: none; color: #a6adc8; }
-  #ma-btn.active + #maq-dd .dd-btn { color: #cba6f7; border-color: #cba6f7; }
+  /* マルチAI ON = エヴァンゲリオン風の赤ネオン明滅（文字＋枠） */
+  @keyframes evaNeonText {
+    0%, 100% { text-shadow: 0 0 3px #ff3b3b, 0 0 7px #ff0026; }
+    50%      { text-shadow: 0 0 7px #ff3b3b, 0 0 16px #ff0026, 0 0 26px #ff0026; }
+  }
+  @keyframes evaNeonBorder {
+    0%, 100% { border-color: #ff2a2a; box-shadow: 0 0 4px #ff0026, inset 0 0 4px rgba(255,0,38,0.35); }
+    50%      { border-color: #ff6060; box-shadow: 0 0 11px #ff0026, 0 0 20px #ff0026, inset 0 0 8px rgba(255,0,38,0.45); }
+  }
+  @keyframes evaNeonIcon {
+    0%, 100% { filter: drop-shadow(0 0 2px #ff0026); }
+    50%      { filter: drop-shadow(0 0 6px #ff0026) drop-shadow(0 0 10px #ff0026); }
+  }
+  #ma-btn.active { color: #ff5a5a; border-color: #ff2a2a; font-weight: bold; position: relative; z-index: 1; animation: evaNeonText 4.2s ease-in-out infinite, evaNeonBorder 4.2s ease-in-out infinite; }
+  #ma-btn.active svg { animation: evaNeonIcon 4.2s ease-in-out infinite; }
+  #maq-dd .dd-btn { border-radius: 0; border-left: none; color: #a6adc8; }
+  #ma-btn.active + #maq-dd .dd-btn { color: #ff5a5a; border-color: #ff2a2a; position: relative; z-index: 1; animation: evaNeonText 4.2s ease-in-out infinite, evaNeonBorder 4.2s ease-in-out infinite; }
+  #mat-dd .dd-btn { border-radius: 0 8px 8px 0; border-left: none; color: #a6adc8; }
+  #ma-btn.active ~ #mat-dd .dd-btn { color: #ff5a5a; border-color: #ff2a2a; position: relative; z-index: 1; animation: evaNeonText 4.2s ease-in-out infinite, evaNeonBorder 4.2s ease-in-out infinite; }
+  /* マルチAI発動中バナー（タイトル横・赤ネオン呼吸） */
+  /* 通常モード用＝緑の穏やかな呼吸（エヴァ計器の正常表示色） */
+  @keyframes evaNeonTextG {
+    0%, 100% { text-shadow: 0 0 2px #1aff8c, 0 0 5px #00b894; }
+    50%      { text-shadow: 0 0 5px #1aff8c, 0 0 11px #00b894; }
+  }
+  @keyframes evaNeonBorderG {
+    0%, 100% { border-color: #1f9c5e; box-shadow: 0 0 3px rgba(0,230,118,0.30), inset 0 0 3px rgba(0,230,118,0.20); }
+    50%      { border-color: #2bd66a; box-shadow: 0 0 8px rgba(0,230,118,0.45), inset 0 0 5px rgba(0,230,118,0.30); }
+  }
+  #ma-eva-banner {
+    display: none; align-items: center; gap: 8px; margin-left: 12px; padding: 3px 18px;
+    vertical-align: middle; white-space: nowrap; user-select: none;
+    border: 1px solid #ff2a2a; border-radius: 3px;
+    /* 黒地＋左右に黄黒ハザードライン（エヴァ機密カード踏襲） */
+    background:
+      repeating-linear-gradient(45deg, #f5c800 0 5px, #141414 5px 10px) left center / 16px 100% no-repeat,
+      repeating-linear-gradient(-45deg, #f5c800 0 5px, #141414 5px 10px) right center / 16px 100% no-repeat,
+      #0a0a0a;
+  }
+  #ma-eva-banner.show { display: inline-flex; }
+  #ma-eva-banner .eva-kbox {
+    font-size: 12px; font-weight: 900; letter-spacing: 2px;
+    padding: 0 5px; border: 1px solid currentColor; border-radius: 2px; line-height: 1.5;
+  }
+  #ma-eva-banner .eva-main { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; }
+  /* 警報＝マルチAI ON（赤・強め・速め） */
+  #ma-eva-banner.alert            { border-color: #ff2a2a; animation: evaNeonBorder 4.2s ease-in-out infinite; }
+  #ma-eva-banner.alert .eva-kbox  { color: #ff2a2a; animation: evaNeonText 4.2s ease-in-out infinite; }
+  #ma-eva-banner.alert .eva-main  { color: #ff3b3b; animation: evaNeonText 4.2s ease-in-out infinite; }
+  /* 情報＝通常モード（緑・穏やか・ゆっくり） */
+  #ma-eva-banner.info             { border-color: #1f9c5e; animation: evaNeonBorderG 5.6s ease-in-out infinite; }
+  #ma-eva-banner.info .eva-kbox   { color: #2bd66a; animation: evaNeonTextG 5.6s ease-in-out infinite; }
+  #ma-eva-banner.info .eva-main   { color: #3be08a; animation: evaNeonTextG 5.6s ease-in-out infinite; }
+  /* ===== エヴァモード：ヘッダーのトグルボタン ＋ チャット背面オーバーレイ（既定OFF） ===== */
+  #eva-toggle-btn { display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:4px 9px; background:transparent; color:#a6adc8; border:1px solid #45475a; border-radius:8px; cursor:pointer; font-size:12px; white-space:nowrap; transition:color .2s, border-color .2s; }
+  #eva-toggle-btn:hover { color:#cdd6f4; border-color:#6c7086; }
+  body.eva-on #eva-toggle-btn { color:#ff5a5a; border-color:#ff2a2a; font-weight:bold; animation:evaNeonBorder 4.2s ease-in-out infinite; }
+  body.eva-on.eva-info #eva-toggle-btn { color:#3be08a; border-color:#1f9c5e; animation:evaNeonBorderG 5.6s ease-in-out infinite; }
+  #eva-overlay { position:absolute; inset:0; z-index:0; display:none; overflow:hidden; pointer-events:none; color:#ff3b3b; }
+  body.eva-on #eva-overlay { display:block; }
+  body.eva-on.eva-info #eva-overlay { color:#3be08a; }
+  #eva-overlay .eo-haz { position:absolute; left:-40px; right:-40px; height:16px; background-image:repeating-linear-gradient(45deg,#f5c800 0 11px,#141414 11px 22px); opacity:.30; will-change:transform; }
+  body.eva-on.eva-info #eva-overlay .eo-haz { opacity:.15; }
+  #eva-overlay .eo-haz.t { top:0; }
+  #eva-overlay .eo-haz.b { bottom:0; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-haz.t { animation:evaHazT 2s linear infinite; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-haz.b { animation:evaHazB 2s linear infinite; }
+  @keyframes evaHazT { from { transform:translateX(0); } to { transform:translateX(31.11px); } }
+  @keyframes evaHazB { from { transform:translateX(0); } to { transform:translateX(-31.11px); } }
+  #eva-overlay .eo-scan { position:absolute; inset:0; background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,.04) 0 1px,transparent 1px 3px); animation:evaScan 6s linear infinite; opacity:.45; }
+  @keyframes evaScan { from { background-position-y:0; } to { background-position-y:120px; } }
+  #eva-overlay .eo-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  #eva-overlay .eo-big { font-size:140px; font-weight:900; letter-spacing:16px; line-height:1; margin:0; opacity:.17; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-big { animation:evaNeonText 4.2s ease-in-out infinite; }
+  body.eva-on.eva-info #eva-overlay .eo-big { animation:evaNeonTextG 5.6s ease-in-out infinite; }
+  #eva-overlay .eo-sub { font-size:13px; font-weight:800; letter-spacing:6px; margin-top:14px; opacity:.5; }
+  #eva-overlay .eo-tag { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:3px; border:1px solid currentColor; border-radius:3px; padding:3px 12px; opacity:.55; }
+  #eva-overlay .eo-reticle { position:absolute; top:50%; left:50%; width:340px; height:340px; margin:-170px 0 0 -170px; border-radius:50%; border:1px dashed currentColor; opacity:.14; }
+  #eva-overlay .eo-reticle:before, #eva-overlay .eo-reticle:after { content:""; position:absolute; background:currentColor; opacity:.5; }
+  #eva-overlay .eo-reticle:before { left:50%; top:-16px; bottom:-16px; width:1px; transform:translateX(-50%); }
+  #eva-overlay .eo-reticle:after { top:50%; left:-16px; right:-16px; height:1px; transform:translateY(-50%); }
+  #eva-overlay .eo-ring { position:absolute; top:50%; left:50%; width:360px; height:360px; margin:-180px 0 0 -180px; border-radius:50%; border:3px solid currentColor; opacity:.12; animation:evaRing 3.6s ease-out infinite; will-change:transform,opacity; }
+  body.eva-on.eva-info #eva-overlay .eo-reticle, body.eva-on.eva-info #eva-overlay .eo-ring { display:none; }
+  @keyframes evaRing { 0% { transform:scale(.3); opacity:.6; } 100% { transform:scale(1.6); opacity:0; } }
+  #eva-overlay .eo-warn { position:absolute; top:20px; left:0; right:0; text-align:center; font-size:12px; font-weight:900; letter-spacing:6px; opacity:.55; }
+  body.eva-on:not(.eva-info) #eva-overlay .eo-warn { animation:evaStrobe 1s steps(2,end) infinite; }
+  @keyframes evaStrobe { 0%,49% { opacity:.6; } 50%,100% { opacity:.12; } }
+  #eva-overlay .eo-sync { position:absolute; top:20px; right:18px; font-size:12px; font-weight:800; letter-spacing:2px; opacity:.5; font-variant-numeric:tabular-nums; }
+  #eva-overlay .eo-magi { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); width:300px; max-width:62%; opacity:.45; }
+  #eva-overlay .eo-magi-svg { width:100%; height:auto; }
+  body.eva-on.eva-info #eva-overlay .eo-magi { display:none; }
+  #eva-overlay .eo-node { font-size:10px; font-weight:800; letter-spacing:2px; border:1px solid currentColor; border-radius:3px; padding:3px 8px; display:flex; align-items:center; gap:6px; }
+  #eva-overlay .eo-dot { width:7px; height:7px; border-radius:50%; background:currentColor; animation:evaDot 1.4s ease-in-out infinite; }
+  #eva-overlay .eo-node:nth-child(2) .eo-dot { animation-delay:.45s; } #eva-overlay .eo-node:nth-child(3) .eo-dot { animation-delay:.9s; }
+  @keyframes evaDot { 0%,100% { opacity:.25; } 50% { opacity:1; } }
   #srcimg-clear-btn { display: inline-grid; place-items: center; height: 32px; padding: 0 7px; background: rgba(137,180,250,0.18); color: #a6adc8; border: none; border-radius: 0 8px 8px 0; cursor: pointer; font-size: 13px; transition: color 0.15s, background 0.15s; }
   #srcimg-clear-btn:hover { color: #f38ba8; background: #3d2030; }
   #srcimg-btn.active { border-radius: 8px 0 0 8px; }
@@ -257,12 +350,55 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   #bg-badge { position:absolute; top:-6px; right:-6px; background:#f38ba8; color:#1e1e2e; border-radius:10px; font-size:10px; font-weight:bold; padding:1px 5px; display:none; }
 
   /* ---- BG Side Pane ---- */
-  #bg-side-pane { display:none; width:340px; min-width:240px; max-width:480px; flex-shrink:0; background:#181825; border-left:1px solid #313244; flex-direction:column; overflow:hidden; }
+  #bg-side-pane { display:none; width:340px; min-width:240px; max-width:480px; flex-shrink:0; background:#181825; border-left:1px solid #313244; flex-direction:column; overflow:hidden; position:relative; z-index:2; }
   #bg-side-pane.open { display:flex; }
   #bg-pane-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#313244; border-bottom:1px solid #45475a; flex-shrink:0; }
   #bg-pane-title { font-size:13px; font-weight:bold; color:#a6e3a1; }
   #bg-pane-actions { display:flex; gap:6px; align-items:center; }
   #bg-pane-body { overflow-y:auto; flex:1; padding:6px; }
+
+  /* ---- Team Live Pane（マルチエージェント・ライブビュー） ---- */
+  #team-live-pane { display:none; width:360px; min-width:260px; max-width:520px; flex-shrink:0; background:#11111b; border-left:1px solid #313244; flex-direction:column; overflow:hidden; position:relative; z-index:2; }
+  #team-live-pane.open { display:flex; }
+  #tl-header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#181825; border-bottom:1px solid #313244; flex-shrink:0; }
+  #tl-title { font-size:12px; font-weight:bold; color:#f38ba8; letter-spacing:.06em; }
+  #tl-body { overflow-y:auto; flex:1; padding:10px; }
+  .tl-lane { background:#181825; border:1px solid #313244; border-radius:11px; padding:10px 11px; margin-bottom:9px; }
+  .tl-lane.run { border-color:#f9a825; }
+  .tl-lane.done { border-color:#2d3b29; }
+  .tl-lane.fail { border-color:#5a2a2a; }
+  .tl-av { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+  .tl-rtag { font-size:10px; padding:1px 7px; border-radius:6px; font-weight:600; }
+  .tl-rail { display:flex; align-items:center; gap:4px; font-size:9px; color:#6c7086; margin-top:3px; }
+  .tl-seg { width:14px; height:3px; border-radius:2px; background:#313244; }
+  .tl-feed { border-top:1px solid #313244; padding-top:6px; margin-top:7px; }
+  .tl-tool { font-family:ui-monospace,monospace; font-size:11px; padding:2px 0; display:flex; align-items:center; gap:6px; }
+  .tl-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .tl-kanban { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; margin-top:8px; }
+  .tl-col-h { font-size:10px; letter-spacing:.06em; color:#a6adc8; margin:0 0 6px; padding-bottom:4px; border-bottom:1px solid #313244; }
+  .tl-kcard { background:#1e1e2e; border:1px solid #313244; border-radius:8px; padding:5px 6px; margin-bottom:6px; font-size:10px; font-family:ui-monospace,monospace; }
+  @keyframes tl-blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .tl-blink { animation:tl-blink 1s ease-in-out infinite; }
+  /* フローティングモード: ワーカー個別窓（PC専用・ドラッグ可／NERVターミナル風） */
+  .tl-fwin { position:fixed; width:286px; background:#0c0a08; border:1px solid #5a3408; border-radius:0; box-shadow:0 0 0 1px rgba(245,160,0,.12),0 10px 30px rgba(0,0,0,.7); z-index:8500; overflow:hidden; font-family:ui-monospace,Menlo,monospace; clip-path:polygon(0 0,100% 0,100% calc(100% - 15px),calc(100% - 15px) 100%,0 100%); }
+  .tl-fwin.run  { border-color:#ff6b00; box-shadow:0 0 0 1px rgba(255,107,0,.30),0 10px 30px rgba(0,0,0,.75); }
+  .tl-fwin.done { border-color:#2e6b3a; box-shadow:0 0 0 1px rgba(61,224,138,.18),0 10px 30px rgba(0,0,0,.75); }
+  .tl-fwin.fail { border-color:#7a2e2e; box-shadow:0 0 0 1px rgba(243,139,168,.18),0 10px 30px rgba(0,0,0,.75); }
+  .tl-fhead { display:flex; align-items:center; gap:7px; padding:6px 9px; background:#160f06; color:#ffb060; border-bottom:1px solid #5a3408; cursor:move; user-select:none; font-size:11px; font-weight:700; letter-spacing:.5px; }
+  .tl-fwin.run  .tl-fhead { background:#ff6b00; color:#1a0e02; border-bottom-color:#ff6b00; }
+  .tl-fwin.done .tl-fhead { background:#143620; color:#9ff0bd; border-bottom-color:#2e6b3a; }
+  .tl-fwin.fail .tl-fhead { background:#3a1414; color:#f5b8c4; border-bottom-color:#7a2e2e; }
+  .tl-fgrip { color:inherit; opacity:.55; font-size:13px; letter-spacing:-1px; flex-shrink:0; }
+  .tl-fav { width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0; background:rgba(0,0,0,.45); color:inherit; }
+  .tl-fwin.run .tl-fav { background:#1a0e02; color:#ff6b00; }
+  .tl-fname { font-weight:700; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tl-fmagi { font-size:10px; font-weight:700; letter-spacing:0; opacity:.85; flex-shrink:0; }
+  .tl-fbody { padding:8px 10px; max-height:260px; overflow-y:auto; }
+  .tl-fmeta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:8px; font-size:10px; color:#7d756a; }
+  .tl-fmeta .tl-rtag { color:#cba6f7; border:1px solid #5a3a7a; background:none; }
+  .tl-fx { color:inherit; opacity:.7; cursor:pointer; background:none; border:none; font-size:13px; padding:0 2px; line-height:1; }
+  .tl-fx:hover { opacity:1; }
+  @media (max-width:768px) { .tl-fwin { display:none !important; } }
 
   /* ---- BG Floating Panel ---- */
   #bg-float-pane { display:none; position:fixed; top:80px; right:16px; width:360px; height:500px; background:#1e1e2e; border:1px solid #45475a; border-radius:10px; box-shadow:0 6px 30px rgba(0,0,0,0.6); z-index:9000; flex-direction:column; overflow:hidden; }
@@ -309,7 +445,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .bsb-cancelled,.bsb-cancelling { background:#6c7086; color:#cdd6f4; }
   .bg-icon-btn  { background:none; border:none; color:#6c7086; cursor:pointer; font-size:14px; padding:2px 5px; border-radius:4px; }
   .bg-icon-btn:hover { color:#cdd6f4; background:#45475a; }
-  #gen-status { display: none; font-size: 11px; color: #585b70; font-family: monospace; white-space: nowrap; }
+  #gen-status { display: none; font-size: 11px; color: #585b70; font-family: monospace; white-space: nowrap; max-width: 860px; margin: 0 auto; padding: 0 14px 3px; text-align: right; }
   .img-preview { position: relative; }
   .img-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #45475a; }
   .img-preview-del { position: absolute; top: -4px; right: -4px; background: #f38ba8; color: #1e1e2e; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer; line-height: 16px; text-align: center; padding: 0; }
@@ -453,6 +589,40 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   .sched-inline { display:flex; gap:10px; } .sched-inline > * { flex:1; }
   .sched-toggle { font-size:12px; }
   .sched-empty { color:#6c7086; font-size:13px; text-align:center; padding:18px; }
+  /* ---- 統計ダッシュボード ---- */
+  #stats-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:210; align-items:center; justify-content:center; }
+  #stats-overlay.open { display:flex; }
+  #stats-modal { background:#1e1e2e; border:1px solid #313244; border-radius:12px; width:820px; max-width:96vw; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+  #stats-header { padding:14px 20px; border-bottom:1px solid #313244; font-size:15px; font-weight:bold; display:flex; align-items:center; gap:10px; }
+  #stats-header .sp { flex:1; }
+  #stats-close { background:#313244; color:#cdd6f4; border:none; border-radius:6px; width:28px; height:28px; cursor:pointer; font-size:14px; }
+  #stats-close:hover { background:#45475a; }
+  #stats-range { background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:5px 9px; font-size:12px; }
+  #stats-metric { background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:5px 9px; font-size:12px; }
+  #stats-body { padding:16px 20px; overflow-y:auto; flex:1; }
+  .stats-cards { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+  .stats-card { flex:1; min-width:120px; background:#181825; border:1px solid #313244; border-radius:10px; padding:12px 14px; }
+  .stats-card .sc-val { font-size:22px; font-weight:bold; color:#89b4fa; }
+  .stats-card .sc-val.sc-good { color:#a6e3a1; }
+  .stats-card .sc-val.sc-mid { color:#f9e2af; }
+  .stats-card .sc-val.sc-low { color:#f38ba8; }
+  .stats-card .sc-lbl { font-size:11px; color:#9399b2; margin-top:3px; }
+  .stats-bar-head .bh-cache { font-size:10px; color:#94e2d5; background:#1e2b2b; padding:1px 6px; border-radius:5px; }
+  .stats-sec-title { font-size:13px; font-weight:bold; color:#cdd6f4; margin:6px 0 12px; }
+  .stats-bar-row { margin-bottom:11px; }
+  .stats-bar-head { display:flex; align-items:baseline; gap:8px; font-size:12px; margin-bottom:4px; }
+  .stats-bar-head .bh-model { font-weight:bold; color:#cdd6f4; word-break:break-all; }
+  .stats-bar-head .bh-prov { font-size:10px; color:#6c7086; background:#313244; padding:1px 6px; border-radius:5px; }
+  .stats-bar-head .bh-pct { margin-left:auto; color:#9399b2; font-variant-numeric:tabular-nums; }
+  .stats-bar-head .bh-val { color:#6c7086; font-variant-numeric:tabular-nums; }
+  .stats-bar-track { height:10px; background:#11111b; border-radius:5px; overflow:hidden; }
+  .stats-bar-fill { height:100%; border-radius:5px; transition:width 0.4s; }
+  .stats-empty { color:#6c7086; font-size:13px; text-align:center; padding:30px; }
+  .stats-daily-chart { display:flex; align-items:flex-end; gap:3px; height:120px; padding:4px 0; }
+  .stats-dbar-wrap { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0; }
+  .stats-dbar { width:100%; max-width:26px; background:#89b4fa; border-radius:3px 3px 0 0; transition:height 0.4s; }
+  .stats-dbar-lbl { font-size:9px; color:#6c7086; margin-top:4px; white-space:nowrap; transform:rotate(-0deg); }
+  .stats-dbar-wrap:hover .stats-dbar { background:#a6c4ff; }
   /* ---- ワークスペーススコープバー ---- */
   #workspace-scope-bar { padding: 3px 20px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 8px; font-size: 12px; flex-shrink: 0; transition: background 0.4s, border-color 0.4s; }
   #workspace-scope-bar.scoped { background: linear-gradient(90deg, #0d1f0f 0%, #181825 70%); border-bottom-color: #40a840; }
@@ -834,6 +1004,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     #bg-side-pane { width: 100%; max-width: none; min-width: 0;
                     border-left: none; border-top: 1px solid #313244; max-height: 50vh; }
     #bg-side-resize-handle { display: none; }
+    #team-live-pane { width: 100%; max-width: none; min-width: 0;
+                      border-left: none; border-top: 1px solid #313244; max-height: 55vh; }
 
     /* --- BGフローティング：画面内に収める --- */
     #bg-float-pane { right: 12px; width: calc(100vw - 24px); max-width: 360px; }
@@ -851,7 +1023,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     /* 入力欄は通常 [＋][🎤マイク][送信] の1行だけ。残りは＋ボタンで開閉する */
     #input-more-btn { display: grid; }
     /* スマホで常に隠す（PC専用機能・ヘッダーと重複する表示） */
-    #codeblock-btn, #rawwrite-btn, .ma-group, #gen-status { display: none; }
+    #codeblock-btn, #rawwrite-btn, .ma-group, #gen-status, #ma-eva-banner, #eva-overlay, #eva-toggle-btn { display: none !important; }
     /* 折りたたみ対象（添付・生成元画像・モード・BG）：通常時は隠す */
     #attach-btn, #srcimg-btn, #mode-dd, #bg-btn { display: none; }
     /* ＋を押したとき（.more-open）だけ展開。元のdisplay値で戻す（.cbtn=grid / .dd・#bg-btn=inline-flex） */
@@ -883,6 +1055,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 </div>
 <div id="header">
   <span id="app-title">⚛️ AI Code Agent</span>
+  <span id="ma-eva-banner" aria-hidden="true"><b class="eva-kbox">情報</b><span class="eva-main">単騎脳ー通常稼働</span></span>
+  <button id="eva-toggle-btn" onclick="toggleEvaMode()" title="EVAモード（演出）ON/OFF">⚡EVA</button>
   <div id="header-right">
     <span id="turn-count"></span>
     <span id="token-info" title="今回: 入力↑ / 出力↓　累計: 合計トークン数"></span>
@@ -902,6 +1076,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     <span class="hgrp">
       <button id="todo-btn" class="cbtn" data-tip="タスクリスト" onclick="toggleTodoPanel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span id="todo-badge"></span></button>
       <button id="schedule-btn" class="cbtn" data-tip="定時実行スケジューラー" onclick="openScheduleModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span id="schedule-badge"></span></button>
+      <button id="stats-btn" class="cbtn" data-tip="利用統計ダッシュボード" onclick="openStatsModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button>
       <button id="tts-btn" class="cbtn" data-tip="AIの返答を読み上げ" onclick="toggleTTS()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
       <button id="cleanup-btn" class="cbtn" data-tip="ワークスペース掃除・保護リスト編集" onclick="openCleanupDirect()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12.6 9 23l-5-1-1-5L13.4 6.6"/><path d="M13.4 6.6 17 3l4 4-3.6 3.6z"/><line x1="6" y1="14" x2="10" y2="18"/></svg></button>
     </span>
@@ -1247,6 +1422,10 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           <label>作業スコープ</label>
           <select id="snew-scope"><option value="">workspace 全体</option></select>
         </div>
+        <div class="sched-field">
+          <label>実行モデル（無人実行なので重要なタスクは賢いモデルを固定推奨）</label>
+          <select id="snew-model"><option value="">（チャットの現在モデル）</option></select>
+        </div>
         <button class="sched-btn primary" id="snew-submit" onclick="schedSubmitTask()">タスクを登録</button>
         <span id="snew-msg" style="margin-left:10px;font-size:12px;"></span>
       </div>
@@ -1266,6 +1445,33 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
         <span id="stpl-msg" style="margin-left:10px;font-size:12px;"></span>
         <div id="sched-template-list" style="margin-top:16px;"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 統計ダッシュボード -->
+<div id="stats-overlay" onclick="if(event.target===this)closeStatsModal()">
+  <div id="stats-modal">
+    <div id="stats-header">📊 利用統計
+      <select id="stats-range" onchange="loadStats()">
+        <option value="7">直近7日</option>
+        <option value="30" selected>直近30日</option>
+        <option value="90">直近90日</option>
+        <option value="0">全期間</option>
+      </select>
+      <select id="stats-metric" onchange="renderStats()">
+        <option value="requests" selected>呼び出し回数で割合</option>
+        <option value="total_tokens">トークン量で割合</option>
+      </select>
+      <span class="sp"></span>
+      <button id="stats-close" onclick="closeStatsModal()">✕</button>
+    </div>
+    <div id="stats-body">
+      <div class="stats-cards" id="stats-cards"></div>
+      <div class="stats-sec-title">モデル別の利用割合</div>
+      <div id="stats-breakdown"><div class="stats-empty">読み込み中…</div></div>
+      <div class="stats-sec-title" style="margin-top:20px;">日別の推移</div>
+      <div id="stats-daily"></div>
     </div>
   </div>
 </div>
@@ -1306,6 +1512,49 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   <button id="session-banner-back" onclick="newSession()">＋ 新しい会話</button>
 </div>
 <div id="chat-wrapper">
+  <div id="eva-overlay" aria-hidden="true">
+    <div class="eo-scan"></div>
+    <div class="eo-haz t"></div>
+    <div class="eo-haz b"></div>
+    <div class="eo-warn">＞＞ 警告 WARNING 警告 ＜＜</div>
+    <div class="eo-sync">SYNC 87.2%</div>
+    <div class="eo-center">
+      <div class="eo-reticle"></div>
+      <div class="eo-ring"></div>
+      <div class="eo-ring" style="animation-delay:1.2s"></div>
+      <div class="eo-ring" style="animation-delay:2.4s"></div>
+      <p class="eo-big">警報</p>
+      <div class="eo-sub">多重思考接続 ─ シンクロ率 上昇中</div>
+      <div class="eo-tag">MAGI SYSTEM / MULTI-BRAIN</div>
+    </div>
+    <div class="eo-magi">
+      <svg class="eo-magi-svg" viewBox="0 0 300 184" width="300" height="184" aria-hidden="true">
+        <!-- BALTHASAR (上) 下両角だけ45°面取り -->
+        <polygon points="98,8 202,8 202,68 186,84 114,84 98,68" fill="rgba(120,205,235,.18)" stroke="#7fd3ef" stroke-width="2"/>
+        <text x="150" y="32" text-anchor="middle" fill="#19d6e6" font-size="20" font-weight="900" letter-spacing="3">承認</text>
+        <text x="150" y="52" text-anchor="middle" fill="#cdeefb" font-size="11.5" font-weight="900" letter-spacing="1">BALTHASAR·2</text>
+        <text class="mc-model" x="150" y="68" text-anchor="middle" fill="#9fd9ef" font-size="9" font-weight="700" font-family="monospace">—</text>
+        <!-- CASPER (下左) 右上だけ45°面取り -->
+        <polygon points="8,104 98,104 114,120 114,176 8,176" fill="rgba(120,205,235,.18)" stroke="#7fd3ef" stroke-width="2"/>
+        <text x="58" y="132" text-anchor="middle" fill="#19d6e6" font-size="20" font-weight="900" letter-spacing="3">承認</text>
+        <text x="58" y="152" text-anchor="middle" fill="#cdeefb" font-size="11.5" font-weight="900" letter-spacing="1">CASPER·3</text>
+        <text class="mc-model" x="58" y="168" text-anchor="middle" fill="#9fd9ef" font-size="9" font-weight="700" font-family="monospace">—</text>
+        <!-- MELCHIOR (下右) 左上だけ45°面取り -->
+        <polygon points="292,104 202,104 186,120 186,176 292,176" fill="rgba(255,42,42,.20)" stroke="#ff2a2a" stroke-width="2"/>
+        <text x="242" y="132" text-anchor="middle" fill="#ff3b3b" font-size="20" font-weight="900" letter-spacing="3">否決</text>
+        <text x="242" y="152" text-anchor="middle" fill="#ffd0d0" font-size="11.5" font-weight="900" letter-spacing="1">MELCHIOR·1</text>
+        <text class="mc-model" x="242" y="168" text-anchor="middle" fill="#ffb3b3" font-size="9" font-weight="700" font-family="monospace">—</text>
+        <!-- 連結: 上左/上右は箱の角どうしを斜めで, 下は水平1本 -->
+        <g stroke="#f5a000" stroke-width="3.5" stroke-linecap="round">
+          <line x1="114" y1="84" x2="98" y2="104"/>
+          <line x1="186" y1="84" x2="202" y2="104"/>
+          <line x1="114" y1="150" x2="186" y2="150"/>
+        </g>
+        <!-- 中央 MAGI（囲み無し） -->
+        <text x="150" y="118" text-anchor="middle" fill="#f5a000" font-size="15" font-weight="900" letter-spacing="2">MAGI</text>
+      </svg>
+    </div>
+  </div>
   <div id="chat"></div>
   <!-- BG Side Pane (right column, flex) -->
   <div id="bg-side-pane">
@@ -1319,7 +1568,21 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     </div>
     <div id="bg-pane-body" class="bg-body"></div>
   </div>
+  <!-- Team Live Pane（マルチエージェント・ライブビュー） -->
+  <div id="team-live-pane">
+    <div id="tl-header">
+      <span id="tl-title">⚡ MAGI SYSTEM ｜ 多重思考接続</span>
+      <div style="display:flex; gap:4px; align-items:center;">
+        <button id="tl-arrange-btn" class="bg-icon-btn" onclick="tlFloatArrange()" title="ワーカー窓を整列" style="display:none;">▤</button>
+        <button id="tl-mode-btn" class="bg-icon-btn" onclick="toggleTlMode()" title="表示モード切替">▭</button>
+        <button class="bg-icon-btn" onclick="teamLiveClose()" title="閉じる">✕</button>
+      </div>
+    </div>
+    <div id="tl-body"></div>
+  </div>
 </div>
+<!-- Team Live: フローティングワーカー窓の置き場（position:fixed なので親は問わない） -->
+<div id="tl-float-layer"></div>
 <!-- BG Floating Panel (fixed position) -->
 <div id="bg-float-pane">
   <div id="bg-float-header">
@@ -1334,6 +1597,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 </div>
 <div id="skill-popup" style="display:none"></div>
 <div id="input-area">
+  <div id="gen-status"></div>
   <div id="input-box">
     <textarea id="input" placeholder="指示を入力してください..." rows="1"></textarea>
     <div id="image-preview-area"></div>
@@ -1359,10 +1623,9 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             <button type="button" class="dd-item" data-value="auto">自動</button>
           </div>
         </div>
-        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コストのバランス設定"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">バランス</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="balance">バランス</button><button type="button" class="dd-item" data-value="quality">品質優先</button><button type="button" class="dd-item" data-value="economy">コスト優先</button></div></div></span>
+        <span class="ma-group"><button id="ma-btn" onclick="toggleMultiAgent()" title="マルチエージェントモード: 複数AIが役割分担して実行"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>マルチAI</button><div class="dd" id="maq-dd" title="品質/コスト設定: コスト優先（安いモデル中心）/ 品質優先（上位モデル中心）。セットアップで2セットを編集"><button type="button" class="dd-btn" id="maq-dd-btn"><span class="dd-label">コスト優先</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="economy">コスト優先</button><button type="button" class="dd-item" data-value="quality">品質優先</button></div></div><div class="dd" id="mat-dd" title="実行方式: 即応モード（計画を出さず即実行）/ 審議モード（MAGIで計画を審議→承認して実行）/ パイプライン（旧・逐次）"><button type="button" class="dd-btn" id="mat-dd-btn"><span class="dd-label">即応モード</span><span class="dd-caret"></span></button><div class="dd-menu"><button type="button" class="dd-item" data-value="single">即応モード</button><button type="button" class="dd-item" data-value="team">審議モード</button><button type="button" class="dd-item" data-value="pipeline">パイプライン（旧）</button></div></div></span>
       </div>
       <div id="input-right">
-        <span id="gen-status"></span>
         <button id="mic-btn" class="cbtn" onclick="toggleMic()" data-tip="音声入力（日本語）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
         <button id="bg-btn" onclick="bgBtnClick()" title="テキストあり→BGジョブ投入 / テキストなし→BG結果エリア開閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>BG<span id="bg-badge"></span></button>
         <button id="send" onclick="sendMessage()">送信<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
@@ -1633,6 +1896,316 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       default:             return `Running ${name}`;
     }
   }
+
+  // ===== マルチエージェント・ライブビュー（#team-live-pane）=====
+  // サーバーの team_event（type=team_event）を消費し、ワーカーごとのレーン＋ツール実況＋
+  // 段階レール＋カンバン＋MAGI賢者グルーピング点灯を描く。チャット本流とは独立。
+  let teamLive = { job:'', mode:'', workers:{}, tasks:{} };
+  function _tlEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function resetTeamLive(){ teamLive = { job:'', mode:'', workers:{}, tasks:{} }; }
+  function teamLiveOpen(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.add('open'); }
+  function teamLiveClose(){ const p=document.getElementById('team-live-pane'); if(p) p.classList.remove('open'); _tlClearFloat(); }
+
+  // ===== マルチ実行のリロード/クラッシュ復元（サーバーの永続化ログから結果を取り戻す）=====
+  const TEAM_RUN_KEY = 'activeTeamRun';
+  function _saveActiveRun(runId, req){ if(!runId) return; try{ localStorage.setItem(TEAM_RUN_KEY, JSON.stringify({run_id:runId, request:req||'', ts:Date.now()})); }catch(e){} }
+  function _clearActiveRun(){ try{ localStorage.removeItem(TEAM_RUN_KEY); }catch(e){} }
+  function _getActiveRun(){ try{ return JSON.parse(localStorage.getItem(TEAM_RUN_KEY)||'null'); }catch(e){ return null; } }
+
+  // ページ読込時、未完了の run_id があればサーバーから結果を取り戻して画面に復元する
+  async function restoreActiveTeamRun(){
+    const a = _getActiveRun();
+    if(!a || !a.run_id) return;
+    if(a.ts && Date.now()-a.ts > 24*3600*1000){ _clearActiveRun(); return; }   // 24h超は破棄
+    let data;
+    try{
+      const r = await fetch(`/multi-agent/runs/${encodeURIComponent(a.run_id)}`);
+      if(r.status === 404){ _clearActiveRun(); return; }
+      if(!r.ok) return;
+      data = await r.json();
+    }catch(e){ return; }
+    // ライブビュー復元（保存済みイベント列を既存ハンドラで再生）
+    if(data.team_events && data.team_events.length){
+      resetTeamLive();
+      data.team_events.forEach(ev => { try{ handleTeamEvent(ev); }catch(e){} });
+    }
+    // 復元バナー＋本文を新しいターンとして差し込む
+    const running = (data.status === 'running');
+    const turnEl = createTurnEl();
+    if(a.request) appendMsg(turnEl, 'user', a.request);
+    const note = document.createElement('div');
+    note.className = 'restore-note';
+    note.style.cssText = 'margin:4px 0;padding:6px 10px;border-radius:8px;font-size:12px;'
+      + (running ? 'background:rgba(245,160,0,.12);color:#f5a000;border:1px solid rgba(245,160,0,.35);'
+                 : 'background:rgba(25,214,120,.10);color:#19d678;border:1px solid rgba(25,214,120,.30);');
+    note.textContent = running
+      ? '↩️ 前回のマルチ実行を復元（まだ実行中です。完了後に「更新」で最新結果を取得）'
+      : '↩️ 前回のマルチ実行を復元しました（完了済み）';
+    turnEl.appendChild(note);
+    if(running){
+      const btn = document.createElement('button');
+      btn.textContent = '🔄 更新';
+      btn.style.cssText = 'margin:2px 0 6px;padding:4px 10px;font-size:12px;cursor:pointer;border-radius:6px;';
+      btn.onclick = () => { turnEl.remove(); restoreActiveTeamRun(); };
+      turnEl.appendChild(btn);
+    }
+    if(data.message){
+      const ai = appendMsg(turnEl, 'ai', '');
+      setAiContent(ai, stripThink(data.message));
+    }
+    const chatEl = document.getElementById('chat');
+    if(chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+    if(!running) _clearActiveRun();   // 完了したら追跡終了
+  }
+
+  // 8役 → MAGI三賢者グルーピング（dispatcher=統括 / coding,infra,debug=実装 / research,design,security,docs=知識）
+  const TL_MAGI = [
+    { key:'BALTHASAR', label:'BALTHASAR・1', sub:'統括', roles:['dispatcher'],                       color:'#f5a000' },
+    { key:'CASPER',    label:'CASPER・3',    sub:'実装', roles:['coding','infra','debug'],           color:'#19d6e6' },
+    { key:'MELCHIOR',  label:'MELCHIOR・2',  sub:'知識', roles:['research','design','security','docs'], color:'#ff3b3b' },
+  ];
+  // タスク状態 → 段階（待機0 / 実行中1 / 検収2 / 完了3）
+  const TL_STAGE = { pending:0, claimed:1, running:1, retry:1, verify:2, done:3, fail:3, error:3 };
+
+  function handleTeamEvent(e){
+    if(!e || !e.kind) return;
+    if(e.kind === 'plan'){
+      resetTeamLive();
+      teamLive.job = e.job_id||''; teamLive.mode = e.mode||'';
+      (e.workers||[]).forEach(w => { teamLive.workers[w] = { name:w, role:'', model:'', tid:'', state:'idle', feed:[], current:null }; });
+      Object.entries(e.tasks||{}).forEach(([tid,t]) => {
+        teamLive.tasks[tid] = { tid, role:t.role||'', files:t.files||[], depends_on:t.depends_on||[], state:'pending', worker:'' };
+      });
+      _tlClearFloat(); tlFloatPos = {};   // 新ランで浮遊窓をリセット
+      teamLiveOpen(); applyTlMode();
+    } else if(e.kind === 'task'){
+      const t = teamLive.tasks[e.tid] || (teamLive.tasks[e.tid] = { tid:e.tid, role:e.role||'', files:[], depends_on:[], state:'pending', worker:'' });
+      t.state = e.state; if(e.worker) t.worker = e.worker; if(e.role) t.role = e.role;
+      const w = teamLive.workers[e.worker];
+      if(w){
+        w.tid = e.tid; w.state = e.state; if(e.role) w.role = e.role; if(e.model) w.model = e.model;
+        if(['done','fail','error'].includes(e.state)) w.current = null;
+      }
+    } else if(e.kind === 'tool'){
+      const w = teamLive.workers[e.worker]; if(!w) return;
+      const item = { tool:e.tool, args:e.args||{}, status:'run' };
+      w.feed.push(item); if(w.feed.length>8) w.feed = w.feed.slice(-8);
+      w.current = item;
+    } else if(e.kind === 'tool_done'){
+      const w = teamLive.workers[e.worker]; if(!w) return;
+      for(let i=w.feed.length-1;i>=0;i--){ if(w.feed[i].tool===e.tool && w.feed[i].status==='run'){ w.feed[i].status = e.ok?'ok':'ng'; break; } }
+    }
+    renderTeamLive();
+  }
+
+  function _tlMagiSvg(activeRoles){
+    let nodes='', lines='';
+    const pos = [ {x:160,y:8}, {x:50,y:96}, {x:270,y:96} ];  // BAL上 / CAS下左 / MEL下右
+    TL_MAGI.forEach((m, i) => {
+      const lit = m.roles.some(r => activeRoles.has(r));
+      const p = pos[i];
+      const stroke = lit ? m.color : '#45475a';
+      const fill = lit ? m.color+'33' : '#181825';
+      const tcol = lit ? m.color : '#7f849c';
+      const blink = lit ? ' class="tl-blink"' : '';
+      nodes += `<g${blink}><rect x="${p.x}" y="${p.y}" width="140" height="28" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="${lit?1.8:1.2}"/>`
+        + `<text x="${p.x+70}" y="${p.y+13}" text-anchor="middle" fill="${tcol}" font-size="10.5" font-weight="600">${m.label}</text>`
+        + `<text x="${p.x+70}" y="${p.y+23}" text-anchor="middle" fill="${lit?m.color:'#6c7086'}" font-size="8">${m.sub}${lit?' ●稼働':''}</text></g>`;
+    });
+    lines = `<g stroke="#45475a" stroke-width="1.4">`
+      + `<line x1="230" y1="36" x2="230" y2="74"/>`
+      + `<line x1="230" y1="84" x2="120" y2="96"/>`
+      + `<line x1="230" y1="84" x2="340" y2="96"/></g>`
+      + `<circle cx="230" cy="79" r="8" fill="#f5a000"/><text x="230" y="82" text-anchor="middle" fill="#11111b" font-size="7" font-weight="700">MAGI</text>`;
+    return `<svg viewBox="0 0 460 130" style="width:100%;height:115px;margin-bottom:8px;">${lines}${nodes}</svg>`;
+  }
+
+  function _tlRail(stage, finished){
+    let s='';
+    for(let i=0;i<4;i++){
+      let c='#313244';
+      if(finished){ c = '#a6e3a1'; }
+      else if(i < stage){ c='#a6e3a1'; }
+      else if(i === stage){ c='#f9a825'; }
+      s += `<span class="tl-seg" style="background:${c}"></span>`;
+    }
+    return s;
+  }
+
+  // ---- ワーカー1人分の共通パーツ（レーンと浮遊窓で共用）----
+  function _tlLaneCls(w){
+    return (w.state==='running'||w.state==='verify'||w.state==='retry') ? 'run'
+         : (w.state==='done' ? 'done' : ((w.state==='fail'||w.state==='error') ? 'fail' : ''));
+  }
+  function _tlStInfo(w){
+    const label = w.state==='done' ? '✓ 完了' : (w.state==='fail'||w.state==='error' ? '⚠ 未達' : (w.state==='verify' ? '検収中' : (w.state==='idle'||w.state==='' ? '待機' : '実行中')));
+    const color = w.state==='done' ? '#a6e3a1' : (w.state==='fail'||w.state==='error' ? '#f38ba8' : (w.state==='idle'||w.state==='' ? '#6c7086' : '#f9a825'));
+    return { label, color };
+  }
+  function _tlFeedHtml(w){
+    let feed='';
+    (w.feed||[]).forEach(it => {
+      const dot = it.status==='run' ? '#f9a825' : (it.status==='ok' ? '#a6e3a1' : '#f38ba8');
+      const stat = it.status==='run' ? '● 実行中…' : (it.status==='ok' ? '✓' : '✕');
+      feed += `<div class="tl-tool${it.status==='run'?' tl-blink':''}"><span class="tl-dot" style="background:${dot}"></span>`
+        + `<span style="color:#a6adc8">${_tlEsc(getToolStatusText(it.tool, it.args))}</span>`
+        + `<span style="margin-left:auto;color:${dot}">${stat}</span></div>`;
+    });
+    return feed || `<div class="tl-tool" style="color:#6c7086">（ツール待機）</div>`;
+  }
+  function _tlMetaHtml(w){
+    return `<span style="font-weight:600;font-size:12px;color:#cdd6f4">${_tlEsc(w.name)}</span>`
+      + (w.role ? `<span class="tl-rtag" style="background:#2a2440;color:#cba6f7">${_tlEsc(w.role)}</span>` : '')
+      + (w.tid ? `<span style="font-family:ui-monospace,monospace;font-size:10px;color:#a6adc8">${_tlEsc(w.tid)}</span>` : '')
+      + (w.model ? `<span style="font-family:ui-monospace,monospace;font-size:9.5px;color:#6c7086">${_tlEsc(w.model)}</span>` : '');
+  }
+  function _tlRailHtml(w){
+    const stage = TL_STAGE[w.state] ?? 0; const finished = w.state==='done'; const st = _tlStInfo(w);
+    return `<div class="tl-rail">${_tlRail(stage, finished)}<span style="margin-left:5px;color:${st.color}">${st.label}</span></div>`;
+  }
+  function _tlLaneHtml(w){
+    const init = _tlInit(w);
+    return `<div class="tl-lane ${_tlLaneCls(w)}">`
+      + `<div style="display:flex;align-items:center;gap:9px;">`
+      + `<div class="tl-av" style="background:#1e3a5f;color:#89b4fa">${_tlEsc(init)}</div>`
+      + `<div style="flex:1;min-width:0">`
+      + `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">${_tlMetaHtml(w)}</div>`
+      + _tlRailHtml(w)
+      + `</div></div>`
+      + `<div class="tl-feed">${_tlFeedHtml(w)}</div>`
+      + `</div>`;
+  }
+  function _tlKanbanHtml(){
+    const cols = [ {h:'待機',st:[0]}, {h:'実行中',st:[1]}, {h:'検収',st:[2]}, {h:'完了',st:[3]} ];
+    let kb = '<div class="tl-kanban">';
+    cols.forEach(col => {
+      let cards='';
+      Object.values(teamLive.tasks).forEach(t => {
+        const tstage = TL_STAGE[t.state] ?? 0;
+        if(!col.st.includes(tstage)) return;
+        const bad = (t.state==='fail'||t.state==='error');
+        cards += `<div class="tl-kcard"><div style="color:${bad?'#f38ba8':'#cdd6f4'}">${_tlEsc(t.tid)}${bad?' ⚠':''}</div>`
+          + `<div style="color:#6c7086;font-size:9px">${_tlEsc(t.role||'')}</div></div>`;
+      });
+      kb += `<div><p class="tl-col-h">${col.h}</p>${cards||'<div style="color:#45475a;font-size:9px">—</div>'}</div>`;
+    });
+    return kb + '</div>';
+  }
+  function _tlLegendHtml(){
+    return `<div style="display:flex;justify-content:center;gap:14px;margin-top:10px;font-size:9.5px;color:#6c7086">`
+      + `<span><span style="color:#a6e3a1">✓</span> 完了</span><span><span style="color:#f9a825">●</span> 実行中</span>`
+      + `<span><span style="color:#f38ba8">✕</span> 失敗</span></div>`;
+  }
+
+  // ---- 表示モード（docked=レーン内蔵 / floating=ワーカー個別窓・PC専用）----
+  let tlMode = localStorage.getItem('tlMode') || 'docked';
+  let _tlFloatDrag = null;
+  let tlFloatEls = {};   // worker名 -> 窓DOM
+  let tlFloatPos = {};   // worker名 -> {left,top}（ドラッグ位置の保持）
+  function _tlIsMobile(){ return window.matchMedia('(max-width:768px)').matches; }
+  function tlEffMode(){ return _tlIsMobile() ? 'docked' : tlMode; }
+  function _tlClearFloat(){ const layer=document.getElementById('tl-float-layer'); if(layer) layer.innerHTML=''; tlFloatEls={}; }
+  function applyTlMode(){
+    const f = tlEffMode()==='floating';
+    const mb = document.getElementById('tl-mode-btn');
+    if(mb){ mb.textContent = f ? '⧉' : '▭'; mb.title = f ? 'フローティング表示（クリックでドッキング）' : 'ドッキング表示（クリックでフローティング）'; }
+    const ab = document.getElementById('tl-arrange-btn');
+    if(ab) ab.style.display = f ? '' : 'none';
+    if(!f) _tlClearFloat();
+  }
+  function toggleTlMode(){ tlMode = (tlMode==='floating' ? 'docked' : 'floating'); localStorage.setItem('tlMode', tlMode); applyTlMode(); renderTeamLive(); }
+  function tlFloatArrange(){ tlFloatPos = {}; _tlClearFloat(); renderTeamLive(); }
+  function tlFloatClose(name){ const w=teamLive.workers[name]; if(w) w._closed=true; const el=tlFloatEls[name]; if(el){ el.remove(); delete tlFloatEls[name]; } }
+  function _tlMagiLabel(w){
+    const r = (w.role||'').toLowerCase();
+    const m = TL_MAGI.find(x => x.roles.includes(r));
+    return m ? m.label : '';
+  }
+  function _tlInit(w){
+    const name = w.name || '';
+    const num = (name.match(/(\d+)\s*$/) || ['',''])[1];
+    const m = TL_MAGI.find(x => x.roles.includes((w.role||'').toLowerCase()));
+    const ini = m ? m.key[0] : ((name.replace(/[^A-Za-z]/g,'')[0]) || 'A').toUpperCase();
+    return (ini + num) || name.toUpperCase();
+  }
+  function _tlFloatMetaHtml(w){
+    return (w.role ? `<span class="tl-rtag">${_tlEsc(w.role)}</span>` : '')
+      + (w.tid ? `<span>${_tlEsc(w.tid)}</span>` : '')
+      + (w.model ? `<span>${_tlEsc(w.model)}</span>` : '');
+  }
+  function _tlFloatWinInner(w){
+    const init = _tlInit(w);
+    const magi = _tlMagiLabel(w);
+    return `<div class="tl-fhead">`
+      + `<span class="tl-fgrip">⠿</span>`
+      + `<div class="tl-fav">${_tlEsc(init)}</div>`
+      + `<span class="tl-fname">${_tlEsc(w.name)}</span>`
+      + (magi ? `<span class="tl-fmagi">${_tlEsc(magi)}</span>` : '')
+      + `<button class="tl-fx" title="閉じる" onclick="tlFloatClose('${_tlEsc(w.name)}')">✕</button>`
+      + `</div>`
+      + `<div class="tl-fbody"><div class="tl-fmeta">${_tlFloatMetaHtml(w)}</div>${_tlRailHtml(w)}<div class="tl-feed">${_tlFeedHtml(w)}</div></div>`;
+  }
+  function _tlRenderFloating(){
+    const layer = document.getElementById('tl-float-layer'); if(!layer) return;
+    const workers = Object.values(teamLive.workers);
+    const names = new Set(workers.map(w=>w.name));
+    Object.keys(tlFloatEls).forEach(n => { if(!names.has(n)){ tlFloatEls[n].remove(); delete tlFloatEls[n]; } });
+    workers.forEach((w, idx) => {
+      if(w._closed) return;
+      let el = tlFloatEls[w.name];
+      if(!el){
+        el = document.createElement('div'); el.dataset.worker = w.name;
+        const pos = tlFloatPos[w.name] || { left: 56 + (idx%3)*30, top: 96 + idx*138 };
+        tlFloatPos[w.name] = pos;
+        el.style.left = pos.left+'px'; el.style.top = pos.top+'px';
+        layer.appendChild(el); tlFloatEls[w.name] = el;
+      }
+      el.className = 'tl-fwin ' + _tlLaneCls(w);
+      el.innerHTML = _tlFloatWinInner(w);
+    });
+  }
+
+  function renderTeamLive(){
+    const body = document.getElementById('tl-body'); if(!body) return;
+    const activeRoles = new Set();
+    Object.values(teamLive.tasks).forEach(t => { if(['running','verify','retry','claimed'].includes(t.state)) activeRoles.add(t.role); });
+    let html = _tlMagiSvg(activeRoles);
+    if(tlEffMode()==='floating'){
+      // 看板（MAGI＋カンバン）は右に固定。ワーカーは個別の浮遊窓へ。
+      html += `<div style="font-size:10px;color:#6c7086;margin:4px 0 8px;text-align:center">各ワーカーは個別ウィンドウに表示中（⠿でドラッグ）</div>`;
+      html += _tlKanbanHtml() + _tlLegendHtml();
+      body.innerHTML = html;
+      _tlRenderFloating();
+    } else {
+      Object.values(teamLive.workers).forEach(w => { html += _tlLaneHtml(w); });
+      html += _tlKanbanHtml() + _tlLegendHtml();
+      body.innerHTML = html;
+    }
+  }
+
+  // フローティング窓のドラッグ（ヘッダ ⠿ を掴んで移動）
+  document.addEventListener('mousedown', e => {
+    const head = e.target.closest && e.target.closest('.tl-fhead'); if(!head) return;
+    if(e.target.closest('button')) return;
+    const win = head.closest('.tl-fwin'); if(!win) return;
+    const r = win.getBoundingClientRect();
+    _tlFloatDrag = { el:win, name:win.dataset.worker, sx:e.clientX, sy:e.clientY, sl:r.left, st:r.top };
+    win.style.zIndex = 8700;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if(!_tlFloatDrag) return; const d=_tlFloatDrag;
+    let nl = d.sl + (e.clientX-d.sx), nt = d.st + (e.clientY-d.sy);
+    nl = Math.max(0, Math.min(nl, window.innerWidth-90));
+    nt = Math.max(0, Math.min(nt, window.innerHeight-40));
+    d.el.style.left = nl+'px'; d.el.style.top = nt+'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if(!_tlFloatDrag) return; const d=_tlFloatDrag;
+    tlFloatPos[d.name] = { left: parseInt(d.el.style.left)||0, top: parseInt(d.el.style.top)||0 };
+    _tlFloatDrag = null;
+  });
+  applyTlMode();
 
   // ---- 設定 ----
   const MAX_VISIBLE_TURNS = 5;   // これより古いターンは折りたたむ
@@ -2069,7 +2642,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   loadReasoningEffort();
 
   // ---- マルチエージェント: 計画確認待ち状態 ----
-  let _maPendingJobId = '';
+  let _maPendingJobId = '';   // 審議モード(team)の計画承認フロー専用（plan_ready→実行）。即応モード(single)は使わない
+  let _maResumeAction = '';   // ""=通常（LLM分類）/ "replan"=審議の修正ボタン＝強制再計画（プランA）
 
   function _updatePlanConfirmUI(active) {
     const bar = document.getElementById('ma-plan-confirm-bar');
@@ -2086,6 +2660,12 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       if (bar) bar.remove();
     }
   }
+  // 即応モード(single)は「スコープ＝継続」のため緑の継続バーは廃止（ジョブIDに継続を結びつけない）。
+  // 次の発言はそのまま同じ作業場所の既存ファイルを直す＝儀式不要。
+  function _updateContinueUI(active) {
+    const bar = document.getElementById('ma-continue-bar');
+    if (bar) bar.remove();
+  }
   function _clearMaPending() {
     _maPendingJobId = '';
     _updatePlanConfirmUI(false);
@@ -2094,16 +2674,141 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   // 送信後にペンディングをクリア（実行開始 or キャンセル後）
   function _maConsumePending() {
     const id = _maPendingJobId;
-    if (id) { _maPendingJobId = ''; _updatePlanConfirmUI(false); }
+    if (id) { _maPendingJobId = ''; _updatePlanConfirmUI(false); _updateContinueUI(false); }
     return id;
   }
 
   // ボタンから直接実行・キャンセルを送信（job_id を DOM に持つので変数消失の心配なし）
+  // ボタンは意図が明確なので resume_action で確定指示を送る＝バックエンドの LLM 分類を経由しない。
+  // （却下なのに弱いモデルが「実行」と誤判定してジョブが走り出す事故を防ぐ）
   function sendMaResume(jobId, action) {
     _maPendingJobId = jobId;
+    _maResumeAction = action;   // 'execute' | 'cancel'（バックエンドが分類せず直接従う）
     const inputEl = document.getElementById('input');
     if (inputEl) {
       inputEl.value = action === 'cancel' ? 'キャンセル' : '実行して';
+      inputEl.dispatchEvent(new Event('input'));
+    }
+    sendMessage();
+  }
+
+  // ---- MAGI 三賢者 計画審議パネル（審議モード=内部値 team の計画承認画面） ----
+  function _magiEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function _magiEscAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/\n/g,'&#10;'); }
+
+  // BALTHASAR=ディスパッチャー(立案) / CASPER=コーディング(実装) / MELCHIOR=リサーチ(審議役)
+  function _magiApprovePanelHTML(jobId) {
+    const stc = getStartupTest() ? 'checked' : '';
+    return `
+    <div class="magi-approve" style="margin-top:12px;background:#05060a;border:1px solid #f5a000;border-radius:8px;padding:12px 12px 10px;">
+      <div style="text-align:center;color:#f5a000;font-weight:900;letter-spacing:2px;font-size:11.5px;margin-bottom:4px;">MAGI SYSTEM ─ 計画審議</div>
+      <svg viewBox="0 0 300 184" width="244" height="150" style="display:block;margin:0 auto;">
+        <!-- BALTHASAR (上) 下両角だけ45°面取り -->
+        <polygon points="98,8 202,8 202,68 186,84 114,84 98,68" fill="rgba(120,205,235,.15)" stroke="#7fd3ef" stroke-width="2"/>
+        <text id="mv-b" x="150" y="32" text-anchor="middle" fill="#f5a000" font-size="20" font-weight="900" letter-spacing="3">待機</text>
+        <text x="150" y="52" text-anchor="middle" fill="#cdeefb" font-size="11.5" font-weight="900" letter-spacing="1">BALTHASAR·2</text>
+        <text class="mc-approve-model" data-role="dispatcher" x="150" y="68" text-anchor="middle" fill="#9fd9ef" font-size="9" font-weight="700" font-family="monospace">—</text>
+        <!-- CASPER (下左) 右上だけ45°面取り -->
+        <polygon points="8,104 98,104 114,120 114,176 8,176" fill="rgba(120,205,235,.15)" stroke="#7fd3ef" stroke-width="2"/>
+        <text id="mv-c" x="58" y="132" text-anchor="middle" fill="#f5a000" font-size="20" font-weight="900" letter-spacing="3">待機</text>
+        <text x="58" y="152" text-anchor="middle" fill="#cdeefb" font-size="11.5" font-weight="900" letter-spacing="1">CASPER·3</text>
+        <text class="mc-approve-model" data-role="coding" x="58" y="168" text-anchor="middle" fill="#9fd9ef" font-size="9" font-weight="700" font-family="monospace">—</text>
+        <!-- MELCHIOR (下右) 左上だけ45°面取り -->
+        <polygon points="292,104 202,104 186,120 186,176 292,176" fill="rgba(255,42,42,.16)" stroke="#ff2a2a" stroke-width="2"/>
+        <text id="mv-m" x="242" y="132" text-anchor="middle" fill="#f5a000" font-size="20" font-weight="900" letter-spacing="3">待機</text>
+        <text x="242" y="152" text-anchor="middle" fill="#ffd0d0" font-size="11.5" font-weight="900" letter-spacing="1">MELCHIOR·1</text>
+        <text class="mc-approve-model" data-role="research" x="242" y="168" text-anchor="middle" fill="#ffb3b3" font-size="9" font-weight="700" font-family="monospace">—</text>
+        <!-- 連結: 上左/上右は箱の角どうしを斜めで, 下は水平1本 -->
+        <g stroke="#f5a000" stroke-width="3.5" stroke-linecap="round">
+          <line x1="114" y1="84" x2="98" y2="104"/>
+          <line x1="186" y1="84" x2="202" y2="104"/>
+          <line x1="114" y1="150" x2="186" y2="150"/>
+        </g>
+        <!-- 中央 MAGI（囲み無し） -->
+        <text x="150" y="118" text-anchor="middle" fill="#f5a000" font-size="15" font-weight="900" letter-spacing="2">MAGI</text>
+      </svg>
+      <div class="magi-review" style="display:none;margin:6px 2px 2px;border:1px solid #ff2a2a;border-radius:6px;padding:8px;color:#cdeefb;font-size:12.5px;line-height:1.6;background:rgba(0,0,0,.35);"></div>
+      <div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:8px;">
+        <button onclick="sendMaResume('${jobId}','execute')" style="background:#a6e3a1;color:#0a0a0a;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:bold;">▶ 実行</button>
+        <button onclick="maReviewPlan('${jobId}', this)" style="background:#1c2030;color:#7fd3ef;border:1px solid #7fd3ef;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:bold;">🔎 審議</button>
+        <button onclick="sendMaResume('${jobId}','cancel')" style="background:#3a1414;color:#ff8a8a;border:1px solid #ff2a2a;border-radius:6px;padding:6px 14px;cursor:pointer;">✕ 却下</button>
+        <label title="ONにすると納品前にこの環境で実際に起動/実行して動作確認します。" style="display:flex;align-items:center;gap:4px;font-size:12px;color:#cdd6f4;cursor:pointer;margin-left:2px;">
+          <input type="checkbox" ${stc} onchange="setStartupTest(this.checked)"> 🔎 起動テスト
+        </label>
+      </div>
+    </div>`;
+  }
+
+  // MAGI箱のSVGテキストにモデル名を入れる。長くて箱からはみ出す名前は端で切れて
+  // しまうので、はみ出す時だけ横方向に圧縮(textLength)して「全文」を表示する。短い名前は等倍のまま。
+  function _fitSvgModelText(el, boxW) {
+    el.removeAttribute('textLength'); el.removeAttribute('lengthAdjust');
+    let w = 0;
+    try { w = el.getComputedTextLength(); } catch (e) { /* 非表示等で測れない */ }
+    if (!w) w = (el.textContent || '').length * 5.4;   // 概算: monospace font-size9 ≈ 5.4px/字
+    if (w > boxW) { el.setAttribute('textLength', boxW); el.setAttribute('lengthAdjust', 'spacingAndGlyphs'); }
+  }
+
+  async function _populateApprovePanel(panel) {
+    try {
+      if (!_magiCfgCache) { const r = await fetch('/multi-agent/config'); _magiCfgCache = await r.json(); }
+      const mode = getAgentMode();
+      const set = (_magiCfgCache && (_magiCfgCache[mode] || _magiCfgCache.economy || _magiCfgCache.quality)) || {};
+      panel.querySelectorAll('.mc-approve-model').forEach(c => {
+        const rc = set[c.dataset.role] || {};
+        c.textContent = rc.model || '—';
+        c.title = (rc.preset_id ? rc.preset_id + ' / ' : '') + (rc.model || '');
+        _fitSvgModelText(c, 98);
+      });
+    } catch (e) { /* 取得失敗時はプレースホルダのまま */ }
+  }
+
+  // 審議: リサーチ役モデルが計画を審査し、承認/否決＋指摘を表示。否決なら再計画ボタンを出す。
+  async function maReviewPlan(jobId, btn) {
+    const panel = btn.closest('.magi-approve'); if (!panel) return;
+    const setV = (id, txt, col) => { const e = panel.querySelector('#' + id); if (e) { e.textContent = txt; e.setAttribute('fill', col); } };
+    const area = panel.querySelector('.magi-review');
+    const old = btn.textContent;
+    btn.disabled = true; btn.textContent = '審議中…';
+    setV('mv-m', '審議中', '#f5a000');
+    try {
+      const r = await fetch('/multi-agent/review-plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: jobId, workspace_scope: currentWorkspaceScope, agent_mode: getAgentMode() }),
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        area.style.display = ''; area.style.borderColor = '#ff2a2a';
+        area.innerHTML = '審議に失敗: ' + _magiEsc(d.error || '');
+        setV('mv-m', '待機', '#f5a000'); btn.disabled = false; btn.textContent = old; return;
+      }
+      const approve = d.verdict === 'approve';
+      if (approve) { setV('mv-b', '承認', '#19d6e6'); setV('mv-c', '承認', '#19d6e6'); setV('mv-m', '承認', '#19d6e6'); }
+      else        { setV('mv-b', '保留', '#f5a000'); setV('mv-c', '保留', '#f5a000'); setV('mv-m', '否決', '#ff3b3b'); }
+      area.style.display = ''; area.style.borderColor = approve ? '#19d6e6' : '#ff2a2a';
+      let html = '<div style="font-weight:900;color:' + (approve ? '#19d6e6' : '#ff6b6b') + ';margin-bottom:4px;">'
+               + (approve ? '■ 審議結果: 承認（このまま実行可）' : '■ 審議結果: 要修正')
+               + ' <span style="opacity:.6;font-weight:400;font-size:11px;">(' + _magiEsc(d.model || '') + ')</span></div>';
+      if (d.summary) html += '<div style="margin-bottom:4px;">' + _magiEsc(d.summary) + '</div>';
+      if (d.points && d.points.length) html += '<ul style="margin:4px 0 0;padding-left:18px;">' + d.points.map(p => '<li>' + _magiEsc(p) + '</li>').join('') + '</ul>';
+      if (!approve) {
+        const fb = ((d.summary ? d.summary + '\n' : '') + (d.points || []).map((p, i) => (i + 1) + '. ' + p).join('\n'));
+        html += '<div style="margin-top:8px;"><button data-fb="' + _magiEscAttr(fb) + '" onclick="sendMaReplan(\'' + jobId + '\', this.dataset.fb)" style="background:#ff2a2a;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:bold;">🔧 この指摘で計画を修正</button></div>';
+      }
+      area.innerHTML = html;
+    } catch (e) {
+      area.style.display = ''; area.innerHTML = '審議エラー: ' + _magiEsc(e); setV('mv-m', '待機', '#f5a000');
+    }
+    btn.disabled = false; btn.textContent = old;
+  }
+
+  // 審議の指摘を既存の再計画(replan)経路に流す → ディスパッチャーが指摘を反映して計画を再提示
+  function sendMaReplan(jobId, feedback) {
+    _maPendingJobId = jobId;
+    _maResumeAction = 'replan';   // LLM分類を経由せず必ず再計画→計画を再提示（プランA）
+    const inputEl = document.getElementById('input');
+    if (inputEl) {
+      inputEl.value = '審議指摘を反映して計画を修正して:\n' + (feedback || '');
       inputEl.dispatchEvent(new Event('input'));
     }
     sendMessage();
@@ -2121,22 +2826,92 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
   function updateMultiAgentBtn() {
     const btn = document.getElementById('ma-btn');
     const dd = document.getElementById('maq-dd');
+    const td = document.getElementById('mat-dd');
+    const eb = document.getElementById('ma-eva-banner');
     if (!btn) return;
+    const kbox = eb && eb.querySelector('.eva-kbox');
+    const emain = eb && eb.querySelector('.eva-main');
     if (isMultiAgentActive()) {
       btn.classList.add('active');
       btn.title = 'マルチエージェント: ON（複数AIが役割分担して実行）';
       if (dd) dd.style.display = '';
+      if (td) td.style.display = '';
+      if (eb) { eb.classList.add('show', 'alert'); eb.classList.remove('info'); }
+      if (kbox) kbox.textContent = '警報';
+      if (emain) emain.textContent = '多重思考接続 ─ シンクロ率 上昇中';
     } else {
       btn.classList.remove('active');
       btn.title = 'マルチエージェント: OFF（通常の単一エージェントモード）';
       if (dd) dd.style.display = 'none';
+      if (td) td.style.display = 'none';
+      if (eb) { eb.classList.add('show', 'info'); eb.classList.remove('alert'); }
+      if (kbox) kbox.textContent = '情報';
+      if (emain) emain.textContent = '単騎脳ー通常稼働';
     }
+    applyEvaMode();
   }
-  // 品質/コスト設定は専用キー maQuality に保存（旧実装は agentMode と共用で壊れていた）
+
+  // ---- エヴァモード（背面オーバーレイ演出・マルチAIとは独立トグル） ----
+  function isEvaMode() { return localStorage.getItem('evaMode') === 'true'; }
+  function toggleEvaMode() { localStorage.setItem('evaMode', !isEvaMode()); applyEvaMode(); }
+  function applyEvaMode() {
+    const on = isEvaMode();
+    const alert = isMultiAgentActive();   // マルチAI ON=警報(赤) / OFF=情報(緑)
+    document.body.classList.toggle('eva-on', on);
+    document.body.classList.toggle('eva-info', !alert);
+    const tb = document.getElementById('eva-toggle-btn');
+    if (tb) tb.title = 'EVAモード（演出）: ' + (on ? 'ON' : 'OFF');
+    const big = document.querySelector('#eva-overlay .eo-big');
+    const sub = document.querySelector('#eva-overlay .eo-sub');
+    const warn = document.querySelector('#eva-overlay .eo-warn');
+    const tag = document.querySelector('#eva-overlay .eo-tag');
+    if (big) big.textContent = alert ? '警報' : '情報';
+    if (sub) sub.textContent = alert ? '多重思考接続 ─ シンクロ率 上昇中' : '単騎脳ー通常稼働';
+    if (warn) warn.textContent = alert ? '＞＞ 警告 WARNING 警告 ＜＜' : '── 正常稼働 NORMAL ──';
+    if (tag) tag.textContent = alert ? 'MAGI SYSTEM / MULTI-BRAIN' : 'MAGI SYSTEM / STAND BY';
+    if (on && alert) populateMagiModels();
+  }
+  // MAGI三賢人カードのモデル名を実マルチAI設定から流し込む（cache・モード連動）
+  let _magiCfgCache = null;
+  async function populateMagiModels() {
+    const cells = document.querySelectorAll('#eva-overlay .mc-model');
+    if (!cells.length) return;
+    try {
+      if (!_magiCfgCache) {
+        const r = await fetch('/multi-agent/config');
+        _magiCfgCache = await r.json();
+      }
+      const mode = getAgentMode();   // economy / quality
+      const set = (_magiCfgCache && (_magiCfgCache[mode] || _magiCfgCache.economy || _magiCfgCache.quality)) || {};
+      const roles = ['dispatcher', 'coding', 'research'];
+      cells.forEach((c, i) => {
+        const rc = set[roles[i]] || {};
+        c.textContent = rc.model || '—';
+        c.title = (rc.preset_id ? rc.preset_id + ' / ' : '') + (rc.model || '');
+        _fitSvgModelText(c, 98);
+      });
+    } catch (e) { /* 取得失敗時はプレースホルダのまま */ }
+  }
+  // SYNC 数値の演出（エヴァモードON時のみ更新）
+  let _evaSyncBase = 87.2;
+  setInterval(() => {
+    if (!isEvaMode()) return;
+    const el = document.querySelector('#eva-overlay .eo-sync');
+    if (!el) return;
+    if (isMultiAgentActive()) {
+      _evaSyncBase = Math.min(99.4, _evaSyncBase + (Math.random() * 1.4 - 0.4));
+      el.textContent = 'SYNC ' + _evaSyncBase.toFixed(1) + '%';
+    } else {
+      el.textContent = 'SYNC ' + (62 + Math.random() * 0.6).toFixed(1) + '%';
+    }
+  }, 800);
+  // 品質/コスト設定は専用キー maQuality に保存。値は economy(コスト優先)/quality(品質優先)の2択。
+  // 旧値（balance 等）が残っていても economy に正規化する。
   function getAgentMode() {
-    return localStorage.getItem('maQuality') || 'balance';
+    const v = localStorage.getItem('maQuality');
+    return (v === 'economy' || v === 'quality') ? v : 'economy';
   }
-  const MAQ_LABELS = { balance: 'バランス', quality: '品質優先', economy: 'コスト優先' };
+  const MAQ_LABELS = { economy: 'コスト優先', quality: '品質優先' };
   function updateMaQuality() {
     const btn = document.getElementById('maq-dd-btn');
     if (!btn) return;
@@ -2146,10 +2921,34 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const dd = document.getElementById('maq-dd');
     if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
   }
+  // 実行方式: 既定は即応モード（内部値 single）。審議モード=team。パイプライン(旧)は残すが既定にしない（塩漬け）
+  function getTeamMethod() {
+    return localStorage.getItem('maMethod') || 'single';
+  }
+  const MAT_LABELS = { pipeline: 'パイプライン（旧）', team: '審議モード', single: '即応モード' };
+  function updateMaMethod() {
+    const btn = document.getElementById('mat-dd-btn');
+    if (!btn) return;
+    const v = getTeamMethod();
+    const lbl = btn.querySelector('.dd-label');
+    if (lbl) lbl.textContent = MAT_LABELS[v] || v;
+    const dd = document.getElementById('mat-dd');
+    if (dd) dd.querySelectorAll('.dd-item').forEach(it => it.classList.toggle('sel', it.dataset.value === v));
+  }
+  // 起動・動作テスト（納品前にこの環境で実際に起動/実行して検証する）: 既定OFF（安全側）
+  // UIは計画確認時の「▶実行する」の隣のチェックボックスで切替（localStorage に保存）
+  function getStartupTest() {
+    return localStorage.getItem('maStartupTest') === 'true';
+  }
+  function setStartupTest(v) {
+    localStorage.setItem('maStartupTest', v ? 'true' : 'false');
+  }
   // 初期化
   updateMultiAgentBtn();
   updateMaQuality();
+  updateMaMethod();
   _initDropdown('maq-dd', (v) => { localStorage.setItem('maQuality', v); updateMaQuality(); });
+  _initDropdown('mat-dd', (v) => { localStorage.setItem('maMethod', v); updateMaMethod(); });
 
   function stopGeneration() {
     if (abortController) abortController.abort();
@@ -3370,7 +4169,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     wrapper.className = `msg-wrapper ${cls}-wrapper`;
     const label = document.createElement('div');
     label.className = 'msg-role-label';
-    label.textContent = cls === 'user' ? 'You' : (_currentProviderName + (_currentModel ? ` (${shortModel(_currentModel)})` : ''));
+    label.textContent = cls === 'user' ? 'You' : (_currentProviderName + (_currentModel ? ` (${_currentModel})` : ''));
     wrapper.appendChild(label);
     const d = document.createElement('div');
     d.className = `msg ${cls}`;
@@ -4542,11 +5341,6 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     } catch(e) { /* 無視 */ }
   }
 
-  function shortModel(name) {
-    if (!name) return '';
-    return name.length > 20 ? name.slice(0, 20) + '…' : name;
-  }
-
   async function fetchProviderModels() {
     const url = document.getElementById('pv-url').value.trim();
     const apikey = document.getElementById('pv-apikey').value.trim();
@@ -4782,6 +5576,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
     const trimmedHistory = history.filter(m => m.role !== 'bg_user' && m.role !== 'bg_result').slice(-MAX_API_MESSAGES);
     // 計画確認ペンディング中の場合は job_id を取り出してバーを消す
     const resumeJobId = _maConsumePending();
+    const resumeAction = _maResumeAction; _maResumeAction = '';
 
     try {
       const res = await fetch('/chat', {
@@ -4799,7 +5594,11 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           workspace_scope: currentWorkspaceScope,
           multi_agent: isMultiAgentActive(),
           agent_mode: getAgentMode(),
+          team_mode: getTeamMethod() === 'team',
+          team_method: getTeamMethod(),
+          startup_test: getStartupTest(),
           resume_job_id: resumeJobId || '',
+          resume_action: resumeAction || '',
         }),
       });
 
@@ -4849,7 +5648,12 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
           if (!line.startsWith('data: ')) continue;
           let data;
           try { data = JSON.parse(line.slice(6)); } catch { continue; }
-          if (data.type === 'tool_start') {
+          if (data.type === 'team_event') {
+            handleTeamEvent(data.event);
+          } else if (data.type === 'run_started') {
+            // マルチ実行が永続化された。run_id を保持し、リロード/クラッシュ後の復元に使う
+            _saveActiveRun(data.run_id, text);
+          } else if (data.type === 'tool_start') {
             genPhase = data.name; updateGenStatus();
             updateStatusLine(statusEl, getToolStatusText(data.name, data.args));
             finalAnswer = '';
@@ -5064,17 +5868,16 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
             // AIメッセージ末尾に実行ボタンを挿入
             const msgEl = getOrCreateAiMsg()?.el || getOrCreateAiMsg();
             if (msgEl) {
-              const btnWrap = document.createElement('div');
-              btnWrap.style.cssText = 'margin-top:12px;display:flex;gap:8px;';
-              btnWrap.innerHTML = `
-                <button onclick="sendMaResume('${data.job_id}','execute')" style="background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-weight:bold;">▶ 実行する</button>
-                <button onclick="sendMaResume('${data.job_id}','cancel')" style="background:#45475a;color:#cdd6f4;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;">✕ キャンセル</button>
-              `;
-              msgEl.appendChild(btnWrap);
+              const panel = document.createElement('div');
+              panel.innerHTML = _magiApprovePanelHTML(data.job_id);
+              msgEl.appendChild(panel);
+              _populateApprovePanel(panel);
             }
           } else if (data.type === 'answer_done') {
+            // マルチ実行が正常完了したので復元用 run_id を破棄
+            _clearActiveRun();
             // plan_ready が来ていない場合はペンディング解除
-            if (!_maPendingJobId) _updatePlanConfirmUI(false);
+            if (!_maPendingJobId) { _updatePlanConfirmUI(false); _updateContinueUI(false); }
             // 読み上げ
             ttsSpeak(finalAnswer);
             // モデル名をラベルに表示（data.model は実際に応答したモデル）
@@ -5108,6 +5911,8 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
       }
     } catch(e) {
       if (e.name === 'AbortError') {
+        // ユーザーが停止＝この画面では復元しない（裏のドライバは完走するが追跡をやめる）
+        _clearActiveRun();
         setAiContent(getOrCreateAiMsg(), (finalAnswer ? stripThink(finalAnswer) : '') + ' [停止]');
       } else {
         getOrCreateAiMsg().textContent = `エラー: ${e.message}`;
@@ -5136,6 +5941,7 @@ try{if(window.navigator.standalone===true||(window.matchMedia&&matchMedia('(disp
 
   // ---- 起動時復元 ----
   loadHistory();
+  restoreActiveTeamRun();   // 未完了のマルチ実行があれば結果を取り戻す（リロード/クラッシュ復元）
   updateScopeBar();
   initInboxButton();
   fetch('/version').then(r => r.json()).then(d => {
@@ -8027,6 +8833,114 @@ window._pendingBgCards = null;
 if (typeof refreshRerunModels === 'function') refreshRerunModels();
 
 // ===========================================================================
+// 統計ダッシュボード UI（第1の軸＝モデル別利用割合）
+// ===========================================================================
+let _statsData = null;
+const _STATS_COLORS = ['#89b4fa','#a6e3a1','#f9e2af','#f38ba8','#cba6f7','#94e2d5','#fab387','#74c7ec','#eba0ac','#b4befe'];
+
+function openStatsModal() {
+  document.getElementById('stats-overlay').classList.add('open');
+  loadStats();
+}
+function closeStatsModal() {
+  document.getElementById('stats-overlay').classList.remove('open');
+}
+function _statsEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _statsFmt(n) {
+  n = n || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k';
+  return String(n);
+}
+async function loadStats() {
+  const days = document.getElementById('stats-range').value;
+  const box = document.getElementById('stats-breakdown');
+  box.innerHTML = '<div class="stats-empty">読み込み中…</div>';
+  try {
+    const r = await fetch('/stats/usage?days=' + encodeURIComponent(days));
+    _statsData = await r.json();
+  } catch (e) {
+    box.innerHTML = '<div class="stats-empty">統計の取得に失敗しました。</div>';
+    return;
+  }
+  renderStats();
+}
+function renderStats() {
+  if (!_statsData) return;
+  const t = _statsData.totals || {};
+  const cards = document.getElementById('stats-cards');
+  const cacheRate = (t.cache_hit_rate != null ? t.cache_hit_rate : 0);
+  const cacheCls = cacheRate >= 50 ? 'sc-good' : (cacheRate >= 20 ? 'sc-mid' : 'sc-low');
+  cards.innerHTML = [
+    ['利用モデル数', _statsFmt(t.models), ''],
+    ['呼び出し回数', _statsFmt(t.requests), ''],
+    ['合計トークン', _statsFmt(t.total_tokens), ''],
+    ['入力 / 出力', _statsFmt(t.prompt_tokens) + ' / ' + _statsFmt(t.completion_tokens), ''],
+    ['キャッシュ率', cacheRate + '%', cacheCls],
+  ].map(([lbl, val, cls]) =>
+    '<div class="stats-card"><div class="sc-val ' + cls + '">' + val + '</div><div class="sc-lbl">' + lbl + '</div></div>'
+  ).join('');
+
+  const metric = document.getElementById('stats-metric').value;  // requests | total_tokens
+  const rows = (_statsData.breakdown || []);
+  const box = document.getElementById('stats-breakdown');
+  if (!rows.length) {
+    box.innerHTML = '<div class="stats-empty">まだ利用データがありません。チャットで何回かやり取りすると記録されます。</div>';
+    return;
+  }
+  _renderDailyChart(metric);
+  const sum = rows.reduce((a, r) => a + (r[metric] || 0), 0) || 1;
+  const max = Math.max.apply(null, rows.map(r => r[metric] || 0)) || 1;
+  box.innerHTML = rows.map((r, i) => {
+    const val = r[metric] || 0;
+    const pct = (val / sum * 100);
+    const width = (val / max * 100);
+    const color = _STATS_COLORS[i % _STATS_COLORS.length];
+    const valLabel = metric === 'requests'
+      ? (_statsFmt(val) + ' 回')
+      : (_statsFmt(val) + ' tok');
+    const cr = (r.prompt_tokens > 0) ? Math.round((r.cached_tokens || 0) / r.prompt_tokens * 100) : null;
+    const cacheChip = (cr != null)
+      ? '<span class="bh-cache" title="入力トークンのうちキャッシュ読込だった割合">💾 ' + cr + '%</span>'
+      : '';
+    return '<div class="stats-bar-row">' +
+      '<div class="stats-bar-head">' +
+        '<span class="bh-model">' + _statsEsc(r.model || '不明') + '</span>' +
+        '<span class="bh-prov">' + _statsEsc(r.provider || '') + '</span>' +
+        cacheChip +
+        '<span class="bh-val">' + valLabel + '</span>' +
+        '<span class="bh-pct">' + pct.toFixed(1) + '%</span>' +
+      '</div>' +
+      '<div class="stats-bar-track"><div class="stats-bar-fill" style="width:' + width + '%;background:' + color + '"></div></div>' +
+    '</div>';
+  }).join('');
+}
+
+function _renderDailyChart(metric) {
+  const days = (_statsData && _statsData.daily) || [];
+  const box = document.getElementById('stats-daily');
+  if (!box) return;
+  if (!days.length) {
+    box.innerHTML = '<div class="stats-empty">まだ推移データがありません。</div>';
+    return;
+  }
+  const max = Math.max.apply(null, days.map(d => d[metric] || 0)) || 1;
+  const unit = metric === 'requests' ? '回' : 'tok';
+  box.innerHTML = '<div class="stats-daily-chart">' + days.map(d => {
+    const v = d[metric] || 0;
+    const h = Math.max(2, v / max * 100);
+    const mmdd = (d.day || '').slice(5);  // MM-DD
+    const tip = mmdd + ' : ' + _statsFmt(v) + ' ' + unit;
+    return '<div class="stats-dbar-wrap" title="' + _statsEsc(tip) + '">' +
+      '<div class="stats-dbar" style="height:' + h + '%"></div>' +
+      '<div class="stats-dbar-lbl">' + _statsEsc(mmdd) + '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+// ===========================================================================
 // 定時実行スケジューラー UI
 // ===========================================================================
 const _RECUR_LABEL = { daily:'毎日', weekly:'毎週', hourly:'毎時', interval:'N時間ごと', once:'1回' };
@@ -8061,7 +8975,7 @@ function schedTab(page) {
   document.querySelectorAll('.sched-page').forEach(p =>
     p.classList.toggle('active', p.id === 'sched-page-' + page));
   if (page === 'templates') schedLoadTemplates();
-  if (page === 'new') { schedFillTemplateSelect(); schedFillScopeSelect(); }
+  if (page === 'new') { schedFillTemplateSelect(); schedFillScopeSelect(); schedFillModelSelect(); }
 }
 
 // 作業スコープのプルダウンを workspace サブフォルダで埋める
@@ -8075,6 +8989,40 @@ async function schedFillScopeSelect(selected = '') {
   } catch (e) {}
   sel.innerHTML = '<option value="">workspace 全体</option>' +
     dirs.map(d => `<option value="${_bgEsc(d)}">📁 ${_bgEsc(d)}</option>`).join('');
+  sel.value = selected || '';
+}
+
+// 実行モデルのプルダウンを /rerun-models（プロバイダー横断）で埋める。
+// selected は 'preset_id::model'。未指定なら「チャットの現在モデル」。
+async function schedFillModelSelect(selected = '') {
+  const sel = document.getElementById('snew-model');
+  if (!sel) return;
+  let models = [];
+  try {
+    const r = await fetch('/rerun-models');
+    models = (await r.json()).models || [];
+  } catch (e) {}
+  sel.innerHTML = '<option value="">（チャットの現在モデル）</option>';
+  const groups = {};
+  models.forEach(m => { (groups[m.provider] = groups[m.provider] || []).push(m); });
+  const multi = Object.keys(groups).length > 1;
+  Object.entries(groups).forEach(([prov, list]) => {
+    let container = sel;
+    if (multi) { const og = document.createElement('optgroup'); og.label = prov; sel.appendChild(og); container = og; }
+    list.forEach(m => {
+      const v = `${m.preset_id}::${m.model}`;
+      const o = document.createElement('option');
+      o.value = v; o.textContent = m.model;
+      if (v === selected) o.selected = true;
+      container.appendChild(o);
+    });
+  });
+  // 保存済みの指定が現在の一覧に無い（プロバイダー無効化など）場合も、選択を失わないよう保持表示
+  if (selected && !models.some(m => `${m.preset_id}::${m.model}` === selected)) {
+    const o = document.createElement('option');
+    o.value = selected; o.textContent = selected + '（現在利用不可）'; o.selected = true;
+    sel.appendChild(o);
+  }
   sel.value = selected || '';
 }
 
@@ -8093,7 +9041,7 @@ function schedSetEditMode(on) {
 function schedCancelEdit() {
   _schedEditId = null;
   schedSetEditMode(false);
-  ['snew-name', 'snew-scope'].forEach(id => document.getElementById(id).value = '');
+  ['snew-name', 'snew-scope', 'snew-model'].forEach(id => document.getElementById(id).value = '');
   schedSetDays([0, 1, 2, 3, 4, 5, 6]);  // 曜日チェックを毎日に戻す
   document.getElementById('snew-msg').textContent = '';
 }
@@ -8232,8 +9180,9 @@ async function schedLoadTasks() {
       const runs = (await rr.json()).runs || [];
       runsHtml = runs.slice(0, 5).map(run => {
         const when = (run.scheduled_at || '').replace('T', ' ').slice(5, 16);
-        return `<span class="sched-run-chip ${run.status}" title="${run.status}">
-          ${when} ${run.status}
+        const mdl = run.actual_model ? ` · 🤖 ${_bgEsc(run.actual_model)}` : '';
+        return `<span class="sched-run-chip ${run.status}" title="${run.status}${run.actual_model ? ' / ' + _bgEsc(run.actual_model) : ''}">
+          ${when} ${run.status}${mdl}
           <a href="#" onclick="schedClearRun(${run.id});return false;" style="color:#6c7086;margin-left:4px;" title="フラグ解除">✕</a>
         </span>`;
       }).join('');
@@ -8260,7 +9209,7 @@ async function schedLoadTasks() {
           <button class="sched-btn" onclick="schedEditTask(${t.id})">編集</button>
           <button class="sched-btn danger" onclick="schedDeleteTask(${t.id})">削除</button>
         </div>
-        <div class="r-meta">📋 ${_bgEsc(t.template || '?')}　/　🔁 ${recurDesc}　/　⏭ 次回: ${nextStr}</div>
+        <div class="r-meta">📋 ${_bgEsc(t.template || '?')}　/　🔁 ${recurDesc}　/　⏭ 次回: ${nextStr}${t.model_ref ? '　/　🤖 ' + _bgEsc(t.model_ref) : ''}</div>
         ${runsHtml ? `<div class="r-runs">${runsHtml}</div>` : ''}
       </div>`);
   }
@@ -8291,6 +9240,7 @@ async function schedEditTask(id) {
   if (task.interval_hours != null) document.getElementById('snew-interval').value = task.interval_hours;
   if (task.run_at) document.getElementById('snew-runat').value = task.run_at.slice(0, 16);
   await schedFillScopeSelect(task.workspace_scope || '');
+  await schedFillModelSelect(task.model_ref || '');
   schedSetEditMode(true);
 }
 
@@ -8302,7 +9252,8 @@ async function schedSubmitTask() {
   if (!name) { msg.style.color = '#f38ba8'; msg.textContent = 'タスク名は必須です'; return; }
   if (!template_id) { msg.style.color = '#f38ba8'; msg.textContent = 'テンプレを選択してください'; return; }
   const payload = { name, template_id, recurrence_type,
-    workspace_scope: document.getElementById('snew-scope').value.trim() };
+    workspace_scope: document.getElementById('snew-scope').value.trim(),
+    model_ref: document.getElementById('snew-model').value };
   if (recurrence_type === 'daily' || recurrence_type === 'weekly')
     payload.time_of_day = document.getElementById('snew-time').value;
   if (recurrence_type === 'daily') {

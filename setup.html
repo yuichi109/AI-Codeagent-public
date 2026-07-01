@@ -614,6 +614,16 @@
     </div>
     <div class="section-body">
       <p class="hint" style="margin-bottom:12px">役割ごとに使用するプロバイダーとモデルを設定します。未設定の場合は現在のアクティブプロバイダーが使われます。ディスパッチャーがタスクに応じてモデルを変更することもあります。</p>
+      <p class="hint" style="margin-bottom:12px;color:#f9e2af">⚠️ チーム方式では、検収で未達のタスクの<b>最終トライだけディスパッチャーのモデルへ格上げ</b>して再実行します。<b>ディスパッチャーには最上位モデルを割り当ててください</b>（ディスパッチャーより強いモデルを他の役割に当てると、格上げが逆に格下げになります）。</p>
+      <p class="hint" style="margin-bottom:12px">チャットの「コスト優先 / 品質優先」で切り替わる<b>2セット</b>を別々に編集できます。タブで切り替えてください（編集内容はタブを切り替えても保持され、保存時に両方まとめて保存します）。</p>
+      <div id="ma-tabs" style="display:flex;gap:6px;margin-bottom:10px">
+        <button type="button" class="ma-tab" data-set="economy"
+          onclick="switchMaTab('economy')"
+          style="padding:6px 16px;border:1px solid #45475a;border-radius:6px;cursor:pointer;font-size:13px;background:#cba6f7;color:#1e1e2e;font-weight:bold">💰 コスト優先</button>
+        <button type="button" class="ma-tab" data-set="quality"
+          onclick="switchMaTab('quality')"
+          style="padding:6px 16px;border:1px solid #45475a;border-radius:6px;cursor:pointer;font-size:13px;background:#313244;color:#cdd6f4">✨ 品質優先</button>
+      </div>
       <table id="ma-role-table" style="width:100%;border-collapse:collapse">
         <thead>
           <tr style="color:#6c7086;font-size:12px;text-align:left">
@@ -1517,8 +1527,9 @@ const MA_ROLE_LABELS = {
 };
 const MA_ROLES = Object.keys(MA_ROLE_LABELS);
 
-let _maProviders = [];   // [{preset_id, name, models:[]}]
-let _maConfig    = {};   // {role: {preset_id, model}}
+let _maProviders = [];                          // [{preset_id, name, models:[]}]
+let _maConfigAll = { economy: {}, quality: {} }; // { economy:{role:{...}}, quality:{role:{...}} }
+let _maTab       = 'economy';                    // 現在編集中のセット
 
 async function loadMaConfig() {
   try {
@@ -1527,16 +1538,49 @@ async function loadMaConfig() {
       fetch('/multi-agent/config').then(r => r.json()),
     ]);
     _maProviders = pRes.providers || [];
-    _maConfig    = cRes || {};
+    const c = cRes || {};
+    // サーバーは economy/quality の2セットを返す。万一の旧フラット形式は両セットへ複製。
+    if (c.economy || c.quality) {
+      _maConfigAll = { economy: c.economy || c.quality || {}, quality: c.quality || c.economy || {} };
+    } else {
+      _maConfigAll = { economy: { ...c }, quality: { ...c } };
+    }
     renderMaTable();
   } catch(e) {
     console.warn('MA config load failed:', e);
   }
 }
 
+// 現在表示中の表の選択内容を _maConfigAll[_maTab] に取り込む（タブ切替・保存の前に呼ぶ）
+function captureMaTable() {
+  const set = {};
+  MA_ROLES.forEach(role => {
+    const provSel  = document.querySelector(`[data-role="${role}"][data-type="provider"]`);
+    const modelSel = document.querySelector(`[data-role="${role}"][data-type="model"]`);
+    if (provSel && modelSel && provSel.value) {
+      set[role] = { preset_id: provSel.value, model: modelSel.value };
+    }
+  });
+  _maConfigAll[_maTab] = set;
+}
+
+function switchMaTab(tab) {
+  if (tab === _maTab) return;
+  captureMaTable();           // 今のタブの編集内容を保持
+  _maTab = tab;
+  document.querySelectorAll('#ma-tabs .ma-tab').forEach(b => {
+    const on = b.dataset.set === tab;
+    b.style.background = on ? '#cba6f7' : '#313244';
+    b.style.color      = on ? '#1e1e2e' : '#cdd6f4';
+    b.style.fontWeight = on ? 'bold' : 'normal';
+  });
+  renderMaTable();
+}
+
 function renderMaTable() {
   const tbody = document.getElementById('ma-role-rows');
   if (!tbody) return;
+  const _maConfig = _maConfigAll[_maTab] || {};
   tbody.innerHTML = '';
   MA_ROLES.forEach(role => {
     const cfg       = _maConfig[role] || {};
@@ -1580,32 +1624,24 @@ function onMaProviderChange(sel) {
   const tr       = sel.closest('tr');
   const modelSel = tr.querySelector('[data-type="model"]');
   if (!modelSel) return;
-  const curModel = (_maConfig[role] || {}).model || '';
+  const curModel = ((_maConfigAll[_maTab] || {})[role] || {}).model || '';
   modelSel.innerHTML = (prov ? prov.models : []).map(m =>
     `<option value="${m}" ${m === curModel ? 'selected' : ''}>${m}</option>`
   ).join('') || `<option value="">（モデルなし）</option>`;
 }
 
 async function saveMaConfig() {
-  const cfg = {};
-  MA_ROLES.forEach(role => {
-    const provSel  = document.querySelector(`[data-role="${role}"][data-type="provider"]`);
-    const modelSel = document.querySelector(`[data-role="${role}"][data-type="model"]`);
-    if (provSel && modelSel && provSel.value) {
-      cfg[role] = { preset_id: provSel.value, model: modelSel.value };
-    }
-  });
+  captureMaTable();   // 表示中タブの編集内容を取り込む（両セットを保存）
   const status = document.getElementById('ma-save-status');
   status.textContent = '保存中...';
   try {
     const r = await fetch('/multi-agent/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cfg),
+      body: JSON.stringify({ economy: _maConfigAll.economy || {}, quality: _maConfigAll.quality || {} }),
     });
     const data = await r.json();
     if (data.ok) {
-      _maConfig = cfg;
       status.textContent = '✓ 保存しました';
       setTimeout(() => status.textContent = '', 3000);
     } else {

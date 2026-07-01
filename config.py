@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-APP_VERSION = "1.20.10"
+APP_VERSION = "2.0.0"
 
 try:
     load_dotenv(override=True, encoding='utf-8')
@@ -282,6 +282,23 @@ MULTI_AGENT_PRESETS: dict = {
 MULTI_AGENT_MAX_ITERATIONS: int = int(os.getenv("MULTI_AGENT_MAX_ITERATIONS", "20"))
 MULTI_AGENT_TIMEOUT_SEC: int    = int(os.getenv("MULTI_AGENT_TIMEOUT_SEC", "300"))
 MULTI_AGENT_MAX_RETRIES: int    = int(os.getenv("MULTI_AGENT_MAX_RETRIES", "2"))
+
+# ---- 協調型チーム方式（Claude Code Agent Teams 準拠・docs/multi-agent-team-design.md）----
+# パイプライン方式（逐次・会話なし）はそのまま温存。チーム方式（並列・mailbox 直接通信）をトグルで追加。
+MULTI_AGENT_TEAM_ENABLED: bool = os.getenv("MULTI_AGENT_TEAM_ENABLED", "true").lower() == "true"
+MULTI_AGENT_MAX_PARALLEL: int  = int(os.getenv("MULTI_AGENT_MAX_PARALLEL", "5"))   # 同時実行 teammate 数の上限（天井）
+MULTI_AGENT_MAX_MESSAGES: int  = int(os.getenv("MULTI_AGENT_MAX_MESSAGES", "20"))  # 1ジョブの mailbox 総送信数ソフト上限（暴走ガード）
+# 検収で未達だったタスクの最終トライだけ上位モデルへ格上げする（空ならディスパッチャーのモデルにフォールバック）。
+# 「同じ失敗の繰り返し」を防ぐ唯一のレバー＝実力不足を最後の1回だけ賢いモデルでひっくり返す。
+# ⚠️ 前提: ディスパッチャー役には最上位モデルを割り当てること（フォールバック先がディスパッチャーのため）。
+#    ディスパッチャーより強いモデルを役割ワーカーに当てると、最終トライで意図せず格下げになりうる。
+#    格上げの強さを自分で固定したい場合は下記キーを明示設定する（その値がワーカーより上位である前提）。
+MULTI_AGENT_ESCALATE_PRESET: str = os.getenv("MULTI_AGENT_ESCALATE_PRESET", "")
+MULTI_AGENT_ESCALATE_MODEL: str  = os.getenv("MULTI_AGENT_ESCALATE_MODEL", "")
+# 429（レート制限）対策: ワーカーのLLM呼び出しが 429 のとき指数バックオフで待って再試行する。
+# 並列ワーカーが同一プロバイダーを一斉に叩いて 429 になっても、タスクを即殺せず捌けるようにする。
+MULTI_AGENT_RATELIMIT_RETRIES: int      = int(os.getenv("MULTI_AGENT_RATELIMIT_RETRIES", "5"))
+MULTI_AGENT_RATELIMIT_BASE_DELAY: float = float(os.getenv("MULTI_AGENT_RATELIMIT_BASE_DELAY", "2.0"))
 
 # ---- メール通知設定 ----
 NOTIFY_EMAIL_ENABLED: bool = os.getenv("NOTIFY_EMAIL_ENABLED", "false").lower() == "true"

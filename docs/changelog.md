@@ -5,6 +5,443 @@
 
 ---
 
+## 2026-07-01（セッション76 続き）v2.0.0：マルチエージェント方式を main にマージ（Stage移行）
+
+> `feature/multi-agent-team`（2026-06-22 作成・約1週間の開発）を `main` にマージ。**Stage 2（マルチAIエージェント）実用化**の区切りとしてメジャーバージョンを `2.0.0` に更新。チーム方式（審議/即応/パイプライン(旧・塩漬け)の3方式並走）・統計ダッシュボード・キャッシュ可視化がここで main に合流。
+
+## 2026-07-01（セッション76）審議モードの統計計測漏れ修正＋「この指摘で計画を修正」がキャンセルされるバグ修正（v1.31.1・feature/multi-agent-team）
+
+> 前回セッションの引き継ぎ（審議モードの Gemini が統計に記録されない）を調査・修正。加えてユーザー実機報告（審議パネルの「🔧 この指摘で計画を修正」を押すと計画修正依頼を出しているのにキャンセル扱いになる）も同時に修正。**このブランチのみ・main/for_windows 無変更。両方とも実機確認OK。**
+
+### 統計計測漏れの修正（3経路）
+- `chat.completions.create` を server.py 全箇所 grep → マルチエージェント関連で計測漏れが3箇所。
+  1. `/multi-agent/review-plan`（審議パネルのリサーチ役審査＝MELCHIOR）：ユーザー報告の本丸。
+  2. `_interpret_plan_response`（承認パネルでの execute/replan/cancel 判定）：引数に `preset_id` を追加し呼び出し2箇所を更新。
+  3. 即応型（single）の最終報告書生成。
+- いずれも `stream=False` の非ストリーミング呼び出しで、既存の `stats_db.record_response_usage(_preset_to_provider_type(preset), resp, model)` パターンを追加。
+- `classify_bg`/`mermaid_check`/`editor/complete`/`editor/chat` は審議モードと無関係の別系統のため今回は対象外（未計測のまま）。
+
+### 「この指摘で計画を修正」がキャンセルされるバグ修正
+- 原因：審議（チーム方式・`team_agent_stream`）の Phase2 分岐に、即応型（`multi_agent_stream`）にはある「`resume_action == "replan"` なら LLM分類を経由せず必ず再計画」の分岐が**欠けていた**。`replan` が `else`（LLM分類）に落ち、修正指示の文面を弱いモデル（DeepSeek-V4-Flash）が `cancel` と誤判定していた。
+- 再計画そのものの処理（`if action == "replan"`）はすでに存在しており、入口の分岐だけが漏れていた。
+- 修正：即応型と同じ構造に揃え、`resume_action == "replan"` を最優先で確定させるガードを追加（`server.py` `team_agent_stream`）。
+
+## 2026-06-30（セッション75 続き）統計ダッシュボード：キャッシュ可視化＋マルチAI記録（v1.31.0・feature/multi-agent-team）
+
+> 「キャッシュがちゃんと使われているか可視化したい」「マルチAIの消費も乗せたい」というユーザー要望に対応。実機でダッシュボードに 98回/54.7%キャッシュ率/マルチAIぶん込みで反映されることを確認済み。**このブランチのみ・main/for_windows 無変更。**
+
+### キャッシュ可視化（v1.31.0 前半）
+- `usage.prompt_tokens_details.cached_tokens` を拾う共通関数 `stats_db.cached_tokens_from_usage()`（オブジェクト/dict両対応）。
+- `stats_db.usage_daily` に `cached_tokens` 列＋後方互換マイグレーション（`_migrate`）。`record_usage(cached_tokens=)` で増分。`totals()` が `cache_hit_rate`（cached÷prompt）を返す。
+- 記録：チャット（server.py token_usage 地点）・BG/定時（agent_core.py）の両方で cached を記録。`token_usage` SSE にも `cached` を追加。**OpenRouter は extra_body に `usage:{include:true}` を追加**（両経路）＝詳細usageを応答に含めさせないと cached が取れないため。
+- UI（index.html）：サマリーに**キャッシュ率カード**（≥50%緑/20-50%黄/<20%赤）、モデル別バーに**💾キャッシュ率チップ**。
+- 調査メモ：OpenRouter のキャッシュは**配信プロバイダー依存**。`nvidia/nemotron-3-nano-30b-a3b` と `nemotron-3-super-120b-a12b` は配信全社（DeepInfra/Novita/Nebius/DekaLLM/DigitalOcean）が非対応で 0% が正しい。`deepseek-v4-flash/pro`・`nemotron-3-ultra-550b` は対応。0% はバグではない。
+
+### マルチAIの利用記録（v1.31.0 後半）— 計測漏れの解消
+- 問題：マルチAI（審議/即応のチーム実行）は `tools/multi_agent_tools.py` と `tools/team_tools.py` 経由で LLM を呼び、計測を入れた2箇所（チャットstream・BGワーカー）を通らず**ダッシュボードに乗っていなかった**。並列ワーカーが何度も呼ぶ＝最も消費する経路なのに漏れていた。
+- 修正：これらは全て `stream=False` で `response.usage` が直接取れるので、`stats_db.record_response_usage(provider, response, model)`（非ストリーミング用ヘルパー・自己防御つき）を5経路に追加：`dispatch_task` / `run_sub_agent`（反復ごと）/ `generate_final_report` / `run_team_member`（反復ごと）/ `dispatch_team_task`。
+- プロバイダー軸：server.py に `_preset_to_provider_type(preset_id)` を追加し、各呼び出し側で preset_id を `azure/foundry/openrouter/...` に正規化して渡す＝チャット/BGと同じ provider 軸へ合流。クロスプロバイダー（タスクごと別プロバイダー）でも正確。各関数に `provider: str="multi"` 引数を追加。
+- 検証：一時DB＋fakeレスポンスで record_response_usage 2件加算・`response.model` 優先・usage=None安全・provider正規化OK。再起動エラーなし。**実機スクショで反映確認**。
+
+### ⚠️ 既知の未対応 → セッション76で解消
+- ~~審議モードで使った Gemini が記録されない~~ → **セッション76（v1.31.1）で修正済み**。詳細は上記参照。
+
+### ⚠️ 反省（恒久ルール化）
+- このセッション中、検証の後片付けで本番 `data/stats.db` に `DELETE FROM usage_daily` を**2回**実行し、ユーザーの実利用データ（日次ロールアップ）を消した。**以降、統計の検証は一時DB（stats_test.db）に対してのみ行い、本番DBには READ 以外触らない。**
+
+---
+
+## 2026-06-30（セッション75）統計ダッシュボード 第1弾＝モデル別利用割合（v1.30.0・feature/multi-agent-team）
+
+> 無人実行（スケジューラー/BG）が空振りしてないか・コスト感・どのモデルがどれだけ使われたかを一覧で見たい、というユーザー要望に対応する統計ダッシュボードの着手。**最重要要件＝肥大化させない**（自分以外の人にも気兼ねなく使ってほしい）ため、生ログは一切ためず**日次ロールアップだけを別DB `stats.db` に蓄積**する設計。第1の軸として合意した「**モデル別利用割合**」から実装。**このブランチのみ・main/for_windows 無変更。**
+
+### 統計DB（tools/stats_db.py・新規・別DB data/stats.db に隔離）
+- schedule_db と同流儀（別DB・WAL・`init_db()`）。既存の schedule.db / jobs.db には一切触れない。
+- **テーブルは `usage_daily` 1枚のみ**：`(day, provider, model)` を主キーにした集計行。`requests`/`prompt_tokens`/`completion_tokens`/`total_tokens` を持つ。
+- **肥大化回避の核**：`record_usage()` は **UPSERT 増分**（`ON CONFLICT(day,provider,model) DO UPDATE`）＝呼ばれた回数に比例して行が増えず、行数は「その日に使ったモデル数」だけ増える（10モデル×365日×5年≈18,000行＝数MB）。生ログは残さない。
+- **ハードキャップ**：`MAX_USAGE_ROWS=50000` 超で古い日からまとめて自動トリム（`_trim()`・既存 prune 文化と同流儀）。通常は到達しない安全弁。
+- 集計API用関数：`model_breakdown(days)`（モデル別・降順）／`daily_series(days)`（日別推移）／`totals(days)`（期間合計・NULLは0正規化）。`days=0/None` で全期間。
+
+### 記録の配線（server.py・チャット経路）
+- 既存の `token_usage` SSE 送出地点（最終chunkで usage が来る所）で `stats_db.record_usage(provider_type, 実応答モデル, prompt/completion/total)` を呼ぶ。**OpenRouter フォールバックで実際に応答したモデル（`_turn_served`）を記録**＝指定と実体がズレても実態が残る。統計失敗で応答を止めないよう try/except で握りつぶす。
+- 起動時に `stats_db.init_db()`（SCHEDULER_ENABLED に依存せず常時）。
+- **API**：`GET /stats/usage?days=30`（0=全期間）が `{totals, breakdown, daily}` を返す。
+- **既知の範囲**：今回の記録はチャット経路のみ。BG/定時（agent_core）は usage を取っていないため未記録＝次段で拡張予定。
+
+### ダッシュボードUI（index.html・📊 ヘッダーボタン → モーダル）
+- ヘッダー（定時⏰の隣）に `📊 利用統計` ボタン。モーダルは期間プルダウン（7/30/90日・全期間）と割合の基準切替（**呼び出し回数 / トークン量**）を持つ。
+- サマリーカード4枚（利用モデル数・呼び出し回数・合計トークン・入力/出力）＋**モデル別の利用割合を横棒バー**で表示（プロバイダー名チップ・実数・%）。Chart.js等の外部依存なし＝**純CSSバーでオフライン安全**。色は10色パレット循環。`_statsFmt()` で k/M 丸め、`_statsEsc()` でモデル名エスケープ。
+- 数値は `loadStats()`（API取得）→ `renderStats()`（描画）。基準切替は再fetchせず再描画のみ。
+
+### BG/定時（無人実行）の記録（agent_core.py）— 動機の本丸
+- チャットだけ記録では「無人実行が空振りしてないか・コスト感」という**本来の動機が満たせない**ため、BGワーカー（async_worker 別プロセス）の LLM ループにも記録を追加。`create_kwargs["stream_options"]={"include_usage": True}` を付け、最終chunkの usage で `stats_db.record_usage()`。OpenRouter は `chunk.model`（実応答モデル `_turn_served`）を記録。統計失敗で BG ジョブを止めないよう try/except。
+- **別プロセス安全**：BGワーカーは init_db を呼ばないため、`stats_db` に**遅延初期化**（`_initialized` フラグ＋`_ensure_init()`）を追加し、`record_usage()` 初回でスキーマを保証。SQLite WAL でサーバー/ワーカーの並行書き込みも安全。
+
+### 日別の推移グラフ（index.html）
+- モーダルに「日別の推移」セクションを追加。API が既に返している `daily`（日×合計）を**純SVG/CSSの縦棒**で表示（基準切替＝回数/トークンに連動・hover でツールチップ）。`_renderDailyChart(metric)` を `renderStats()` から呼ぶ。
+
+### 検証
+- stats_db ロールアップを単体テスト（UPSERT 増分・breakdown/totals/daily の集計値一致）。**遅延初期化**を別プロセス相当（init_db 未呼び出し）で record_usage→自動スキーマ生成を確認。サーバー再起動 active・ログ無エラー・`/stats/usage` 200（空DBで0・シード後に正しい集計）。static-preview に curl 検証済みJSONを注入し `renderStats()` 実行＝モデルバー・**日別棒7本**（06-24〜06-30・相対高さ/ツールチップ一致）・割合 62.5/25/12.5%（回数）⇄37.3/34.8/28.0%（トークン）一致、コンソール無エラー、**スクショ目視OK**。検証後にシードを削除し本番 stats.db はクリーン状態（実利用で蓄積開始）。
+
+### 残（次々段・roadmap に整理）
+- 推定コスト（単価表を config/.env に）／ジョブ成否率・平均所要時間（jobs.db）／スケジューラー代替フォールバック率（task_runs.actual_model）／Power BI 連携用 CSV/Excel エクスポート。
+
+---
+
+## 2026-06-30（セッション74）スケジューラーのタスクごとモデル指定＋審議モード却下バグ修正（v1.29.0・feature/multi-agent-team）
+
+> 定時タスクは無人実行なので「後で空振りが分かる」のが痛い → 重要タスクほど賢いモデルを固定したいというユーザー要望に対応。タスクごとに実行モデルを指定でき、実行履歴に「実際に動いたモデル」も残るようにした。加えて、審議モードで計画を**却下したのにジョブが進行してしまうバグ**を修正。**このブランチのみ・main/for_windows 無変更。**
+
+### スケジューラー: タスクごとのモデル指定（クロスプロバイダー）
+- **スキーマ**（tools/schedule_db.py）：`scheduled_tasks.model_ref`（`preset_id::model` 形式）と `task_runs.actual_model` を追加。`_migrate()` で既存DBに後方互換 ALTER（days_of_week と同じ流儀）。`create_task(model_ref=)`、`claim_occurrence(actual_model=)`、`set_run_actual_model()` 追加、`_TASK_FIELDS` に model_ref（update_task が自動対応）。
+- **解決ロジック**（server.py）：`_resolve_model_ref('preset_id::model')` がプロバイダー別に type/url/api_key を組んで BG ジョブ用 provider_config を返す（認証情報が無い・不正なら None）。`_provider_label(cfg)` で「プロバイダー名 / モデル」ラベル化。
+- **発火**：`_create_job_from_task()` を `(job_id, 実行モデルラベル)` 返却に変更。指定が解決できればそのモデルで実行／**指定があるが使えない場合はチャットモデルにフォールバックしつつ「（指定 X が使用不可のため代替）」を履歴に明記**（合意仕様(c)＝黙って代替でも失敗扱いでもなく、動かすが何が起きたか残す）／未指定はチャットモデル（後方互換）。`_scheduler_create_job` も同タプル。run-now・取りこぼし実行・スケジューラー `_fire` の3経路すべてで actual_model を記録（`_fire` は旧 str 返却も isinstance で許容）。
+- **API**：TaskRequest/TaskUpdateRequest に `model_ref`。自然言語ツール `schedule_task_create(model_ref=)` も対応。`/schedule/tasks` は model_ref を同梱。
+- **UI**（index.html）：新規/編集フォームに「実行モデル」プルダウン（`/rerun-models` 横断・既定「（チャットの現在モデル）」・利用不可になった指定値は「（現在利用不可）」で選択保持）＝`schedFillModelSelect()`。submit/edit/reset に配線。タスク一覧 meta に `🤖 固定モデル`、実行履歴チップに `🤖 実際に動いたモデル` を表示。
+- **検証**：backend py_compile・migration実DB適用・`_resolve_model_ref` 全ケース・DB往復（model_ref保存/actual_model記録）・サーバー再起動200・`/rerun-models`・`/schedule/tasks`(model_ref同梱)。static-preview でフォーム描画/関数定義/グループ化/選択保持/利用不可フォールバック/コンソール無エラー＋スクショ目視。**ユーザー実機テストOK**。
+
+### 審議モード: 計画却下なのにジョブが走り出すバグ修正
+- **原因**：①却下ボタンが「キャンセル」という"テキスト"を送り、バックエンドの LLM 分類（`_interpret_plan_response`・ディスパッチャーモデル）に判定を委ねていた＝弱いモデルだと「キャンセル」を「実行」と誤分類してジョブが走り出す。②分類失敗時のフォールバックが `execute`＝判定不能でも黙って実行。
+- **修正**：修正ボタン(replan)が既に使う `resume_action` の確定指示方式を実行/却下にも適用。フロントの ▶実行 / ✕却下 ボタンが `resume_action`（execute/cancel）を明示送信し、`team_agent_stream`・`multi_agent_stream` の Phase2 が **execute/cancel は分類せず直接従う**（自由入力の返答だけ分類）。分類失敗時フォールバックを `execute`→`cancel`（勝手に走らせない）に変更。
+- **付随**：`multi_agent_stream`（旧パイプライン・塩漬け）が引数に無い `resume_action` を参照していた潜在 NameError を、引数追加＋呼び出し側で渡すよう是正。
+- **検証**：ユーザー実機テストOK（却下→「🚫キャンセルします」で停止しジョブ不発、その後の実行→正常進行）。
+
+### 追補 v1.29.1: ライブビューが出ない不具合修正＋MAGI箱のモデル名切れ修正
+- **ライブビューが開かない不具合（v1.28.0 の起動レース）**: `/chat` のマルチ分岐が `create_task(_drive_team_run)` でドライバを先に起動し、その後に `_relay_team_run` が購読キューを登録していた。ドライバは購読者ゼロの一瞬に最初のチャンク（**ペインを開く `plan` team_event**）を fan-out するため、ライブ視聴側だけ取りこぼし→右ペインが開かなかった（ディスクには残るので復元では見えていた）。修正＝**購読キューを `create_task` より前に `_TEAM_RUNS[run_id]["subs"]` へ登録**しレースを解消。即応(single)も同経路で同時に解消。保存SSE解析で team_event 43件(plan含む)送出を確認済み＝原因はフロント未受信と確定。**ユーザー実機OK**。
+- **MAGI箱のモデル名が後ろで切れる**: 審議パネル(`.mc-approve-model`)・EVA(`#eva-overlay .mc-model`)とも SVG `<text>` にフル名を入れていたが、長い名前が箱(viewBox)からはみ出し端でクリップされていた。修正＝`_fitSvgModelText(el, 98)` 新設＝はみ出す時だけ `textLength`+`lengthAdjust="spacingAndGlyphs"` で横圧縮して**全文表示**、短い名前は等倍のまま。両パネルに適用。静的プレビューで長/短/超長3ケースとも箱内・viewBox内に収まり短名は非伸長を確認。
+
+### 追補 v1.29.2: 応答ヘッダーのモデル名が「…」で切れる修正
+- AIターン上部のラベル `プロバイダー (モデル)` の初期表示が `shortModel()`（20文字で `…` 切り）を使っていたため「OPENROUTER (NVIDIA/NEMOTRON-3-NA…)」のように切れていた（ライブ更新・履歴復元側は元々全文）。修正＝初期ラベルも `_currentModel` を**全文表示**に。未使用化した `shortModel()` は削除（デッドコード除去）。`.msg-role-label` に省略CSSは無く、唯一の切り詰めは shortModel だったため、これで全経路で全文表示。
+
+---
+
+## 2026-06-29（セッション73）マルチ実行のリロード/クラッシュ復元（v1.28.0・feature/multi-agent-team）
+
+> マルチ実行中にブラウザをリロード/クラッシュすると、裏のワーカーは完走するのに**後処理（反映先統一・納品ゲート・最終報告書）が接続断でスキップ**され、画面も「開始」で固まって結果が見えなかった。実行をリクエストから切り離して永続化し、リロード/クラッシュ後でも結果を取り戻せるようにした（ユーザー選択＝最小案C・結果を失わない）。**既存の stream 本体は無改修＝回帰リスク最小。このブランチのみ・main/for_windows 無変更。**
+
+### バックエンド（server.py・既存 team/single/pipeline stream は無改修）
+- **実行を独立タスクへ切り離し**：`/chat` のマルチ分岐が `team_agent_stream`/`single_team_stream`/`multi_agent_stream` を**バックグラウンドのドライバ `_drive_team_run` で回す**。ドライバが SSE チャンクを逐次ディスク（`workspace/.agent-runs/<run_id>.sse`）へ保存しつつ、接続中クライアントへ中継。**クライアントが切れてもドライバは生き残り後処理まで完走**して成果物・`final-report.md`・実況ログを残す。HTTP レスポンスは購読者として中継するだけ（`_relay_team_run`）。先頭で `run_started{run_id}` を1イベント送る。
+- **run レジストリ**：`_TEAM_RUNS`（run_id→subs/status）。`_run_sse_path`/`_run_meta_path`/`_write_run_meta`/`_prune_team_runs`（直近30件保持）。`run_id` はサーバー採番（uuid 先頭12桁）。
+- **復元EP** `GET /multi-agent/runs/{run_id}`：保存済み SSE ログをパースし `message`（answer_chunk 連結）/`team_events`（ライブビュー再生用）/`plan_ready`/`status`/`meta` を返す。未知 run_id は 404。
+- 注：サーバーは systemd で常駐＝ブラウザクラッシュ後も run は生存。ディスク保存なのでサーバー再起動後も最終結果は復元可能。
+
+### フロント（index.html・既存の受信ループは無改修＝低リスク）
+- `run_started` を受けたら `localStorage.activeTeamRun` に run_id 保持。`answer_done`（正常完了）と明示的な停止で破棄。
+- **ページ読込時 `restoreActiveTeamRun()`**：未完了 run があれば復元EPを叩き、`team_events` を既存 `handleTeamEvent` で再生（ライブビュー復元）＋本文を新ターンに描画。完了済み=「復元しました」バナー＋run破棄／実行中=「まだ実行中」バナー＋「🔄更新」ボタンで再取得（run保持）。24h超の run は破棄。
+- 復元は受信ループを再利用せず別経路（保存ログ→組み立て→再生）にしたため、通常チャットの描画に一切手を入れていない。
+
+### 検証
+- サーバー再起動 HTTP200・`/multi-agent/runs/<未知>`=404・合成 `.sse` を置いて復元EPが message/team_events/status を正しく組み立てるのを確認。
+- フロント：静的配信でスクリプト無エラー読込・新関数定義・restore-render を fetch スタブで通し、完了/実行中の両ケース（バナー・更新ボタン・run破棄/保持・ライブビューpane点灯・markdown描画）を確認。
+- **未実施＝実トークンの実走で、実際にリロードして後処理完走＋画面復元を目視**（次回・経路は検証済みと同一）。
+
+---
+
+## 2026-06-29（セッション72）NERV外装＋並列強化＋役割固定ワーカー＋凡例色一致（v1.27.1〜1.27.4・feature/multi-agent-team）
+
+> ライブビューのフローティング窓を NERV ターミナル風に刷新し、マルチエージェントの「複数体が実際に並列で働く」を実現するため dispatcher の並列分解強化＋ワーカーの役割固定を入れた。さらに凡例と実物の状態色の不一致を解消。**このブランチのみ・main/for_windows 無変更。**
+
+### v1.27.1 フローティング窓を NERV ターミナル風に（index.html のみ・フロントのみ）
+- `.tl-fwin` / `.tl-fhead` を素の Catppuccin カードから NERV 外装に刷新：温かい黒地（`#0c0a08`）・等幅フォント・**右下を斜め面取り**（`clip-path` の切り欠き＝MAGI端末シルエット）・状態色のグロー枠。
+- ヘッダーを状態色ベタ塗り（実行中=アンバー `#ff6b00` / 完了=グリーン / 未達=レッド）＋ヘッダー右に **MAGI三賢者名**（既存 `TL_MAGI` で role→CASPER/MELCHIOR/BALTHASAR をマップ）。役割タグ・tid・モデルはヘッダー下のメタ行へ整理。新ヘルパ `_tlMagiLabel`/`_tlFloatMetaHtml`、`_tlFloatWinInner` を再構成。
+- **上下ハザード帯は窓に入れない**（EVAモードのオン/オフ側の担当という整理）。NERV外装は「フローティング表示中は常時適用」（`body.eva-on` でのゲートはしない）＝ユーザー確定。
+- 検証：静的配信＋合成3ワーカー（run/done/fail）で描画確認。
+
+### v1.27.2 dispatcher の並列分解を強化（prompts.py `dispatcher_team`）
+- **真因**：出力例そのものが `design→coding→debug` の一本鎖で、モデルが例を真似て直列計画を作っていた → 構造上1体しか動けない。
+- 出力例を**ファンアウト型**に作り替え（`design(1) → coding×3（盤面/描画/入力を別ファイル・全部 design だけに依存）→ debug（全実装に依存）`）。
+- 「**coding を1つの巨大タスクにまとめるな**（並列化の肝・最重要）」を明記。分離できる部分があれば部分ごとに別 coding タスクへ割り互いに依存させない／「迷ったら割る」／本当に小さい1ファイル実装のときだけ1つ。小さな既存修正の最小タスク方針は温存。
+- 反映には**サーバー再起動が必要**（f-string が import 時評価）。
+
+### v1.27.3 ワーカーを役割固定に・coding は複数許可（server.py ＋ index.html）
+- **動機（ユーザー指摘）**：モデルは役割で決まるのに、`agent-1` は役割を持たない「空き枠」で、self-claim プールだと最初の1体が design→coding→debug を全部拾って中のモデルだけ入れ替わる＝直感に反するねじれ。
+- `_build_role_workers(plan, max_parallel)` 新設：plan のタスクを役割別に数え、`coding`/`infra` は独立タスク数だけ並列ワーカー（上限 max_parallel）、他役割は1体。worker名 `<役割>-<連番>`（例 `design-1` / `coding-1,2,3` / `debug-1`）。
+- 両ストリーム（審議＝team_agent_stream / refine＝single）のワーカーループを `claim_task(..., role=bound_role)` に変更＝**自分の役割のタスクだけ取る**（既存のロール絞り込み機能を活用）。`workers`→`worker_specs`(name,role)/`worker_names` に置換、gather も `worker(n,r)` に。
+- フロント：アバター頭文字を役割対応に（`_tlInit` 新設＝MAGI頭文字＋番号 M1/C1/C2/C3…・旧 agent-N もフォールバックで A1 等）。
+- 検証：ユニットで 3 coding → `design-1/coding-1,2,3/debug-1` 構築を確認。静的配信＋合成データで5窓レンダリング（coding 3体同時=実行中・design=完了・debug=待機・モデルも役割どおり）。
+- **効く前提**：dispatcher が coding を複数に割る（v1.27.2）＋役割固定ワーカーが並列で拾う、の合わせ技。小さな指示は従来どおり1体で正常。
+
+### v1.27.4 凡例と実物の状態色を一致（index.html のみ）
+- フィード右側の状態グリフ（✓/✕/●実行中）が `グレー(#6c7086)` 固定で、凡例（✓緑/●アンバー/✕赤）と不一致だった（左ドットだけ色付き）。
+- `_tlFeedHtml` で右グリフの色を状態色（左ドットと同色 `${dot}`）に変更＝凡例と一致。フローティング窓・ドッキングレーン両方に効く。ハードリロードで反映。
+
+### リロード時の挙動（調査メモ・コード未変更）
+- マルチ実行中にブラウザ更新すると：ワーカー本体は `asyncio.create_task(run_all())` の独立タスクなので**裏で最後まで走りファイルは完成**。ただし**表示ストリーム側にある後処理**（HTML参照先統一 `reconcile_html_referenced_files`・納品ゲート・最終報告書）は接続断で**スキップされうる**。画面は「開始」で固まって見えるが実体は終了済み＝**リロードで画面を作り直せばよい**。実機の SUTE ジョブで成果物完成＋`index.html` が `js/game.js` を正しく参照（今回は二重化なし）を確認。
+- **未対応の改善余地**：後処理を裏タスク側へ移して「更新しても安全（完走＋結果保持）」にする案はユーザー保留。
+
+---
+
+## 2026-06-28（セッション71b）ライブビューにフローティングモードをトグル追加（v1.27.0・feature/multi-agent-team）
+
+> ライブビューに表示モードの切り替えを追加。`docked`（現行＝右ペインにレーン内蔵）と `floating`（看板は右固定のまま、各ワーカーを個別のドラッグ可能な浮遊窓に）。**フロントのみ（index.html）・バックエンド無改変・サーバー再起動不要。** このブランチのみ・main/for_windows 無変更。
+
+- **トグル**: `#tl-header` に表示モードボタン（▭/⧉）＋整列ボタン（▤・floating時のみ）。`tlMode`（localStorage保存）。`docked⇄floating` を `toggleTlMode`/`applyTlMode`。
+- **floating モード**: 看板（MAGI＋カンバン＋凡例）は右ペインに残し、ワーカーは `#tl-float-layer` に `position:fixed` の個別窓（`.tl-fwin`）で表示。EVA枠・稼働中は枠点滅・✕で閉じる。初期位置は自動カスケード。ドラッグはヘッダ `⠿` 掴み（document委譲の mousedown/mousemove/mouseup・位置は `tlFloatPos` に保持）。「整列」で再カスケード。
+- **PC専用**: `@media(max-width:768px)` で `.tl-fwin` 非表示＋`tlEffMode()` がモバイルでは強制 docked にフォールバック。
+- **共通化**: レーンと浮遊窓で `_tlLaneCls`/`_tlMetaHtml`/`_tlRailHtml`/`_tlFeedHtml`/`_tlKanbanHtml`/`_tlLegendHtml` を共用に切り出し。新ラン(plan)で浮遊窓をリセット、ペイン✕で浮遊窓もクリア。
+- **検証**: 静的配信＋合成イベントで、docked⇄floating 切替・浮遊窓2枚生成/カスケード・ドラッグ移動と位置保持・ドッキング復帰でレーン復元・整列ボタン表示制御を確認（コンソールエラー無し）。
+
+---
+
+## 2026-06-28（セッション71）マルチエージェント・ライブビュー（ワーカーレーン＋ツール実況）（v1.26.0・feature/multi-agent-team）
+
+> マルチエージェント実行中に「どのエージェントが・どのツールを発動して・今どの段階か」を右サイドペインでリアルタイムに見られるライブビューを新設。シングルAIで見えていたツール実況の透明性をマルチへ持ち込む。チャット本流は無改変の純粋な追加レイヤー。**このブランチのみ・main/for_windows 無変更。**
+
+### 背景（なぜ）
+- 審議/即応モードの実行中、UIには `🎯 t1 開始 → 完了 ✅` の粗い節目しか出ず、各ワーカーがどのツール（read_file/grep/write_file/run_command…）を叩いているかが `run_team_member()` の中で無言に起きていて見えなかった（`stream:False`＋イベント未送出）。
+
+### バックエンド（イベントの燃料を出す）
+- `tools/team_tools.py` `run_team_member()` に `on_event` フックを追加（引数追加のみ＝既定 None で従来挙動・既存呼び出し無改変）。ツール実行の前後で `tool`/`tool_done` イベントを送出。`_emit`（例外握り潰し）・`_brief_args`/`_brief_result`（ペイロード最小化）・`_result_ok`（`{"error":...}` JSON も失敗判定）を新設。
+- `server.py` `team_agent_stream`（審議）と `single_team_stream`（即応）の**両方**に同じ配線。既存の `asyncio.Queue` にテキスト(従来ナレーション)と構造化イベント(dict)を相乗りさせ、ドレインで `dict→team_event SSE` / `str→answer_chunk(従来通り)` に振り分け。`_sse_team` ヘルパ追加。実行直前に `plan` イベント（workers/tasks/依存）を先出し、worker 内で `task`（running/verify/retry/done/fail/error）を送出。パイプライン(multi_agent_stream)は対象外。
+
+### フロント（#team-live-pane）
+- `index.html` に BG パネルとは別の専用右サイドペイン `#team-live-pane` を新設（BGパネルは流用せず衝突回避）。`team_event` SSE 分岐を追加し、`teamLive` 状態＋`handleTeamEvent`＋`renderTeamLive` でモック準拠に描画：
+  - **MAGI三賢者グルーピング点灯**（BALTHASAR=統括[dispatcher] / CASPER=実装[coding,infra,debug] / MELCHIOR=知識[research,design,security,docs]・稼働役のノードが点灯）
+  - **ワーカーレーン**（アバター・役割タグ・モデル・段階レール[待機→実行中→検収→完了]＋ツール実況リスト・`getToolStatusText` 流用・実行中点滅・✓/●/✕）
+  - **カンバン**（待機/実行中/検収/完了に tid カードを配置）＋凡例
+  - 動的文字列は `_tlEsc` でエスケープ（生HTML混入防止）。モバイルは下に縦積み全幅。
+
+### 検証（実トークンE2E）
+- 静的配信＋プレビューで合成イベント駆動 → レーン/ツール実況/MAGI点灯/カンバン/段階遷移(実行中→検収→完了/未達)を目視確認。
+- 即応モードで実トークン実走 → `team_event` が実 `/chat` 経路で送出（plan×1・task×3・tool×14・tool_done×14、worker/role/実ツール名付き）。チャットナレーション(answer_chunk)は 2697 字で健在＝無回帰。二重化なし（game.js は js/ のみ）。
+- 両 stream は同型配線で審議モードも同じ経路。multi OFF 時はペイン非表示で無回帰。
+
+### 残課題（次回）
+- ブラウザで**審議モードの実トークン実走**を目視（即応は実走確認済み・審議は経路同一だが念のため）。
+- マージ判断（feature/multi-agent-team → main・版数2.0.0 or 現状継続）。
+
+---
+
+## 2026-06-26（セッション70）実行方式リネーム＋MAGI三賢者図をスケッチ準拠に作り直し（v1.25.1・feature/multi-agent-team）
+
+> 実行方式の名前を中身に合わせて変更し、MAGI 三賢者図をユーザーのスケッチ通り（横長の箱＋45°面取り＋角どうしを結ぶ斜め線）に作り直した。`index.html` のみ。**このブランチのみ・main/for_windows 無変更。**
+
+### 実行方式のリネーム（中身と名前のズレ解消）
+- 「シングル型（並列）／チーム（並列）」は実は人数の差ではなく**計画承認で止まる儀式の有無だけ**の差だったため、振る舞いで命名し直し。`index.html` の `MAT_LABELS` とドロップダウン、コメントを変更。**内部値（`single`/`team`/`pipeline`）は据え置き**＝localStorage・サーバールーティング・`.team` 判定に無影響。
+  - `single`（既定）→ **即応モード**（計画を出さず即実行）
+  - `team` → **審議モード**（MAGIで計画を審議→承認して実行）
+  - `pipeline` → **パイプライン（旧）**（塩漬け）
+  - ドロップダウンの並びを 即応→審議→パイプライン(旧) に整理。ツールチップも更新。
+- 審議モード＝MAGI計画審議パネルそのものなので名前と整合。**審議→修正→実行の往復は実機で動作確認済み**（ユーザー報告・残課題②の実トークン検証が一部クリア）。
+
+### MAGI三賢者図をスケッチ準拠に作り直し
+- 旧図（BALTHASAR=横幅いっぱいの帯／CASPER・MELCHIOR=縦長で不揃い・中心への線が変な角度）を、ユーザーの手描きスケッチ通りに刷新。`_magiApprovePanelHTML`（審議パネル）と `#eva-overlay .eo-magi`（EVAモード背面オーバーレイ）の**両方**を同一レイアウトに統一。
+  - **3箱とも横長の長方形**で、中心側の角だけ45°面取り（BALTHASAR=下両角／CASPER=右上／MELCHIOR=左上）。
+  - **中央は MAGI（囲み無しの素テキスト）**。連結は上左/上右が箱の角どうしを結ぶ斜め線、下は CASPER↔MELCHIOR 水平線1本。
+  - viewBox を `0 0 300 300`→`0 0 300 184`（横長アスペクト）に。箱を約104px幅にして**モデル名のはみ出しを解消**。
+  - 維持した連携: 審議パネル＝状態ID `mv-b`/`mv-c`/`mv-m`＋`mc-approve-model`(dispatcher/coding/research)／EVA＝`mc-model`(DOM順 dispatcher→coding→research の `populateMagiModels` 流し込み)。座標のみ新レイアウトに追従。
+- 図の確定は visualize ウィジェットで現在版/提案を並べて多数回プレビュー→ユーザー承認の上で実SVGに反映。サーバー再起動不要・ハードリロードで反映。
+
+### 残課題（次回）
+- **承認時UXの紛らわしさ**（残・対応不要とユーザー判断＝クローズ）。
+- **実トークンのさらなる検証**: 審議判定品質・二重化/報告書修正の実走。
+- **マージ判断**: feature/multi-agent-team を main へ。バージョンは 2.0.0（Stage移行）か 1.26.0（マイナー）かは保留＝ユーザー判断待ち。差分は9→10コミット・index.html 中心＋team_tools.py(新規)など。
+
+---
+
+## 2026-06-26（セッション69）MAGI三賢者 計画審議パネル＋マルチAI実機バグ修正（v1.25.0・feature/multi-agent-team）
+
+> 実機ランで出たバグを原因ごとに潰しつつ、計画承認画面を MAGI 三賢者の「審議」UIに刷新。**このブランチのみ・main/for_windows 無変更。**
+
+### UI微修正
+- **「⚡臨戦」→「⚡EVA」**にリネーム（個人利用のため権利配慮の自主規制を解除）。`index.html` のトグルボタンのラベル＋title 2箇所のみ。機能名・バナーの「臨戦」表記は未変更。
+- **マルチAI ON＋生成中の入力欄レイアウト崩れ修正**: トークン表示 `#gen-status` を `#input-box` の**外（直上・右寄せ）**へ移動。生成中に gen-status＋停止ボタンが入力ボックスをはみ出していたのを解消（1段のまま収まる）。PC/モバイル両方 preview で無回帰確認。
+
+### マルチAI 実機バグ修正（3件）
+- **二重化バグ（テストは通るがブラウザに反映されない）= 機械保証層を追加**: `tools/team_tools.py` に `reconcile_html_referenced_files()` 新設。**index.html が実際に読むファイル（`<script src>`/`<link href>`）を「正」**とし、エージェントが同名の別コピー（ルート/`code/`）を新しく編集していたら参照先へ上書き集約。既存 `reconcile_declared_files` が「宣言パスが空のときだけ」なのに対し、本関数は**古い中身が残っていても新しい同名コピーで上書き**する。single/team の納品ゲート直前で実行（`🧷 反映先を統一` ログ）。合成テスト5/5 PASS。併せて dispatcher プロンプトに「Webアプリの既存修正は index.html が読むファイルをその場で直す・ルート/code に同名新規を作るな」を明記。
+- **最終報告書の誤報修正**: `generate_final_report`（`tools/multi_agent_tools.py`）が **`.md` ファイルしか読んでいなかった**ため、`index.html` を見ず「ゲーム未完成・存在しない」と誤報していた（動くのに）。実コード（html/js/css/py 等）も読む＋**成果物ファイル一覧**を渡し「一覧にあるファイルを"存在しない"と書くな」と明示。＝モデルの賢さの問題ではなく、材料不足が原因だった。
+- **計画提示が途中で切れる**: 真因は prompt 内の生 `<script>` タグ。フロントは `marked.parse()`→`innerHTML` で描画するため `<script>` が**本物のHTMLタグとして解釈**され、以降（t2/t3含む）がまるごと飲み込まれていた。`_plan_lines`（server.py team/single）で prompt を**空白畳み＋ `< > &` エスケープ**して根治。実 marked.js で `scriptEls:1→0` を確認（プランデータ自体は常に完全だった）。
+
+### MAGI三賢者 計画審議パネル（新機能）
+- チーム方式の計画承認バーを **MAGI 三賢者パネル**に刷新（`index.html` `_magiApprovePanelHTML`）。BALTHASAR=ディスパッチャー/CASPER=コーディング/MELCHIOR=リサーチに**実割当モデル名**を表示＋中央 MAGI ハブ。ボタンは `▶実行 / 🔎審議 / ✕却下`（キャンセル→却下）。
+- **🔎審議** = 新エンドポイント `POST /multi-agent/review-plan`。リサーチ役モデルが計画を審査（特に「js/ を無視してルート同名新規＝二重化」を見る）し、`approve/revise`＋総評＋指摘を返す。承認=三賢者シアン「承認」／要修正=MELCHIOR赤「否決」＋指摘＋**「🔧この指摘で計画を修正」**ボタン。
+- **修正→再提示（プランA・確定）**: 修正ボタンは LLM分類を経由せず**強制 replan**。`ChatRequest.resume_action="replan"` を新設し `/chat`→`team_agent_stream` Phase2 で分類スキップ→必ず計画を再提示（また審議できる）。`_interpret_plan_response` の replan 基準に「修正して/やり直し/審議指摘を反映して」も追加。
+- 静的プレビューで描画・承認/否決の見た目・モデル名流し込み・再計画ボタンまで確認済み。
+
+### roadmap / issue
+- **GitLab [#68 BG（非同期エージェント）でもマルチAIに対応](https://gitlab.com/yuichi.matsuo/AI-Codeagent/-/work_items/68)** を起票＋`docs/roadmap.md` に将来課題追記（BGは何をしているか見えにくい→複数AIの役割分担をBGペインで可視化）。
+
+### 残課題（次回）
+- **承認時UXの紛らわしさ**: 審議で「承認」が出た後、MAGIパネルの `🔎審議` の隣にあるターンの `⟳再実行（別モデル）`バーと混同しやすい → 計画承認中は再実行バーを隠す等の対応。
+- **実トークン未検証**: 審議の往復（修正→再提示でまた審議パネルが出る）、審議エンドポイントの判定品質、二重化/報告書修正の実走確認。
+- **ネーミング保留**: チーム/シングル型 →「審議/即応」等の対語にリネーム（中身は同一エンジン・違いは計画承認の有無）。`却下`化は審議パネルで適用済み。
+
+---
+
+## 2026-06-25（セッション68c）臨戦モードの作り込み＝MAGI審議図・波紋・帯スクロール（v1.24.1・feature/multi-agent-team）
+
+> セッション68b の臨戦モードを実機の見た目フィードバックで詰めた。全て `index.html` の CSS/JS/HTML のみ。**このブランチのみ・main/for_windows 無変更。**
+
+- **MAGI SYSTEM 帯の追加（バグ修正）**: 実アプリのオーバーレイにデモには有った `MAGI SYSTEM / MULTI-BRAIN` 帯（`.eo-tag`）を入れ忘れていた → 追加。モード連動（マルチ=MULTI-BRAIN／通常=STAND BY）。
+- **中央の波紋を強調**: リングを太く(2→3px)・明るく(開始opacity .22→.6)・大きく(scale .3→1.6)し、3枚を時間差(1.2s)で連続発信。transform/opacity 主体で**CPU増えない**。
+- **上下ハザード帯を逆方向スクロール（マルチ時のみ）**: `transform: translateX` で上=右/下=左へ。45°ストライプの横1周期(≈31.11px)でループ＝継ぎ目なし。`body.eva-on:not(.eva-info)` で囲い、通常モードは静止。
+- **MAGI 三賢人 審議図（警報の下）**: ユーザー提供の本家画像に寄せて作成。上=BALTHASAR·2「承認」(シアン)/左下=CASPER·3「承認」(シアン)/右下=MELCHIOR·1「否決」(赤)、中央にオレンジの MAGI ハブ六角形＋上・左下・右下へ3本結線。各セルに**実マルチAI設定の割当モデル名**を流し込み（`populateMagiModels`・`/multi-agent/config`・BALTHASAR=dispatcher/CASPER=coding/MELCHIOR=research・コスト/品質連動・cache）。SVG。マルチ時のみ表示・通常は非表示。
+- **CPU軽量化の試み→撤回**: グローを静的化＋スキャンラインを transform 化したら「動き・光が地味」とユーザー判断で `git checkout` 破棄（派手さ優先）。重い要素（text-shadow ぼかしアニメ等）は残置。
+- **可読性調整**: 三賢者図の不透明度を `.85 → .6 → .45` に段階的に下げて確定（テキストが見やすいよう薄く）。警報まわりは変更なし。
+- ⚠️ index.html はキャッシュバスター無し＝ハードリロード必須。見た目はユーザー実機確認で確定済み。
+
+---
+
+## 2026-06-24（セッション68b）エヴァ風ステータス演出＝臨戦モード（v1.24.0・feature/multi-agent-team）
+
+> マルチAI ON の視認性を上げる遊び要素。タイトル横の常時バナー＋独立トグル「⚡臨戦」でチャット背面に警報オーバーレイ。
+> 全て `index.html` の CSS/JS のみ（サーバー非依存）。**このブランチのみ。main / for_windows 無変更。**
+
+### タイトル横バナー（常時表示・モード連動）
+- マルチAI ON＝赤「警報 多重思考接続 ─ シンクロ率 上昇中」／通常＝緑「情報 単騎脳ー通常稼働」。黒地＋左右に黄黒ハザード、赤/緑ネオンの**呼吸アニメ**（点滅でなく ease-in-out のゆっくり明滅。赤4.2s/緑5.6s）。`updateMultiAgentBtn` で文言・色を切替。スマホ非表示。
+- 併せてマルチAIボタン群（ma-btn・コスト優先・シングル型）の active 表示を紫→赤ネオン呼吸に変更。
+
+### 臨戦モード（独立トグル・背面オーバーレイ）
+- ヘッダーに `⚡臨戦` トグル（`toggleEvaMode`/`applyEvaMode`・`localStorage.evaMode`・既定OFF）。マルチAIとは独立。
+- ON で `#chat-wrapper` 背面（`#eva-overlay`・z-index 0／`#chat` を z-index 1・`#bg-side-pane` を z-index 2 に）に警報オーバーレイ常時表示：黄黒ハザード上下・スキャンライン・照準＋A.T.フィールド風パルス・中央巨大「警報/情報」透かし・MAGI三賢人ノード（MELCHIOR/BALTHASAR/CASPER 点滅）・右上 SYNC% 変動・上部「警告 WARNING」ストロボ。
+- 色はマルチAIモード連動（ON=赤警報／OFF=緑情報・緑は穏やか）。可読性のため透かし濃度に調整。スマホ非表示。
+- 権利配慮で表記は「EVANGELION」を使わず **MAGI SYSTEM／警報／臨戦** 等の語に統一。
+- 検証: config.py 構文OK・再起動 HTTP200・`#eva-overlay`/`#eva-toggle-btn`/`toggleEvaMode` の配信確認。⚠️ index.html はキャッシュバスター無し＝ハードリロード必須。最終的な見た目（濃さ/可読性）はユーザー実機確認。
+
+---
+
+## 2026-06-24（セッション68）実行方式の既定をシングル型に＋品質/コストを2プリセット化（v1.22.7〜1.23.0・feature/multi-agent-team）
+
+> パイプライン方式は**削除せず塩漬け**で確定（調査の結論：削除は範囲限定だが UI既定・ルーティング既定・旧resume の3点手当てが必須＝動くものを触るリスクが上回る）。
+> 代わりに「既定をシングル型に寄せる」＋「飾りだった品質/コスト設定を実働化」。**このブランチのみ。main / for_windows は無変更。**
+
+### パイプライン削除可否の厳密調査（変更なし・結論=塩漬け継続）
+- パイプライン専用＝`multi_agent_stream`（server.py）／`dispatch_task`・`run_sub_agent`（tools/multi_agent_tools.py）／`AGENT_SYSTEM_PROMPTS["dispatcher"]`（prompts.py）。
+- **共有で消せない**: `multi_agent_tools.py` の `generate_final_report`/`new_job_id`/`_update_status`/`AGENT_ALLOWED_TOOLS`/`_filter_tools` は team_tools が流用。`get_agent_system_prompt` と役割プロンプト全部・`MULTI_AGENT_*` は team/single 共有。`agent_core.py` に参照ゼロ＝BG/定時は非依存。
+- 削除時の要手当て3点: ①UI 既定がパイプライン ②`/chat` ルーティングの catch-all がパイプライン ③旧ジョブ resume（`<scope>/jobs/<id>`）。
+
+### `.agent-jobs` 退避＋プルーンの確認（セッション67分の積み残し）
+- 退避: 実機ラン（GAME5）でスコープ直下が成果物のみ・制御は `.agent-jobs/GAME5/<id>/` に集約を確認。
+- プルーン: `tests/test_prune_agent_jobs.py` 新規（実LLM不要の合成テスト）。25件→20件・古い5件削除・keep=0 全削除・存在しないスコープも安全、を確認。
+
+### v1.22.7 実行方式トグルの既定をシングル型に（パイプライン塩漬け）
+- `index.html`: `getTeamMethod()` 既定 `pipeline`→`single`・初期ラベルもシングル型。`server.py` `/chat` の空フォールバックも `pipeline`→`single`（UI/サーバーで既定一致）。既存ユーザーの選択（localStorage maMethod）は保持。
+
+### v1.23.0 品質/コストを実働化＝2プリセット（コスト優先 / 品質優先）
+- **これまで `agent_mode`（balance/quality/economy）は受け取るだけで未使用（飾り）だった**。
+- `.multi_agent_config.json` を `{economy:{8役割}, quality:{8役割}}` の2セット構造に変更。`server.py`:
+  - `_load_ma_config_all()`＝2セットで返す（**旧フラット形式は両セットへ複製して自動移行**・未設定は現アクティブモデルへフォールバック）。`_load_ma_config(mode)`＝モード別セットを返す（旧 balance 等は economy にフォールバック）。
+  - 3つの stream（multi_agent_stream / team_agent_stream / single_team_stream）が `agent_mode` を `_load_ma_config(agent_mode)` に渡すよう配線＝**初めて機能**。
+  - `/rerun-models`・`GET /multi-agent/config` を2セット対応（GET は2セット構造を返す）。
+- `setup.html`: 役割設定を「💰コスト優先 / ✨品質優先」**タブ**で2セット別々に編集（タブ切替で編集保持・保存時に両方 POST）。`captureMaTable`/`switchMaTable` 追加。
+- `index.html`: チャットのドロップダウンを2値（コスト優先=economy / 品質優先=quality）に。**既定はコスト優先**。旧値は economy に正規化。
+- `tests/e2e_team_retry.py`: モンキーパッチ `_load_ma_config` を `lambda *a,**k` 化（引数付き呼び出しに追従）。
+- 検証: 構文OK・移行/フォールバックOK・再起動HTTP200・GET 2セット返却・POST往復(ok·8役割)確認。⚠️ index/setup はキャッシュバスター無し＝ハードリロード必須。
+
+---
+
+## 2026-06-24（セッション67）シングル型を「スコープ＝継続」へ作り直し（v1.22.1〜1.22.6・feature/multi-agent-team）
+
+> 北極星＝**Claude Code に近づける／モード（single・team）を意識させない**。実機テスト（テトリス）で出た問題を
+> 1つずつ潰しつつ、継続(refine)を「ジョブID」でなく「**スコープ**」基準に作り直した。
+> single と team は同一エンジン（team_tools / dispatcher_team / get_team_member_prompt）を共有するため、以下は基本的に**両方に効く**。
+> **このブランチのみ。main / for_windows は無変更。** v1.22.0（シングル型段階1）は前コミット 429a5c2。
+
+### v1.22.1 納品ゲートの誤検知3種を対策
+- **debug の判定矛盾**: debug役プロンプトに「合否判定の鉄則」追加＝テストが落ちても (A)製品バグか (B)テスト側の前提ミスかを切り分け、(B)なら壊れたテストを直して再実行し、**動く成果物を自作テストの不備でFAILにしない**。
+- **http.server のポート衝突**: `run_acceptance_checks` に `_avoid_port_conflict`／`_free_port` を追加＝`python -m http.server 8000` の固定ポートを空きポートへ自動置換し、本体(uvicorn:8000)との自己衝突による偽「起動失敗」を解消。
+- **試行ログに「理由」列**: `summarize_attempts_md` で ⚠️/❌ のとき problems を表示（pass/fail しか分からない問題の解消）。
+- ※ `file://` での fetch/WASM 偽FAIL（browser_smoke_test を http 配信化）は**未対応で残す**。
+
+### v1.22.2 スコープ＝継続（全モードで既存ファイルをその場編集・儀式撤去）
+- `dispatcher_team` プロンプトに「★既存ファイルがあるときは作り直さずその場で修正・最小タスク」を明記（single/team 共通の dispatcher）。
+- `team_agent_stream` を **work_dir=スコープ** で動かすよう変更（従来は jobs/<id> に新規作成＝既存を触れなかった）。`generate_final_report` に `out_dir` 追加（成果物はスコープから読み、report は制御側に書く）。
+- フロントの緑「続けて指示できます」バー／「✕新規に戻す」／`team_job_open`／localStorage 継続を**撤去**。継続はスコープが持つ＝各指示は毎回フレッシュに分解（試行ログも新規・t1から）。team の計画承認フローは温存。
+
+### v1.22.3 制御ファイルをスコープ外へ退避＋自動プルーン
+- 制御/ログを `<scope>/.team|jobs/<id>` から **`workspace/.agent-jobs/<スコープ名>/<id>/`** へ集約（成果物に足場を混ぜない・スコープ名で迷子防止・`scope.txt` も残す）。`_agent_job_dir`／`_scope_from_job_dir`／`_prune_agent_jobs`（スコープごと直近20件保持）。`/chat` の再開ルーティングと各除外箇所（scope一覧/報告書/find_entry_html 等）を新パスに対応。
+
+### v1.22.4 最終報告書を「要望→対応」起点に
+- 報告生成にユーザーの指示文を渡し、冒頭に必ず「## ご要望への対応」を置く。要望ごとに対応/未対応/確認できないを明示し、対応箇所（ファイル・変更内容）を具体化。コードから確認できないものは推測で「対応済み」と書かない（嘘をつかない）。single はインライン、team は `generate_final_report(user_request=...)`。
+
+### v1.22.5 既存修正時のファイルロック緩和（実装箇所を grep で特定して直す）
+- 真因＝dispatcher が中身を見ずファイル名で対象を推測（renderer.js）→外す→ワーカーは宣言ファイル以外を触れず本物(main.js)を直せない。
+- `get_team_member_prompt` と worker base_prompt を「**新規作成は指定パス厳守／既存修正は grep・read_file で実装箇所を特定し、宣言に無い既存ファイルでも直す**」に緩和。`dispatcher_team` にも「ファイル名で当て推量せず grep で実装箇所を特定せよと指示に書け」を追加。
+
+### v1.22.6 試行ログに「分解（dispatcher）」行
+- タスク分解はディスパッチャー（役割割当の上位モデル想定）が行うが、`log_attempt` はワーカー試行のみ記録で「誰が分割したか」が見えなかった。新規ジョブの分解直後に dispatcher 行（role=`dispatch`・モデル＝dispatcher）を試行ログ先頭に記録（single/team 両方）。
+
+### 方針メモ
+- **パイプライン方式（multi_agent_stream）は将来的に削除**（ユーザー決定）。別系統で今回の改善がほぼ届かず最も遅れている＝廃止第一候補。当面は塩漬け。
+- 未確認: 各 v1.22.x の挙動は起動/スモークまで検証。要望対応・既存その場編集の最終品質は実機ラン（実トークン）での確認が前提。
+
+## 2026-06-23（セッション64）チーム方式 Step3 堅牢化（v1.21.1・feature/multi-agent-team・未コミット）
+
+> Step3 として検収・納品の信頼性を作り込み。実機で「マルチでdebugまでさせたのに動かない物を納品」「mini が
+> くだらない理由で差し戻され上位モデルに多発フォールバック」という問題を、原因を1つずつ潰して対処。
+> **このブランチのみ・全て未コミット。main / for_windows は無変更。**
+
+### 検収の強化（①）
+- `verify_task_files`: 空/空白だけのファイルも未達扱いに（作ったフリを弾く）。
+- `verify_task` 新設: debug役の `test-result.md` の FAIL を抜粋付きで検出。
+- 差し戻しを毎回エスカレーション（具体的な未達内容を渡す）＋**最終トライだけ上位モデルへ格上げ**（`MULTI_AGENT_ESCALATE_PRESET/MODEL`・空ならディスパッチャーにフォールバック）。前提＝ディスパッチャーを最上位モデルに（config/.env/UIに注意書き）。
+
+### status.md の信頼性
+- 記録を**リード機械化＋ファイルロック**（`update_status_locked`・並列の lost update 防止）。
+- 役割/共有(`_MA_COMMON_RULES`)/`dispatcher_team` プロンプトから「status を書く」手順を全撤去（teammate の丸ごと上書き事故を解消）。
+
+### 429 レート制限
+- ワーカーのLLM呼び出しに指数バックオフ＋ジッター再試行（`_create_with_backoff`・`MULTI_AGENT_RATELIMIT_RETRIES`=5/`_BASE_DELAY`=2.0）。
+
+### 成果物の配置を機械保証（モデル非依存）
+- `reconcile_declared_files`: モデルがどこに書いても宣言パスへ自動集約（同名でも他タスクの正規物は奪わない）。検収の直前に実行。
+- 真因＝コーディング役プロンプトの「出力先 code/」と dispatcher の宣言パス（`js/...`）の矛盾で mini が誤配置→未達→無駄な差し戻し/格上げ。team_rules で「宣言パス厳守・役割の出力先は無効」を上書き＋ワーカーが prompt 冒頭に作成対象ファイルを明示注入。
+
+### 納品ゲート＝「動く証拠が無いものは納品しない」（②の一般化）
+- `run_acceptance_checks`: ディスパッチャーが出す受け入れ条件（**起動確認 startup / 実行確認 run**）をリードが機械実行。**合否は終了コード基準**。`browser_smoke_test`: index.html を実ブラウザ(Playwright)で開き JS/CORS/読込エラーを検出（pageerror＋console error＋requestfailed・favicon除外）。
+- 失敗時は強モデルで1回自動修復→再検証→ダメなら「⚠️未完成」と正直に報告（成功と偽らない）。
+- **安全弁**: `sudo`/`apt`/`systemctl`/`rm -rf`/`ssh`/`curl|bash` 等やスクリプト中身の破壊的コマンドは実行せず静的検証(`bash -n`等)に格下げ。`kind:"syntax"` も静的のみ。→ **システム変更/他PC向け構築シェルをこの開発機で実行する事故を防止**。
+- **UI**: 計画確認の「▶実行する」の隣に「🔎起動テスト」チェックボックス（`startup_test` フラグ・既定OFF＝安全側・localStorage `maStartupTest`）。ヘッダーに最初付けたが秒数/トークン表示を圧迫したため撤去し、実行ボタン横へ移動。
+- 誤判定修正: 受け入れの `expect_contains` を**大文字小文字無視**で照合（`SELFTEST PASSED` vs `selftest passed:` で動く物を偽FAILにしていた件）。dispatcher に「合否は終了コードで・決め打ち文字列は原則使わない」を明示。
+
+### プロンプト（debug安全・Webアプリ）
+- debug役: GUI/ゲーム/サーバー等「終わらないプロセス」を素で起動しない鉄則（py_compile/node --check/コアロジックを実際に呼ぶ）。
+- coding役/dispatcher: ブラウザで直接開くWebアプリは ESモジュール禁止＝通常 `<script>`＋IIFE＋`window`名前空間（`file://` CORS・グローバル二重宣言の回避）。
+
+### テスト・環境
+- `tests/e2e_team_retry.py` 追加（差し戻し→格上げ→status機械記録を LLM不使用で決定論検証・ALL PASS）。各機能を単体検証済み（配置補正/429/ロック/受け入れ run・startup/破壊的格下げ/ブラウザ検出）。
+- venv に `playwright==1.60.0` 導入（chromium-1223 既存利用）。`config.py` `APP_VERSION` 1.21.0→1.21.1。
+
+---
+
+## 2026-06-23（セッション63）協調型マルチエージェント「チーム方式」Step1＋Step2 実装（v1.21.0・feature/multi-agent-team）
+
+> パイプライン方式（逐次・会話なし）は無改修で温存し、Claude Code Agent Teams に倣った
+> **チーム方式（並列・mailbox 直接通信・共有タスクリスト）**を UI トグルで追加。
+> 設計書: `docs/multi-agent-team-design.md` / 詳細メモリ: [[project-multi-agent-team]]。
+> **このブランチのみ。main / for_windows は無変更**（全体確認後にマージするユーザー方針）。
+
+### Step1: 協調コア
+- 新規 `tools/team_tools.py`:
+  - **共有タスクリスト** `tasks.json`: self-claim（pending かつ依存完了のみ取得）・`os.open(O_CREAT|O_EXCL)` ファイルロックで同時 claim 競合防止・完了で依存 unblock。
+  - **mailbox**: 宛先別 `mailbox/{name}.jsonl` 追記＋既読オフセットで未読のみ取得。`send_message`/`read_messages`/`list_tasks`。総送信数 `MULTI_AGENT_MAX_MESSAGES`(20) で暴走ガード。
+  - `run_team_member`: teammate のエージェントループ。**ターン冒頭に自分宛 mailbox を機械注入**（弱モデルが read_messages を呼び忘れても会話に入る）。ツール未使用でテキストだけ返したら**1回催促**。
+  - **専用便箋 executor**（`make_team_executor`）: job_dir＋自分の名前をクロージャで束ね、チームツールを処理。新ツールは**グローバル登録しない**（コンテキスト依存＝並列で取り違え防止）。
+  - `dispatch_team_task`: 依存グラフ付き plan.json を生成。
+- `prompts.py`: `dispatcher_team`（並列化を強く促す指針）・`get_team_member_prompt`。
+- `server.py`: `team_agent_stream`（plan_ready 確認フローは既存流用）・`ChatRequest.team_mode`・/chat 分岐（再開時は plan.json の mode を優先）。
+- `index.html`: 「パイプライン⇔チーム」トグル追加（既定パイプライン＝既存無改修）。**キャッシュバスター無し→ハードリロード必要**。
+- `config.py`: `MULTI_AGENT_TEAM_ENABLED`(true)・`MULTI_AGENT_MAX_PARALLEL`・`MULTI_AGENT_MAX_MESSAGES`。
+
+### Step2: ワーカープール＋検収/差し戻し＋並列化
+- **ワーカープール方式（A案）**: 役割に縛られず、空いたワーカー（`agent-1`…）が**実行可能なタスクを何でも取る**。`asyncio.gather`＋`Semaphore(max_parallel)` で同時実行。同役割の独立タスクが**真に並列**で走る（電卓4実装が agent-1〜4 で同時稼働を確認）。
+- **リード検収＋1回差し戻し**: teammate 完了後に宣言ファイル（`files`）の実在を `verify_task_files` で確認。無ければ「未作成」を伝えて**1回だけ再実行**、それでも無ければ正直に **未達** と記録（完了の嘘を撲滅）。
+- **相対パスの自動補正**（検証中に発見した真因の修正）: teammate の相対パス（`code/x.py` 等）を **job_dir 基準に正す**。従来は workspace ルートに落ちてファイル消失に見えていた。`path`/`file_path`/`work_dir` を補正。
+- `MULTI_AGENT_MAX_PARALLEL` 既定 **5**（天井。計画値は `min` で上限クランプ）。
+- ディスパッチャー指針強化: 独立な同種作業は鎖で依存させず共通の設計だけに依存＝並列化。
+
+### 検証（e2e: `tests/e2e_team.py`・実 LLM）
+- 単体: claim 競合・依存解決・mailbox 未読・専用便箋 executor 合格。
+- e2e（電卓）: 5ワーカー・コーディング4タスク同時並列・差し戻しで全完了・四則＋テスト＋test-result.md を**全て job_dir 内に生成**・workspace 漏れゼロ。
+- パイプライン方式の回帰なし（従来の逐次フロー維持を確認）。
+
+### Step3 向け残課題（次セッション）
+- 検収がファイルの「有無」のみ（中身の妥当性・テスト合否は未検収）。
+- teammate の status ファイル作り忘れで差し戻しが多発気味（プロンプト or 検収対象の調整余地）。
+- 複数 teammate の進捗が 1 本の SSE にラベル表示のみ（per-agent 表示未実装）・plan 承認モード未実装。
+
+---
+
 ## 2026-06-22（セッション61）`/backup-subdir` 同名上書きバグ修正（v1.20.10）
 
 - **症状**: 既に同名のバックアップファイルがあると、確認なしで**上書きされてしまう**。

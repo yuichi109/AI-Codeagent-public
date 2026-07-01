@@ -228,10 +228,14 @@ async def _fire(create_job_fn, task: dict, scheduled_at_iso: str,
     if not run_id:
         return  # 既に他が確保済み（冪等）
     try:
-        job_id = await asyncio.to_thread(create_job_fn, task)
+        result = await asyncio.to_thread(create_job_fn, task)
+        # create_job_fn は (job_id, 実行モデルラベル) を返す（旧来の str も許容）。
+        job_id, actual_model = result if isinstance(result, tuple) else (result, None)
         await asyncio.to_thread(schedule_db.set_run_job, run_id, job_id)
+        if actual_model:
+            await asyncio.to_thread(schedule_db.set_run_actual_model, run_id, actual_model)
         print(f"[scheduler] 発火 task={task['id']} '{task.get('name')}' "
-              f"job={job_id} ({'auto' if auto else 'manual'})", flush=True)
+              f"job={job_id} model={actual_model} ({'auto' if auto else 'manual'})", flush=True)
     except Exception as e:
         await asyncio.to_thread(schedule_db.decide_run, run_id, "failed")
         print(f"[scheduler] 発火失敗 task={task['id']}: {e}", flush=True)

@@ -81,7 +81,10 @@ from tools.code_tools import code_lint
 from tools.verify_tools import augment_tool_result_with_verify
 from config import VERIFY_ON_WRITE_ENABLED
 from config import SCHEDULER_ENABLED, SCHEDULER_CATCHUP_HOURS, SCHEDULER_TICK_SECONDS, ASYNC_MAX_TURNS
+from config import MULTI_AGENT_TEAM_ENABLED, MULTI_AGENT_MAX_PARALLEL, MULTI_AGENT_TIMEOUT_SEC as _MA_TIMEOUT_SEC
+from config import MULTI_AGENT_MAX_RETRIES, MULTI_AGENT_ESCALATE_PRESET, MULTI_AGENT_ESCALATE_MODEL
 from tools import schedule_db
+from tools import stats_db
 from tools.scheduler import scheduler_loop as _scheduler_loop
 from tools.todo_tools import todo_update, todo_read
 from tools.workspace_tools import protected_list_read, protected_list_update, protected_list_replace, workspace_cleanup_preview, workspace_backup, archive_workspace
@@ -330,6 +333,12 @@ async def lifespan(app: FastAPI):
     )
     print(f"[INFO] async_worker 起動 PID={_async_worker_proc.pid}", flush=True)
 
+    # 統計 DB 初期化（利用統計のロールアップ蓄積）。別DB stats.db に隔離。
+    try:
+        stats_db.init_db()
+    except Exception as e:
+        print(f"[WARN] stats_db 初期化失敗: {e}", flush=True)
+
     # 定時実行スケジューラー起動（in-process asyncio タスク）
     global _scheduler_task
     if SCHEDULER_ENABLED:
@@ -386,29 +395,103 @@ _async_worker_proc: subprocess.Popen | None = None  # set in lifespan
 _scheduler_task: "asyncio.Task | None" = None  # set in lifespan
 
 
-def _create_job_from_task(task: dict) -> str:
-    """テンプレ指示文を BG ジョブとして登録し job_id を返す（副作用なし）。"""
+def _provider_label(cfg: dict) -> str:
+    """provider_config を 'プロバイダー名 / モデル' 形式の人間可読ラベルにする。"""
+    who = cfg.get("name") or cfg.get("preset_id") or cfg.get("type", "?")
+    return f"{who} / {cfg.get('model', '?')}"
+
+
+def _resolve_model_ref(model_ref: str | None) -> dict | None:
+    """
+    'preset_id::model' を BG ジョブ用の provider_config dict に解決する。
+    指定が無効・該当プロバイダーの認証情報が無い場合は None（=フォールバック判断は呼び出し側）。
+    """
+    if not model_ref or "::" not in model_ref:
+        return None
+    preset_id, _, model = model_ref.partition("::")
+    preset_id, model = preset_id.strip(), model.strip()
+    if not preset_id or not model:
+        return None
+    base = {"model": model, "preset_id": preset_id, "tools_enabled": True}
+    if preset_id == "azure":
+        if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
+            return None
+        base.update(type="azure", url=AZURE_OPENAI_ENDPOINT,
+                    api_key=AZURE_OPENAI_API_KEY, name="Azure OpenAI")
+        return base
+    if preset_id.startswith("foundry"):
+        inst = next((i for i in FOUNDRY_INSTANCES if i["id"] == preset_id), None)
+        if not inst:
+            return None
+        base.update(type="foundry", url=inst["endpoint"],
+                    api_key=inst["api_key"], name=inst["name"])
+        return base
+    if preset_id == "gemini":
+        if not GEMINI_API_KEY:
+            return None
+        base.update(type="gemini", url="", api_key=GEMINI_API_KEY, name="Google Gemini")
+        return base
+    if preset_id == "openai":
+        if not OPENAI_API_KEY:
+            return None
+        base.update(type="openai", url="", api_key=OPENAI_API_KEY, name="OpenAI")
+        return base
+    if preset_id == "groq":
+        if not GROQ_API_KEY:
+            return None
+        base.update(type="groq", url="", api_key=GROQ_API_KEY, name="Groq")
+        return base
+    if preset_id == "openrouter":
+        if not OPENROUTER_API_KEY:
+            return None
+        base.update(type="openrouter", url="", api_key=OPENROUTER_API_KEY, name="OpenRouter")
+        return base
+    return None
+
+
+def _create_job_from_task(task: dict) -> tuple[str, str]:
+    """
+    テンプレ指示文を BG ジョブとして登録し (job_id, 実行モデルラベル) を返す（副作用なし）。
+
+    task.model_ref ('preset_id::model') が指定され解決できればそのモデルで実行。
+    指定があるが使えない場合は (c) チャットモデルにフォールバックし「代替」をラベルに明記する。
+    未指定はチャットモデルで実行（後方互換）。
+    """
     prompt = task.get("template_prompt") or ""
     if not prompt:
         raise RuntimeError(f"テンプレ未設定 task_id={task.get('id')}")
-    return _create_async_job(
+    model_ref = (task.get("model_ref") or "").strip()
+    cfg = _resolve_model_ref(model_ref)
+    if cfg is not None:
+        provider = cfg
+        actual_model = _provider_label(cfg)
+    elif model_ref:
+        # 指定はあるが解決不可 → フォールバックして実行し、何が起きたか履歴に残す（(c)）
+        provider = dict(_provider_config)
+        actual_model = f"{_provider_label(_provider_config)}（指定 {model_ref} が使用不可のため代替）"
+    else:
+        provider = dict(_provider_config)
+        actual_model = _provider_label(_provider_config)
+    job_id = _create_async_job(
         message=prompt,
-        provider_config=dict(_provider_config),
+        provider_config=provider,
         max_turns=ASYNC_MAX_TURNS,
         workspace_scope=task.get("workspace_scope") or "",
     )
+    return job_id, actual_model
 
 
-def _scheduler_create_job(task: dict) -> str:
-    """スケジューラー発火時のコールバック。ジョブ登録＋once タスクの自動無効化。"""
-    job_id = _create_job_from_task(task)
+def _scheduler_create_job(task: dict) -> tuple[str, str]:
+    """スケジューラー発火時のコールバック。ジョブ登録＋once タスクの自動無効化。
+    (job_id, 実行モデルラベル) を返す。"""
+    job_id, actual_model = _create_job_from_task(task)
     # 1回限りのタスクは発火後に無効化する
     if task.get("recurrence_type") == "once":
         try:
             schedule_db.set_enabled(task["id"], False)
         except Exception:
             pass
-    return job_id
+    return job_id, actual_model
 
 
 def _win_kill_worker_then_exit():
@@ -529,7 +612,7 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
                          time_of_day: str = None, day_of_week=None,
                          days_of_week=None,
                          interval_hours: int = None, run_at: str = None,
-                         workspace_scope: str = "") -> dict:
+                         workspace_scope: str = "", model_ref: str = None) -> dict:
     """
     定時タスクを登録する。template_name で実行内容テンプレートを指定する。
     recurrence_type: daily(毎日) / weekly(毎週) / once(1回) / hourly(毎時) / interval(N時間ごと)
@@ -537,6 +620,8 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
     daily で特定曜日のみ実行したい場合は days_of_week に '月,火,水,木,金' や '0,1,2,3,4'
     を渡す（未指定なら毎日）。土日を除くなら平日5日を指定する。
     once は run_at='YYYY-MM-DDTHH:MM:SS'。interval は interval_hours が必要。
+    model_ref は実行モデルを 'preset_id::model' 形式で固定したい場合に指定（未指定はチャットの
+    現在モデルで実行）。利用可能な値は /rerun-models の一覧（preset_id::model）に準拠する。
     """
     tpl = schedule_db.get_template_by_name(template_name)
     if not tpl:
@@ -547,7 +632,7 @@ def schedule_task_create(name: str, template_name: str, recurrence_type: str,
             time_of_day=time_of_day, day_of_week=_coerce_dow(day_of_week),
             days_of_week=_coerce_dow_list(days_of_week),
             interval_hours=interval_hours, run_at=run_at,
-            workspace_scope=workspace_scope or "",
+            workspace_scope=workspace_scope or "", model_ref=model_ref,
         )
     except ValueError as e:
         return {"error": str(e)}
@@ -1973,7 +2058,11 @@ class ChatRequest(BaseModel):
     workspace_scope: str = ""  # 空文字 = 制限なし（workspace全体）
     multi_agent: bool = False
     agent_mode: str = "balance"  # "quality" | "balance" | "economy"
+    team_mode: bool = False      # 旧フラグ（後方互換）: True=チーム方式。team_method が優先される
+    team_method: str = ""        # "pipeline" | "team" | "single"（新方式）。空なら team_mode から導出
+    startup_test: bool = False   # True=納品前にこの環境で起動/実行テストを行う（既定OFF=安全側）
     resume_job_id: str = ""     # 計画確認後の再開ジョブID
+    resume_action: str = ""     # ""=ユーザー返答をLLM分類 / "replan"=審議の修正ボタン＝分類せず強制再計画
 
 
 class MermaidCheckRequest(BaseModel):
@@ -2129,7 +2218,7 @@ async def agent_stream(user_message: str, history: list, images: list = None, by
         print(err)  # uvicornログに出力
 
 
-async def _interpret_plan_response(user_message: str, plan: dict, async_client, model: str) -> dict:
+async def _interpret_plan_response(user_message: str, plan: dict, async_client, model: str, preset_id: str = "") -> dict:
     """ユーザーの返答から action (execute / replan / cancel) を判定する"""
     from prompts import AGENT_ROLE_LABELS
     roles_str = " / ".join(AGENT_ROLE_LABELS.get(r, r) for r in plan.get("roles", []))
@@ -2141,7 +2230,8 @@ async def _interpret_plan_response(user_message: str, plan: dict, async_client, 
         f'{"{"}"action": "execute" | "replan" | "cancel", "notes": "修正内容（replanの場合のみ）"{"}"}\n\n'
         f"判定基準:\n"
         f"- execute: 承認・実行・進めて・OK・やってみて 等\n"
-        f"- replan: 役割の追加/削除/変更を求めている\n"
+        f"- replan: 役割の追加/削除/変更、または計画の修正・やり直し・改善を求めている"
+        f"（「修正して」「直して」「計画し直して」「審議指摘を反映して」等を含む）\n"
         f"- cancel: キャンセル・やめる・不要 等\n"
     )
     resp = await async_client.chat.completions.create(
@@ -2152,12 +2242,17 @@ async def _interpret_plan_response(user_message: str, plan: dict, async_client, 
         max_completion_tokens=200,
     )
     try:
+        stats_db.record_response_usage(_preset_to_provider_type(preset_id), resp, model)
+    except Exception:
+        pass
+    try:
         return json.loads(resp.choices[0].message.content or "{}")
     except Exception:
-        return {"action": "execute", "notes": ""}
+        # 判定不能なら安全側＝勝手に実行しない（却下扱い）。ユーザーはボタンで明示できる。
+        return {"action": "cancel", "notes": ""}
 
 
-async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = ""):
+async def multi_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", resume_action: str = ""):
     """マルチエージェントモード:
     Phase 1 (resume_job_id なし): ディスパッチャー → 計画表示 → 停止（plan_ready イベント）
     Phase 2 (resume_job_id あり): ユーザー返答を解釈 → 実行 / 再計画 / キャンセル
@@ -2168,7 +2263,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
     def _sse(text: str) -> str:
         return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
 
-    ma_cfg = _load_ma_config()
+    ma_cfg = _load_ma_config(agent_mode)
     d_cfg    = ma_cfg.get("dispatcher", {})
     d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
     d_model  = d_cfg.get("model", _provider_config["model"])
@@ -2196,9 +2291,18 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             original_task_file = job_dir / "original_task.txt"
             original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
 
-            action_result = await _interpret_plan_response(user_message, plan, d_client, d_model)
-            action = action_result.get("action", "execute")
-            notes  = action_result.get("notes", "")
+            if resume_action == "replan":
+                # 審議の「この指摘で計画を修正」ボタン＝LLM分類を経由せず必ず再計画する（プランA）。
+                # 分類ミスで実行に化けるのを防ぐ。指摘内容は user_message に入っている。
+                action = "replan"
+                notes  = user_message
+            elif resume_action in ("execute", "cancel"):
+                # 承認パネルのボタンは意図が明確。LLM分類を挟まず確定指示を信じる。
+                action, notes = resume_action, ""
+            else:
+                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model, d_preset)
+                action = action_result.get("action", "execute")
+                notes  = action_result.get("notes", "")
 
             if action == "cancel":
                 yield _sse("🚫 了解しました、キャンセルします。\n")
@@ -2208,7 +2312,8 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             if action == "replan":
                 yield _sse("🔄 計画を修正中...\n\n")
                 revised_message = original_task + (f"\n\n【修正指示】{notes}" if notes else "")
-                plan = await dispatch_task(revised_message, d_client, d_model, job_dir)
+                plan = await dispatch_task(revised_message, d_client, d_model, job_dir,
+                                           provider=_preset_to_provider_type(d_preset))
                 plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 
                 roles = plan.get("roles", [])
@@ -2232,13 +2337,17 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
             # ---- Phase 1: 新規ジョブ → 計画表示 → 停止 ----
             job_id = new_job_id()
             base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
-            job_dir = base_dir / "jobs" / job_id
+            # 制御ファイルはスコープの外（.agent-jobs/<scope>/<id>）に置く＝成果物に足場を混ぜない
+            job_dir = _agent_job_dir(workspace_scope, job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / "scope.txt").write_text(workspace_scope or "_root", encoding="utf-8")
+            _prune_agent_jobs(workspace_scope)
 
             yield _sse(f"🤖 **マルチエージェントモード** (job: `{job_id}`)\n\n")
             yield _sse("📋 タスク分解中...\n")
 
-            plan = await dispatch_task(user_message, d_client, d_model, job_dir)
+            plan = await dispatch_task(user_message, d_client, d_model, job_dir,
+                                       provider=_preset_to_provider_type(d_preset))
             (job_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
             (job_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 
@@ -2282,6 +2391,7 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                     model=model,
                     job_dir=job_dir,
                     timeout_sec=task.get("timeout_sec"),
+                    provider=_preset_to_provider_type(preset_id),
                 )
                 yield _sse(f"  → 完了 ✅\n\n")
             except Exception as e:
@@ -2289,7 +2399,8 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
                 print(f"[multi_agent] {role} エラー: {e}")
 
         yield _sse("📄 最終報告書を生成中...\n\n")
-        report = await generate_final_report(d_client, d_model, job_dir)
+        report = await generate_final_report(d_client, d_model, job_dir,
+                                             provider=_preset_to_provider_type(d_preset))
         yield _sse(f"---\n\n{report}\n\n")
         scope_path = f"workspace/{workspace_scope}/jobs/{job_id}" if workspace_scope else f"workspace/jobs/{job_id}"
         yield _sse(f"\n📁 成果物: `{scope_path}/`\n")
@@ -2297,6 +2408,939 @@ async def multi_agent_stream(user_message: str, agent_mode: str = "balance", wor
     except Exception as e:
         import traceback
         yield _sse(f"❌ マルチエージェントエラー: `{type(e).__name__}: {e}`")
+        print(traceback.format_exc())
+
+    yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+
+
+def _agent_job_dir(workspace_scope: str, job_id: str) -> Path:
+    """マルチエージェントの制御・ログ用ディレクトリ。ユーザーの成果物（スコープ直下）とは分離し、
+    `workspace/.agent-jobs/<スコープ名>/<id>/` に置く（スコープ内に足場ファイルを残さないため）。
+    スコープ名でフォルダを分けるので「どのプロジェクトのどの実行か」は保たれる。"""
+    seg = workspace_scope or "_root"
+    return ALLOWED_WORK_DIR / ".agent-jobs" / seg / job_id
+
+
+def _scope_from_job_dir(job_dir: Path) -> Path:
+    """制御ディレクトリ（.agent-jobs/<scope>/<id>）から、対応する成果物スコープを逆算する。"""
+    seg = job_dir.parent.name
+    return ALLOWED_WORK_DIR if seg in ("", "_root") else (ALLOWED_WORK_DIR / seg)
+
+
+def _prune_agent_jobs(workspace_scope: str, keep: int = 20) -> None:
+    """スコープごとに直近 keep 件だけ残し、古い制御ディレクトリを自動削除する（無限増殖を防ぐ）。"""
+    base = ALLOWED_WORK_DIR / ".agent-jobs" / (workspace_scope or "_root")
+    if not base.is_dir():
+        return
+    try:
+        dirs = sorted((d for d in base.iterdir() if d.is_dir()), key=lambda p: p.stat().st_mtime)
+        for d in dirs[:-keep] if keep > 0 else dirs:
+            shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _sse_team(event: dict) -> str:
+    """マルチエージェント・ライブビュー用の構造化SSEイベント。
+    チャット本流の answer_chunk とは別系統（type=team_event）。フロントの #team-live-pane が消費する。"""
+    return f"data: {json.dumps({'type': 'team_event', 'event': event}, ensure_ascii=False)}\n\n"
+
+
+# 役割固定ワーカー割り当て: coding/infra は独立タスク数だけ並列、他役割は1体。
+# モデルは役割で決まるので、ワーカー＝役割に固定すると「同じ agent が全工程をやる」現象を防ぎ、
+# design→coding→debug が自然に別エージェントへ渡る。coding だけ複数体で並列性を維持する。
+_PARALLEL_ROLES = {"coding", "infra"}
+
+
+def _build_role_workers(plan: dict, max_parallel: int) -> list[tuple[str, str]]:
+    """plan のタスクから役割固定ワーカーを構築する。返り値 [(worker_name, bound_role), ...]。
+    coding/infra は「その役割の独立タスク数」だけ並列ワーカーを立てる（上限 max_parallel）。
+    他役割は1体（直列でよい工程）。worker_name は `<役割>-<連番>`。"""
+    tasks = plan.get("tasks", {}) or {}
+    role_counts: dict[str, int] = {}
+    for t in tasks.values():
+        r = (t.get("role") or "general")
+        role_counts[r] = role_counts.get(r, 0) + 1
+    workers: list[tuple[str, str]] = []
+    for role, cnt in role_counts.items():
+        k = max(1, min(cnt, max_parallel)) if role in _PARALLEL_ROLES else 1
+        for i in range(k):
+            workers.append((f"{role}-{i+1}", role))
+    return workers or [("general-1", "")]
+
+
+# =====================================================================
+# マルチエージェント実行の永続化（リロード/クラッシュ後も結果を失わない・C案）
+# 既存の team_agent_stream / single_team_stream / multi_agent_stream は無改修。
+# /chat はこれらをバックグラウンドのドライバ（_drive_team_run）で回し、SSE チャンクを
+# ディスク（workspace/.agent-runs/<run_id>.sse）へ逐次保存する。クライアントが切れても
+# ドライバは生き残り、後処理（反映先統一・納品ゲート・最終報告書）まで完走して結果を残す。
+# リロード/クラッシュ後は GET /multi-agent/runs/<run_id> で保存ログから結果を復元する。
+# =====================================================================
+_TEAM_RUNS: dict[str, dict] = {}          # run_id -> {"subs": set[asyncio.Queue], "status": str}
+_RUNS_DIR = ALLOWED_WORK_DIR / ".agent-runs"
+
+
+def _run_sse_path(run_id: str) -> Path:
+    return _RUNS_DIR / f"{run_id}.sse"
+
+
+def _run_meta_path(run_id: str) -> Path:
+    return _RUNS_DIR / f"{run_id}.meta.json"
+
+
+def _prune_team_runs(keep: int = 30) -> None:
+    """直近 keep 件だけ残し、古い実行ログ（.sse / .meta.json）を削除する。"""
+    if not _RUNS_DIR.is_dir():
+        return
+    try:
+        metas = sorted(_RUNS_DIR.glob("*.meta.json"), key=lambda p: p.stat().st_mtime)
+        for m in (metas[:-keep] if keep > 0 else metas):
+            rid = m.name[:-len(".meta.json")]
+            m.unlink(missing_ok=True)
+            _run_sse_path(rid).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_run_meta(run_id: str, **fields) -> None:
+    try:
+        _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        p = _run_meta_path(run_id)
+        cur: dict = {}
+        if p.exists():
+            try:
+                cur = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                cur = {}
+        cur.update(fields)
+        p.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def _drive_team_run(run_id: str, stream, meta: dict) -> None:
+    """stream（team/single/pipeline）を最後まで消費し、SSE チャンクをディスクへ保存しつつ
+    接続中のクライアントへ中継する独立タスク。クライアント切断後も生き残り、後処理まで完走する。"""
+    _RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    _write_run_meta(
+        run_id, status="running", started_at=datetime.now().isoformat(),
+        request=meta.get("request", ""), mode=meta.get("mode", ""), scope=meta.get("scope", ""),
+    )
+    status = "done"
+
+    def _fanout(chunk: str) -> None:
+        run = _TEAM_RUNS.get(run_id)
+        if run:
+            for q in list(run["subs"]):
+                q.put_nowait(chunk)
+
+    try:
+        with _run_sse_path(run_id).open("a", encoding="utf-8") as f:
+            async for chunk in stream:
+                try:
+                    f.write(chunk)
+                    f.flush()
+                except OSError:
+                    pass
+                _fanout(chunk)
+    except Exception as e:
+        status = "failed"
+        import traceback
+        print("[team-run] driver error:", traceback.format_exc())
+        err = "data: " + json.dumps(
+            {"type": "answer_chunk", "content": f"\n❌ 実行エラー: {type(e).__name__}: {e}"},
+            ensure_ascii=False,
+        ) + "\n\n"
+        try:
+            with _run_sse_path(run_id).open("a", encoding="utf-8") as f:
+                f.write(err)
+        except OSError:
+            pass
+        _fanout(err)
+    finally:
+        _write_run_meta(run_id, status=status, finished_at=datetime.now().isoformat())
+        run = _TEAM_RUNS.get(run_id)
+        if run:
+            run["status"] = status
+            for q in list(run["subs"]):
+                q.put_nowait(None)
+        _prune_team_runs()
+
+
+async def team_agent_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False, resume_action: str = ""):
+    """協調型チーム方式（docs/multi-agent-team-design.md / [[project-multi-agent-team]]）。
+    Phase 1: ディスパッチャー → 計画表示 → 停止（plan_ready）
+    Phase 2: ユーザー返答を解釈 → 実行（並列＋self-claim＋mailbox）/ 再計画 / キャンセル
+    パイプライン方式（multi_agent_stream）は無改修で温存。
+    """
+    import asyncio as _asyncio
+    import time
+    from tools.multi_agent_tools import generate_final_report, new_job_id
+    from tools.team_tools import (
+        dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
+        verify_task, reconcile_declared_files, reconcile_html_referenced_files,
+        update_status_locked as _update_status,
+        find_entry_html, browser_smoke_test, run_acceptance_checks,
+        log_attempt, summarize_attempts_md,
+    )
+    from prompts import get_team_member_prompt, AGENT_ROLE_LABELS
+
+    def _sse(text: str) -> str:
+        return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
+
+    ma_cfg = _load_ma_config(agent_mode)
+    d_cfg    = ma_cfg.get("dispatcher", {})
+    d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
+    d_model  = d_cfg.get("model", _provider_config["model"])
+    d_client = _make_async_client_for(d_preset)
+
+    def _plan_lines(plan: dict) -> str:
+        out = ""
+        for tid, t in plan.get("tasks", {}).items():
+            label = AGENT_ROLE_LABELS.get(t.get("role", ""), t.get("role", ""))
+            deps = t.get("depends_on", [])
+            dep_s = f" (依存: {', '.join(deps)})" if deps else " (並列可)"
+            files = t.get("files", []) or []
+            files_s = f"　📄 {', '.join(files)}" if files else ""
+            # prompt は空白を畳んで1行化（整形崩れ防止）＋ <,>,& をエスケープする。
+            # `通常の<script>で実装` 等の生HTMLタグが marked でタグ解釈され、以降（t2/t3含む）が
+            # まるごとタグ内に飲み込まれて消える事故を防ぐ。
+            prompt_one = " ".join((t.get('prompt', '') or '').split())
+            prompt_one = prompt_one.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            out += f"- `{tid}` **{label}**{dep_s}{files_s}: {prompt_one}\n"
+        return out
+
+    # 既存スコープの内容を要約してディスパッチャーに渡す（更地前提を外す＝既存コードベースをその場で直す）
+    def _scope_listing(d: Path, limit: int = 60) -> str:
+        try:
+            names: list[str] = []
+            for p in sorted(d.rglob("*")):
+                rel = p.relative_to(d)
+                if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in rel.parts):
+                    continue
+                if p.is_file():
+                    names.append(str(rel))
+                if len(names) >= limit:
+                    names.append("…（以下略）")
+                    break
+            return "\n".join(f"- {n}" for n in names)
+        except Exception:
+            return ""
+
+    try:
+        if resume_job_id:
+            # ---- Phase 2: ユーザー返答を解釈 ----
+            job_id = resume_job_id
+            base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+            job_dir = _agent_job_dir(workspace_scope, job_id)
+            if not (job_dir / "plan.json").exists():
+                candidates = list(ALLOWED_WORK_DIR.glob(f".agent-jobs/*/{job_id}"))
+                job_dir = next((c for c in candidates if (c / "plan.json").exists()), job_dir)
+            plan_file = job_dir / "plan.json"
+            if not plan_file.exists():
+                yield _sse("❌ ジョブが見つかりません。\n")
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            plan = json.loads(plan_file.read_text(encoding="utf-8"))
+            original_task_file = job_dir / "original_task.txt"
+            original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else user_message
+
+            # 承認パネルのボタン（▶実行 / ✕却下 / 🔧この指摘で計画を修正）は意図が明確なので、
+            # LLM分類を経由せず resume_action をそのまま信じる。却下なのに弱いモデルが execute に
+            # 誤分類してジョブが走り出す事故、修正なのに cancel に化ける事故を防ぐ（プランA）。
+            # 自由入力の返答のみ分類にかける。
+            if resume_action == "replan":
+                # 審議の「この指摘で計画を修正」ボタン＝LLM分類を経由せず必ず再計画する。
+                # 指摘内容は user_message に入っている。
+                action = "replan"
+                notes  = user_message
+            elif resume_action in ("execute", "cancel"):
+                action, notes = resume_action, ""
+            else:
+                action_result = await _interpret_plan_response(user_message, plan, d_client, d_model, d_preset)
+                action = action_result.get("action", "execute")
+                notes  = action_result.get("notes", "")
+
+            if action == "cancel":
+                yield _sse("🚫 了解しました、キャンセルします。\n")
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            if action == "replan":
+                yield _sse("🔄 計画を修正中...\n\n")
+                revised_message = original_task + (f"\n\n【修正指示】{notes}" if notes else "")
+                plan = await dispatch_team_task(revised_message, d_client, d_model, job_dir,
+                                                provider=_preset_to_provider_type(d_preset))
+                plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+                yield _sse(_plan_lines(plan))
+                yield _sse("\nこの内容でよろしいですか？\n")
+                roles = list(dict.fromkeys(t.get("role") for t in plan.get("tasks", {}).values()))
+                yield f"data: {json.dumps({'type': 'plan_ready', 'job_id': job_id, 'roles': roles})}\n\n"
+                yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+                return
+
+            yield _sse(f"▶ **チーム実行開始** (job: `{job_id}`)\n\n")
+
+        else:
+            # ---- Phase 1: 新規ジョブ → 計画表示 → 停止 ----
+            job_id = new_job_id()
+            base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+            # 制御ファイルはスコープの外（.agent-jobs/<scope>/<id>）に置く＝成果物に足場を混ぜない
+            job_dir = _agent_job_dir(workspace_scope, job_id)
+            job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / "scope.txt").write_text(workspace_scope or "_root", encoding="utf-8")
+            _prune_agent_jobs(workspace_scope)
+
+            yield _sse(f"👥 **チーム方式マルチエージェント** (job: `{job_id}`)\n\n")
+            yield _sse("📋 タスク分解中...\n\n")
+
+            # 既存ファイルがあれば dispatcher に渡し、更地に作り直さずその場で直させる
+            scope_note = _scope_listing(base_dir)
+            dispatch_input = user_message
+            if scope_note:
+                dispatch_input += (
+                    "\n\n【作業場所には既存ファイルがあります。更地に作り直すのではなく、"
+                    "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
+                )
+            _d_t0 = time.time()
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, base_dir,
+                                            provider=_preset_to_provider_type(d_preset))
+            # 試行ログに「誰がタスク分解したか（ディスパッチャー＝上位モデル）」を先頭行として残す
+            log_attempt(job_dir, worker="dispatcher", task_id="—", role="dispatch",
+                        preset_id=d_preset, model=d_model, result="ok",
+                        elapsed_sec=round(time.time() - _d_t0, 1), problems=[])
+            (job_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
+            (job_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+
+            yield _sse(_plan_lines(plan))
+            yield _sse("\nこの流れで実行してよいですか？ タスクの追加・変更があればお知らせください。\n")
+            roles = list(dict.fromkeys(t.get("role") for t in plan.get("tasks", {}).values()))
+            yield f"data: {json.dumps({'type': 'plan_ready', 'job_id': job_id, 'roles': roles})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+            return
+
+        # ---- 実行フェーズ（ワーカープール＝役割に縛られず空いた人が取る・self-claim・mailbox・検収/差し戻し）----
+        # 成果物はスコープ直下（既存ファイルをその場で編集）、制御ファイルは job_dir(=.agent-jobs/<scope>/<id>) に隠す。
+        work_dir = _scope_from_job_dir(job_dir)
+        init_team_job(plan, job_dir)
+        # 設定値を天井とし、計画が大きい値を出しても超えさせない。タスク数より多くは立てない。
+        max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
+        n_tasks = len(plan.get("tasks", {}))
+        worker_specs = _build_role_workers(plan, max_parallel)   # [(name, role), ...] 役割固定・coding は複数
+        worker_names = [w[0] for w in worker_specs]
+        n_workers = len(worker_names)
+        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(worker_names))}）が担当（役割）ごとに着手します\n\n")
+
+        # ライブビュー（#team-live-pane）の骨格を先出し＝ワーカー/タスク/依存を先に描く
+        _plan_tasks = {tid: {"role": t.get("role", ""), "files": t.get("files", []) or [],
+                             "depends_on": t.get("depends_on", []) or []}
+                       for tid, t in plan.get("tasks", {}).items()}
+        yield _sse_team({"kind": "plan", "job_id": job_id, "mode": "team",
+                         "workers": worker_names, "tasks": _plan_tasks})
+
+        sem = _asyncio.Semaphore(max_parallel)
+        queue: _asyncio.Queue = _asyncio.Queue()
+        def emit(d: dict):
+            queue.put_nowait(d)
+        # 全タスクが在りうる最大待ち時間（デッドロック保険）
+        deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
+
+        async def worker(name: str, bound_role: str):
+            coworkers = [w for w in worker_names if w != name]
+            while time.time() < deadline:
+                claimed = claim_task(job_dir, name, role=bound_role)   # 役割固定: 自分の役割のタスクだけ取る
+                if claimed.get("none"):
+                    if claimed.get("pending_remain"):
+                        await _asyncio.sleep(2)   # 依存待ち
+                        continue
+                    break                          # 実行可能な pending なし → 退場
+                tid = claimed["id"]
+                role = claimed.get("role", "")
+                label = AGENT_ROLE_LABELS.get(role, role)
+                role_cfg = ma_cfg.get(role, d_cfg)
+                preset_id = claimed.get("preset_id") or role_cfg.get("preset_id", d_preset)
+                model     = claimed.get("model")     or role_cfg.get("model", d_model)
+                client    = _make_async_client_for(preset_id)
+                sys_prompt = get_team_member_prompt(role, str(work_dir), name, coworkers)
+                queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
+                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                      "state": "running", "model": model, "preset": preset_id})
+                async with sem:
+                    problems: list[str] = []
+                    # 実行 → 検収（ファイル有無/空＋中身）→ 未達なら差し戻し再実行。
+                    # 回数は MULTI_AGENT_MAX_RETRIES（既定2＝計3トライ）。差し戻しは毎回エスカレーション
+                    # （具体的な未達内容・テスト失敗の抜粋を渡す）。最終トライだけ上位モデルへ格上げ。
+                    max_attempts = MULTI_AGENT_MAX_RETRIES + 1
+                    # 作成対象ファイルを prompt 先頭に明示し、宣言パス厳守を強制する。
+                    # （役割プロンプトの汎用「出力先 code/」に弱いモデルが引っ張られ、宣言と違う場所に
+                    #  書いて検収を落とす＝無駄な差し戻し/格上げを誘発する事故を防ぐ。最重要修正）
+                    _decl_files = claimed.get("files", [])
+                    if _decl_files:
+                        _files_str = "\n".join(f"- {f}" for f in _decl_files)
+                        base_prompt = (
+                            "【ファイル指定＝作業のヒント】新規に作るファイルは下記パスにそのまま作ること"
+                            "（code/ などの別の場所に散らかさない）。ただし**既存の挙動を直す指示なら**、まず "
+                            "grep / read_file で対象機能の実装箇所を特定し、その実ファイルを編集すること"
+                            "（下記に無い既存ファイルでも、そこが実装箇所ならそこを直す。『指定外だから』と要望を放置しない）。\n"
+                            f"対象ファイル(ヒント):\n{_files_str}\n\n" + claimed.get("prompt", "")
+                        )
+                    else:
+                        base_prompt = claimed.get("prompt", "")
+                    try:
+                        for attempt in range(max_attempts):
+                            is_final = attempt == max_attempts - 1
+                            prompt = base_prompt
+                            run_client, run_model, run_preset = client, model, preset_id
+                            escalated = False
+                            if attempt >= 1:
+                                detail = "\n".join(f"- {p}" for p in problems)
+                                prompt += (
+                                    f"\n\n【リードからの差し戻し（{attempt}回目）】前回の成果に次の問題があります:\n{detail}\n"
+                                    f"上記を解消し、必ずツール（write_file / run_command 等）で成果ファイルを実際に作り直してください。"
+                                )
+                                queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（{attempt}回目）\n")
+                                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                      "state": "retry", "attempt": attempt})
+                            # 最終トライは上位モデルへ格上げ（未設定ならディスパッチャーのモデル）。
+                            # 前提: ディスパッチャー＝最上位モデル（config の注意書き参照）なので、
+                            # フォールバック差し替えは常に「同等か格上げ」になり格下げしない。
+                            if is_final and attempt >= 1:
+                                esc_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
+                                esc_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
+                                if (esc_preset, esc_model) != (preset_id, model):
+                                    run_client = _make_async_client_for(esc_preset)
+                                    run_model, run_preset = esc_model, esc_preset
+                                    escalated = True
+                                    queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
+                                    emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                          "state": "running", "model": esc_model, "preset": esc_preset})
+                            _attempt_t0 = time.time()
+                            await run_team_member(
+                                member_name=name, role=role, system_prompt=sys_prompt,
+                                task_prompt=prompt, all_tools=TOOLS,
+                                base_executor=execute_tool_async, async_client=run_client,
+                                model=run_model, job_dir=job_dir, timeout_sec=claimed.get("timeout_sec"),
+                                work_dir=work_dir, on_event=emit,
+                                provider=_preset_to_provider_type(run_preset),
+                            )
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "verify"})
+                            # 検収の前に、迷子ファイルを宣言パスへ機械的に集約（モデル非依存の保証層）
+                            relocated = reconcile_declared_files(job_dir, claimed, work_dir=work_dir)
+                            if relocated:
+                                queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
+                            problems = verify_task(job_dir, claimed, work_dir=work_dir)
+                            # この1トライの試行ログを残す（誰が・何回目・どのモデルで・結果・所要秒数）
+                            log_attempt(
+                                job_dir, worker=name, task_id=tid, role=role,
+                                attempt=attempt + 1, preset_id=run_preset, model=run_model,
+                                escalated=escalated, result=("ok" if not problems else "ng"),
+                                elapsed_sec=round(time.time() - _attempt_t0, 1),
+                                problems=[p.splitlines()[0] for p in problems] if problems else [],
+                            )
+                            if not problems:
+                                break
+                        if problems:
+                            summary = "未達: " + " / ".join(problems)
+                            complete_task(job_dir, tid, summary)
+                            _update_status(job_dir, role, f"未達 ⚠️（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{'; '.join(problems)}）\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "fail"})
+                        else:
+                            complete_task(job_dir, tid, "完了")
+                            _update_status(job_dir, role, f"完了（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "done"})
+                    except Exception as e:
+                        complete_task(job_dir, tid, f"エラー: {type(e).__name__}: {e}")
+                        _update_status(job_dir, role, f"エラー ⚠️（{tid}）")
+                        log_attempt(
+                            job_dir, worker=name, task_id=tid, role=role,
+                            attempt=locals().get("attempt", 0) + 1,
+                            preset_id=locals().get("run_preset", preset_id),
+                            model=locals().get("run_model", model),
+                            escalated=locals().get("escalated", False),
+                            result="error", problems=[f"{type(e).__name__}: {e}"],
+                        )
+                        queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
+                        emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "error"})
+                        print(f"[team_agent] {name}/{tid} エラー: {e}")
+
+        async def run_all():
+            try:
+                await _asyncio.gather(*[worker(n, r) for n, r in worker_specs])
+            finally:
+                queue.put_nowait(None)
+
+        runner = _asyncio.create_task(run_all())
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            # dict=ライブビュー用構造化イベント / str=従来のチャットナレーション（無改変）
+            yield _sse_team(item) if isinstance(item, dict) else _sse(item)
+        await runner  # 例外を表に出す
+
+        # ---- 納品ゲート（モデル非依存の実行検収）----
+        # debug役の自己申告 PASS では合否を決めない。リードが acceptance コマンドを機械実行し、
+        # index.html があれば実ブラウザでも検証する。通らなければ強モデルで1回修復→再検証。
+        # それでも通らなければ「未完成」として正直に納品する（成功と偽らない）。
+        entry_html = find_entry_html(work_dir)
+        # ブラウザが実際に読むファイル（index.htmlの参照先）へ、編集した同名の別コピーを集約する＝
+        # 「テストは通るがブラウザに反映されない（js/game.js が古いまま）」二重化をモデル非依存で解消。
+        _html_merged = reconcile_html_referenced_files(entry_html, work_dir)
+        for _m in _html_merged:
+            yield _sse(f"🧷 反映先を統一: {_m}\n")
+        acceptance = plan.get("acceptance", []) or []
+
+        async def _run_gate() -> list[str]:
+            probs: list[str] = []
+            if acceptance:
+                probs += await _asyncio.to_thread(run_acceptance_checks, work_dir, acceptance)
+            if entry_html:
+                probs += await _asyncio.to_thread(browser_smoke_test, entry_html)
+            return probs
+
+        gate_problems: list[str] = []
+        if not startup_test:
+            # 起動・動作テストOFF（既定）。この環境で実行しない＝システム変更/他PC向けスクリプトでも安全。
+            if acceptance or entry_html:
+                yield _sse("\nℹ️ 起動・動作テストはOFFです（実行検証なし）。実機で動かす成果物は、UIの「起動テスト」をONにすると納品前に自動検証します。\n")
+        elif acceptance or entry_html:
+            yield _sse("\n🔎 納品前の動作検証中（起動/実行・ブラウザ）...\n")
+            gate_problems = await _run_gate()
+            if gate_problems:
+                for gp in gate_problems[:5]:
+                    yield _sse(f"  ⚠️ {gp.splitlines()[0]}\n")
+                fix_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
+                fix_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
+                yield _sse(f"  🔧 強モデルで自動修復を試行 (`{fix_preset}` / `{fix_model}`)...\n")
+                try:
+                    proj_files = ", ".join(
+                        str(p.relative_to(work_dir)) for p in sorted(work_dir.rglob("*"))
+                        if p.is_file() and p.suffix in (".html", ".js", ".css", ".py", ".json", ".css", ".ts")
+                        and not any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in p.relative_to(work_dir).parts)
+                    )
+                    fix_prompt = (
+                        "あなたは統合修復担当です。成果物が次の検証に失敗し、まだ動きません:\n"
+                        f"{chr(10).join(gate_problems)}\n\n"
+                        f"対象ファイル: {proj_files}\n"
+                        "エラー内容から原因を特定し、実際に起動/実行できるよう修正してください。"
+                        "ブラウザで開くWebアプリの場合は、ESモジュール（type=module/import/export）を使わず "
+                        "通常の <script>＋IIFE＋window名前空間に統一すること（素のグローバル関数は衝突して全停止します）。"
+                        "read_file で確認し、edit_file / write_file で修正すること。"
+                    )
+                    await run_team_member(
+                        member_name="fixer", role="coding",
+                        system_prompt=get_team_member_prompt("coding", str(work_dir), "fixer", []),
+                        task_prompt=fix_prompt, all_tools=TOOLS,
+                        base_executor=execute_tool_async,
+                        async_client=_make_async_client_for(fix_preset), model=fix_model,
+                        job_dir=job_dir, work_dir=work_dir,
+                        provider=_preset_to_provider_type(fix_preset),
+                    )
+                    gate_problems = await _run_gate()
+                except Exception as fe:
+                    gate_problems = gate_problems + [f"統合修復に失敗: {type(fe).__name__}: {fe}"]
+                if gate_problems:
+                    yield _sse(f"  ❌ 修復後も動作検証に失敗（{len(gate_problems)}件）。未完成として報告します。\n")
+                else:
+                    yield _sse("  ✅ 動作検証OK（修復後）。実際に起動/動作することを確認しました。\n")
+            else:
+                yield _sse("  ✅ 動作検証OK。実際に起動/動作することを確認しました。\n")
+
+        yield _sse("\n📄 最終報告書を生成中...\n\n")
+        # 成果物はスコープ(work_dir)から読み、報告書(final-report.md)は制御側(job_dir)に書く。
+        # ユーザーの要望(original_task)を渡し「要望→どう対応したか」を冒頭に書かせる。
+        report = await generate_final_report(d_client, d_model, work_dir, out_dir=job_dir, user_request=original_task,
+                                             provider=_preset_to_provider_type(d_preset))
+        if gate_problems:
+            # 動かないものを「成功」と偽らない。先頭に未完成バナーと実エラーを明示。
+            detail = "\n".join(f"- {p.splitlines()[0]}" for p in gate_problems[:5])
+            yield _sse(
+                "---\n\n## ⚠️ 未完成（動作検証に失敗）\n"
+                "このジョブは成果物が**実際には動作しません**。残っている問題:\n"
+                f"{detail}\n\n以下は参考の作業報告です。\n\n"
+            )
+        yield _sse(f"---\n\n{report}\n\n")
+        # 試行ログ（誰が・何回目・どのモデルで・結果）を表で提示し、生ログの場所も案内する
+        attempts_md = summarize_attempts_md(job_dir)
+        _ctrl_label = f".agent-jobs/{job_dir.parent.name}/{job_id}"
+        if attempts_md:
+            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + f"\n_（生ログ: `{_ctrl_label}/attempts.jsonl`）_\n")
+        scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+        yield _sse(f"\n📁 作業場所: `{scope_label}/`（制御ファイル: `{_ctrl_label}/`）\n")
+
+    except Exception as e:
+        import traceback
+        yield _sse(f"❌ チーム方式エラー: `{type(e).__name__}: {e}`")
+        print(traceback.format_exc())
+
+    yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
+
+
+async def single_team_stream(user_message: str, agent_mode: str = "balance", workspace_scope: str = "", resume_job_id: str = "", startup_test: bool = False):
+    """シングル型マルチ（新方式・段階1）。
+    チーム方式の「儀式」を外し、シングルチャットと同じ操作感にする:
+      - 計画承認で止まらない（計画を情報として流して即実行）
+      - 作業場所＝今のスコープ（既存ファイルをその場で触る）。制御ファイルは <scope>/.team/<id>/ に隠す
+      - 実行後もジョブを生かす（job_open を流しフロントが job_id を保持＝会話継続の土台）
+    並列・self-claim・検収/差し戻し・自動格上げの核は team_tools をそのまま流用する。
+    既存の team_agent_stream / multi_agent_stream は無改修で温存。
+    """
+    import asyncio as _asyncio
+    import time
+    from tools.multi_agent_tools import generate_final_report, new_job_id
+    from tools.team_tools import (
+        dispatch_team_task, init_team_job, claim_task, complete_task, run_team_member,
+        verify_task, reconcile_declared_files, reconcile_html_referenced_files,
+        update_status_locked as _update_status,
+        find_entry_html, browser_smoke_test, run_acceptance_checks,
+        log_attempt, summarize_attempts_md,
+    )
+    from prompts import get_team_member_prompt, AGENT_ROLE_LABELS
+
+    def _sse(text: str) -> str:
+        return f"data: {json.dumps({'type': 'answer_chunk', 'content': text})}\n\n"
+
+    ma_cfg = _load_ma_config(agent_mode)
+    d_cfg    = ma_cfg.get("dispatcher", {})
+    d_preset = d_cfg.get("preset_id", _provider_config.get("preset_id", _provider_config["type"]))
+    d_model  = d_cfg.get("model", _provider_config["model"])
+    d_client = _make_async_client_for(d_preset)
+
+    def _plan_lines(plan: dict) -> str:
+        out = ""
+        for tid, t in plan.get("tasks", {}).items():
+            label = AGENT_ROLE_LABELS.get(t.get("role", ""), t.get("role", ""))
+            deps = t.get("depends_on", [])
+            dep_s = f" (依存: {', '.join(deps)})" if deps else " (並列可)"
+            files = t.get("files", []) or []
+            files_s = f"　📄 {', '.join(files)}" if files else ""
+            # prompt は空白を畳んで1行化（整形崩れ防止）＋ <,>,& をエスケープする。
+            # `通常の<script>で実装` 等の生HTMLタグが marked でタグ解釈され、以降（t2/t3含む）が
+            # まるごとタグ内に飲み込まれて消える事故を防ぐ。
+            prompt_one = " ".join((t.get('prompt', '') or '').split())
+            prompt_one = prompt_one.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            out += f"- `{tid}` **{label}**{dep_s}{files_s}: {prompt_one}\n"
+        return out
+
+    # 既存スコープの内容を要約してディスパッチャーに渡す（更地前提を外す＝既存コードベース対応の土台）
+    def _scope_listing(work_dir: Path, limit: int = 60) -> str:
+        try:
+            names: list[str] = []
+            for p in sorted(work_dir.rglob("*")):
+                rel = p.relative_to(work_dir)
+                parts = rel.parts
+                if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in parts):
+                    continue
+                if p.is_file():
+                    names.append(str(rel))
+                if len(names) >= limit:
+                    names.append("…（以下略）")
+                    break
+            return "\n".join(f"- {n}" for n in names)
+        except Exception:
+            return ""
+
+    try:
+        base_dir = (ALLOWED_WORK_DIR / workspace_scope) if workspace_scope else ALLOWED_WORK_DIR
+        work_dir = base_dir
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        if resume_job_id:
+            # ---- 会話継続（段階1の基本refine）: 同じ制御ディレクトリ・同じスコープで追い実行 ----
+            job_id = resume_job_id
+            ctrl_dir = base_dir / ".team" / job_id
+            if not (ctrl_dir / "plan.json").exists():
+                # スコープを跨いだ場合の保険（.team/<id> を全スコープから探す）
+                cands = list(ALLOWED_WORK_DIR.glob(f".team/{job_id}")) + list(ALLOWED_WORK_DIR.glob(f"*/.team/{job_id}"))
+                ctrl_dir = next((c for c in cands if (c / "plan.json").exists()), ctrl_dir)
+                if (ctrl_dir / "plan.json").exists():
+                    work_dir = ctrl_dir.parent.parent  # <scope>/.team/<id> → <scope>
+            original_task_file = ctrl_dir / "original_task.txt"
+            original_task = original_task_file.read_text(encoding="utf-8") if original_task_file.exists() else ""
+            yield _sse(f"▶ **続けて作業します** (job: `{job_id}`)\n\n")
+            scope_note = _scope_listing(work_dir)
+            dispatch_input = (
+                f"{original_task}\n\n【ここまでの成果物は既にスコープ内にあります。下記の追加指示に必要な分だけ"
+                f"作り直し・修正してください（無関係なファイルは触らない）】\n追加指示: {user_message}\n\n"
+                f"現在スコープにあるファイル:\n{scope_note}"
+            )
+            ctrl_dir.mkdir(parents=True, exist_ok=True)
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir,
+                                            provider=_preset_to_provider_type(d_preset))
+            (ctrl_dir / "original_task.txt").write_text(original_task + f"\n\n追加指示: {user_message}", encoding="utf-8")
+            (ctrl_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+            yield _sse(_plan_lines(plan) + "\n")
+        else:
+            # ---- 新規（儀式なし・即実行）----
+            job_id = new_job_id()
+            # 制御ファイルはスコープの外（.agent-jobs/<scope>/<id>）に置く＝プロジェクト直下に足場を残さない
+            ctrl_dir = _agent_job_dir(workspace_scope, job_id)
+            ctrl_dir.mkdir(parents=True, exist_ok=True)
+            (ctrl_dir / "scope.txt").write_text(workspace_scope or "_root", encoding="utf-8")
+            _prune_agent_jobs(workspace_scope)
+            scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+            yield _sse(f"👥 **シングル型マルチ** (job: `{job_id}` / 作業場所: `{scope_label}`)\n\n")
+            yield _sse("📋 タスク分解中...\n\n")
+            scope_note = _scope_listing(work_dir)
+            dispatch_input = user_message
+            if scope_note:
+                dispatch_input += (
+                    "\n\n【作業場所には既存ファイルがあります。更地に作り直すのではなく、"
+                    "必要なら既存ファイルを編集して指示を満たしてください】\n現在のファイル:\n" + scope_note
+                )
+            _d_t0 = time.time()
+            plan = await dispatch_team_task(dispatch_input, d_client, d_model, work_dir,
+                                            provider=_preset_to_provider_type(d_preset))
+            # 試行ログに「誰がタスク分解したか（ディスパッチャー＝上位モデル）」を先頭行として残す
+            log_attempt(ctrl_dir, worker="dispatcher", task_id="—", role="dispatch",
+                        preset_id=d_preset, model=d_model, result="ok",
+                        elapsed_sec=round(time.time() - _d_t0, 1), problems=[])
+            (ctrl_dir / "original_task.txt").write_text(user_message, encoding="utf-8")
+            (ctrl_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+            yield _sse(_plan_lines(plan) + "\n")
+
+        # ---- 実行フェーズ（ワーカープール＝チーム方式と同じ並列・検収・自動格上げ）----
+        init_team_job(plan, ctrl_dir)
+        max_parallel = min(int(plan.get("max_parallel", MULTI_AGENT_MAX_PARALLEL)), MULTI_AGENT_MAX_PARALLEL)
+        n_tasks = len(plan.get("tasks", {}))
+        worker_specs = _build_role_workers(plan, max_parallel)   # [(name, role), ...] 役割固定・coding は複数
+        worker_names = [w[0] for w in worker_specs]
+        n_workers = len(worker_names)
+        yield _sse(f"🧑‍🤝‍🧑 ワーカー {n_workers}体（{('、'.join(worker_names))}）が担当（役割）ごとに着手します\n\n")
+
+        # ライブビュー（#team-live-pane）の骨格を先出し
+        _plan_tasks = {tid: {"role": t.get("role", ""), "files": t.get("files", []) or [],
+                             "depends_on": t.get("depends_on", []) or []}
+                       for tid, t in plan.get("tasks", {}).items()}
+        yield _sse_team({"kind": "plan", "job_id": job_id, "mode": "single",
+                         "workers": worker_names, "tasks": _plan_tasks})
+
+        sem = _asyncio.Semaphore(max_parallel)
+        queue: _asyncio.Queue = _asyncio.Queue()
+        def emit(d: dict):
+            queue.put_nowait(d)
+        deadline = time.time() + _MA_TIMEOUT_SEC * max(n_tasks, 1) + 120
+
+        async def worker(name: str, bound_role: str):
+            coworkers = [w for w in worker_names if w != name]
+            while time.time() < deadline:
+                claimed = claim_task(ctrl_dir, name, role=bound_role)   # 役割固定: 自分の役割のタスクだけ取る
+                if claimed.get("none"):
+                    if claimed.get("pending_remain"):
+                        await _asyncio.sleep(2)
+                        continue
+                    break
+                tid = claimed["id"]
+                role = claimed.get("role", "")
+                label = AGENT_ROLE_LABELS.get(role, role)
+                role_cfg = ma_cfg.get(role, d_cfg)
+                preset_id = claimed.get("preset_id") or role_cfg.get("preset_id", d_preset)
+                model     = claimed.get("model")     or role_cfg.get("model", d_model)
+                client    = _make_async_client_for(preset_id)
+                sys_prompt = get_team_member_prompt(role, str(work_dir), name, coworkers)
+                queue.put_nowait(f"🎯 **[{name}]** `{tid}`({label}) 開始 (`{preset_id}` / `{model}`)\n")
+                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                      "state": "running", "model": model, "preset": preset_id})
+                async with sem:
+                    problems: list[str] = []
+                    max_attempts = MULTI_AGENT_MAX_RETRIES + 1
+                    _decl_files = claimed.get("files", [])
+                    if _decl_files:
+                        _files_str = "\n".join(f"- {f}" for f in _decl_files)
+                        base_prompt = (
+                            "【ファイル指定＝作業のヒント】新規に作るファイルは下記パスにそのまま作ること"
+                            "（code/ などの別の場所に散らかさない）。ただし**既存の挙動を直す指示なら**、まず "
+                            "grep / read_file で対象機能の実装箇所を特定し、その実ファイルを編集すること"
+                            "（下記に無い既存ファイルでも、そこが実装箇所ならそこを直す。『指定外だから』と要望を放置しない）。\n"
+                            f"対象ファイル(ヒント):\n{_files_str}\n\n" + claimed.get("prompt", "")
+                        )
+                    else:
+                        base_prompt = claimed.get("prompt", "")
+                    try:
+                        for attempt in range(max_attempts):
+                            is_final = attempt == max_attempts - 1
+                            prompt = base_prompt
+                            run_client, run_model, run_preset = client, model, preset_id
+                            escalated = False
+                            if attempt >= 1:
+                                detail = "\n".join(f"- {p}" for p in problems)
+                                prompt += (
+                                    f"\n\n【リードからの差し戻し（{attempt}回目）】前回の成果に次の問題があります:\n{detail}\n"
+                                    f"上記を解消し、必ずツール（write_file / run_command 等）で成果ファイルを実際に作り直してください。"
+                                )
+                                queue.put_nowait(f"  ↩️ **[{name}]** `{tid}` 差し戻し（{attempt}回目）\n")
+                                emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                      "state": "retry", "attempt": attempt})
+                            if is_final and attempt >= 1:
+                                esc_preset = MULTI_AGENT_ESCALATE_PRESET or d_preset
+                                esc_model  = MULTI_AGENT_ESCALATE_MODEL or d_model
+                                if (esc_preset, esc_model) != (preset_id, model):
+                                    run_client = _make_async_client_for(esc_preset)
+                                    run_model, run_preset = esc_model, esc_preset
+                                    escalated = True
+                                    queue.put_nowait(f"  ⬆️ **[{name}]** `{tid}` 上位モデルで再試行 (`{esc_preset}` / `{esc_model}`)\n")
+                                    emit({"kind": "task", "tid": tid, "worker": name, "role": role,
+                                          "state": "running", "model": esc_model, "preset": esc_preset})
+                            _attempt_t0 = time.time()
+                            await run_team_member(
+                                member_name=name, role=role, system_prompt=sys_prompt,
+                                task_prompt=prompt, all_tools=TOOLS,
+                                base_executor=execute_tool_async, async_client=run_client,
+                                model=run_model, job_dir=ctrl_dir, timeout_sec=claimed.get("timeout_sec"),
+                                work_dir=work_dir, on_event=emit,
+                                provider=_preset_to_provider_type(run_preset),
+                            )
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "verify"})
+                            relocated = reconcile_declared_files(ctrl_dir, claimed, work_dir=work_dir)
+                            if relocated:
+                                queue.put_nowait(f"  🛠️ **[{name}]** `{tid}` 配置補正: {'; '.join(relocated)}\n")
+                            problems = verify_task(ctrl_dir, claimed, work_dir=work_dir)
+                            log_attempt(
+                                ctrl_dir, worker=name, task_id=tid, role=role,
+                                attempt=attempt + 1, preset_id=run_preset, model=run_model,
+                                escalated=escalated, result=("ok" if not problems else "ng"),
+                                elapsed_sec=round(time.time() - _attempt_t0, 1),
+                                problems=[p.splitlines()[0] for p in problems] if problems else [],
+                            )
+                            if not problems:
+                                break
+                        if problems:
+                            summary = "未達: " + " / ".join(problems)
+                            complete_task(ctrl_dir, tid, summary)
+                            _update_status(ctrl_dir, role, f"未達 ⚠️（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 未達 ⚠️（{'; '.join(problems)}）\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "fail"})
+                        else:
+                            complete_task(ctrl_dir, tid, "完了")
+                            _update_status(ctrl_dir, role, f"完了（{tid}）")
+                            queue.put_nowait(f"  → **[{name}]** `{tid}` 完了 ✅\n")
+                            emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "done"})
+                    except Exception as e:
+                        complete_task(ctrl_dir, tid, f"エラー: {type(e).__name__}: {e}")
+                        _update_status(ctrl_dir, role, f"エラー ⚠️（{tid}）")
+                        emit({"kind": "task", "tid": tid, "worker": name, "role": role, "state": "error"})
+                        log_attempt(
+                            ctrl_dir, worker=name, task_id=tid, role=role,
+                            attempt=locals().get("attempt", 0) + 1,
+                            preset_id=locals().get("run_preset", preset_id),
+                            model=locals().get("run_model", model),
+                            escalated=locals().get("escalated", False),
+                            result="error", problems=[f"{type(e).__name__}: {e}"],
+                        )
+                        queue.put_nowait(f"  → **[{name}]** `{tid}` エラー ⚠️ `{type(e).__name__}: {e}`\n")
+                        print(f"[single_team] {name}/{tid} エラー: {e}")
+
+        async def run_all():
+            try:
+                await _asyncio.gather(*[worker(n, r) for n, r in worker_specs])
+            finally:
+                queue.put_nowait(None)
+
+        runner = _asyncio.create_task(run_all())
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            # dict=ライブビュー用構造化イベント / str=従来のチャットナレーション（無改変）
+            yield _sse_team(item) if isinstance(item, dict) else _sse(item)
+        await runner
+
+        # ---- 納品ゲート（指示が無いときだけ静的検証・正直報告は段階3で強化）----
+        entry_html = find_entry_html(work_dir)
+        # ブラウザが実際に読むファイル（index.htmlの参照先）へ、編集した同名の別コピーを集約（二重化解消・モデル非依存）。
+        _html_merged = reconcile_html_referenced_files(entry_html, work_dir)
+        for _m in _html_merged:
+            yield _sse(f"🧷 反映先を統一: {_m}\n")
+        acceptance = plan.get("acceptance", []) or []
+        gate_problems: list[str] = []
+        if not startup_test:
+            if acceptance or entry_html:
+                yield _sse("\nℹ️ 起動・動作テストはOFFです（実行検証なし）。実機で動かすなら「起動テスト」をONにしてください。\n")
+        elif acceptance or entry_html:
+            yield _sse("\n🔎 納品前の動作検証中（起動/実行・ブラウザ）...\n")
+            if acceptance:
+                gate_problems += await _asyncio.to_thread(run_acceptance_checks, work_dir, acceptance)
+            if entry_html:
+                gate_problems += await _asyncio.to_thread(browser_smoke_test, entry_html)
+            if gate_problems:
+                for gp in gate_problems[:5]:
+                    yield _sse(f"  ⚠️ {gp.splitlines()[0]}\n")
+            else:
+                yield _sse("  ✅ 動作検証OK。実際に起動/動作することを確認しました。\n")
+
+        # ---- 最終報告（スコープ全体を読まず、宣言された成果物だけを要約）----
+        yield _sse("\n📄 最終報告書を生成中...\n\n")
+        declared: list[str] = []
+        for t in plan.get("tasks", {}).values():
+            for f in t.get("files", []):
+                if f not in declared:
+                    declared.append(f)
+        files_content = ""
+        for rel in declared:
+            p = Path(rel)
+            if not p.is_absolute():
+                p = work_dir / rel
+            try:
+                if p.is_file():
+                    files_content += f"\n\n## {rel}\n{p.read_text(encoding='utf-8', errors='ignore')[:6000]}"
+            except OSError:
+                pass
+            if len(files_content) > 16000:
+                files_content += "\n\n…（以下略）"
+                break
+        if files_content.strip():
+            try:
+                resp = await d_client.chat.completions.create(
+                    model=d_model,
+                    messages=[
+                        {"role": "system", "content": (
+                            "あなたはプロジェクト完了報告書を書く専門家です。報告書は必ず"
+                            "**ユーザーの要望を起点**に書くこと。冒頭に必ず「## ご要望への対応」セクションを置き、"
+                            "ユーザーの要望を1項目ずつ箇条書きにし、各項目について\n"
+                            "・対応した/できていない/確認できない のいずれかを明示\n"
+                            "・対応した場合は **どのファイルのどこを・どう変えて** その要望を満たしたかを具体的に書く\n"
+                            "・成果物のコードから要望が満たされたと確認できない場合は、推測で『対応済み』と書かず"
+                            "正直に『コード上は確認できない／未対応の可能性』と書く（嘘をつかない）。\n"
+                            "そのあとに簡潔な成果物概要を付ける。日本語で。"
+                        )},
+                        {"role": "user", "content": (
+                            f"# ユーザーの要望（これにどう応えたかを最優先で報告すること）\n{user_message}\n\n"
+                            f"# 成果物ファイルの内容\n{files_content}"
+                        )},
+                    ],
+                    stream=False,
+                )
+                stats_db.record_response_usage(_preset_to_provider_type(d_preset), resp, d_model)
+                report = resp.choices[0].message.content or ""
+            except Exception as re:
+                report = f"（報告書生成に失敗: {type(re).__name__}）"
+        else:
+            report = "成果物ファイルが見つかりませんでした。"
+        if gate_problems:
+            detail = "\n".join(f"- {p.splitlines()[0]}" for p in gate_problems[:5])
+            yield _sse(
+                "---\n\n## ⚠️ 未完成（動作検証に失敗）\n"
+                "成果物が**実際には動作しません**。残っている問題:\n"
+                f"{detail}\n\n以下は参考の作業報告です。\n\n"
+            )
+        yield _sse(f"---\n\n{report}\n\n")
+        attempts_md = summarize_attempts_md(ctrl_dir)
+        _ctrl_label = f".agent-jobs/{workspace_scope or '_root'}/{job_id}"
+        if attempts_md:
+            yield _sse("---\n\n### 🧾 試行ログ\n" + attempts_md + f"\n_（生ログ: `{_ctrl_label}/attempts.jsonl`）_\n")
+        scope_label = f"workspace/{workspace_scope}" if workspace_scope else "workspace"
+        yield _sse(f"\n📁 作業場所: `{scope_label}/`（制御ファイル: `{_ctrl_label}/`）\n")
+        # 継続は「スコープ＝作業場所」が土台。緑バー/ジョブIDの儀式は使わず、次の発言でそのまま
+        # 同じ作業場所の既存ファイルを直せる（毎回フレッシュに分解＝関係箇所だけ・試行ログも新規）。
+        yield _sse(f"\n💬 このまま続けて指示できます（「ここ直して」等）。同じ作業場所(`{scope_label}/`)の既存ファイルを直します。\n")
+
+    except Exception as e:
+        import traceback
+        yield _sse(f"❌ シングル型マルチ エラー: `{type(e).__name__}: {e}`")
         print(traceback.format_exc())
 
     yield f"data: {json.dumps({'type': 'answer_done'})}\n\n"
@@ -2490,6 +3534,8 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
             _extra = {
                 "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": True},
                 "reasoning": {"effort": _eff},
+                # 詳細usage（cached_tokens 等）を応答に含めさせる＝キャッシュ可視化に必要
+                "usage": {"include": True},
             }
             # モデル間フォールバック: メインが失敗/レート制限時に順に別モデルへ。
             # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
@@ -2517,7 +3563,21 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                         yield f"data: {json.dumps({'type': 'fallback_model', 'model': _served, 'requested': _main})}\n\n"
             # トークン使用量（最終chunk）
             if chunk.usage:
-                yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens})}\n\n"
+                _cached = stats_db.cached_tokens_from_usage(chunk.usage)
+                yield f"data: {json.dumps({'type': 'token_usage', 'prompt': chunk.usage.prompt_tokens, 'completion': chunk.usage.completion_tokens, 'total': chunk.usage.total_tokens, 'cached': _cached})}\n\n"
+                # 利用統計にロールアップ記録（モデル別の利用割合・別DB stats.db）。
+                # 統計失敗で応答を止めないよう握りつぶす。
+                try:
+                    stats_db.record_usage(
+                        _provider_config.get("type", "unknown"),
+                        _turn_served or _provider_config.get("model", "unknown"),
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens,
+                        cached_tokens=_cached,
+                    )
+                except Exception:
+                    pass
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -3164,13 +4224,120 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
 @app.post("/chat")
 async def chat(req: ChatRequest):
     if req.multi_agent or req.resume_job_id:
-        stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id)
+        # 実行方式を決定。team_method（新）が優先、無ければ旧 team_mode から導出（既定はシングル型）。
+        method = req.team_method or ("team" if req.team_mode else "single")
+        if req.resume_job_id:
+            # 再開時は、ジョブが実際にどの方式で作られたかをディスク上から判定（トグル取り違え防止）。
+            # チーム/シングルの制御は .agent-jobs/<scope>/<id>/ に集約。パイプラインは旧来の <scope>/jobs/<id>/。
+            try:
+                _base = (ALLOWED_WORK_DIR / req.workspace_scope) if req.workspace_scope else ALLOWED_WORK_DIR
+                _agent = list(ALLOWED_WORK_DIR.glob(f".agent-jobs/*/{req.resume_job_id}"))
+                _apf = next((c / "plan.json" for c in _agent if (c / "plan.json").exists()), None)
+                if _apf:
+                    # シングル型は会話継続をスコープ基準にしたため resume を使わない＝再開はチーム方式の計画承認のみ。
+                    method = "team"
+                else:
+                    _cands = [_base / "jobs" / req.resume_job_id] + list(ALLOWED_WORK_DIR.glob(f"*/jobs/{req.resume_job_id}")) + [ALLOWED_WORK_DIR / "jobs" / req.resume_job_id]
+                    _pf = next((c / "plan.json" for c in _cands if (c / "plan.json").exists()), None)
+                    if _pf:
+                        method = "team" if json.loads(_pf.read_text(encoding="utf-8")).get("mode") == "team" else "pipeline"
+            except Exception:
+                pass
+        if method == "single" and MULTI_AGENT_TEAM_ENABLED:
+            stream = single_team_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test)
+        elif method == "team" and MULTI_AGENT_TEAM_ENABLED:
+            stream = team_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.startup_test, req.resume_action)
+        else:
+            stream = multi_agent_stream(req.message, req.agent_mode, req.workspace_scope, req.resume_job_id, req.resume_action)
+        # --- C案: 実行をリクエストから切り離して永続化（リロード/クラッシュ後も結果を失わない）---
+        # ドライバ（独立タスク）が stream を完走させ SSE をディスクへ保存。クライアントが切れても
+        # 後処理まで終わって結果が残る。HTTP レスポンスは購読者として中継するだけ。
+        run_id = uuid.uuid4().hex[:12]
+        # 購読キューを「ドライバ起動より前」に登録する。create_task で起こすドライバは
+        # 購読者ゼロの瞬間に最初のチャンク（ペインを開く plan team_event 等）を fan-out しうる。
+        # 先に subs へ入れておけば、その早期イベントもキューに溜まり取りこぼさない（ライブビューが出ない不具合の修正）。
+        _relay_q: asyncio.Queue = asyncio.Queue()
+        _TEAM_RUNS[run_id] = {"subs": {_relay_q}, "status": "running"}
+        _run_meta = {"request": (req.message or "")[:200], "mode": method, "scope": req.workspace_scope or ""}
+        asyncio.create_task(_drive_team_run(run_id, stream, _run_meta))
+
+        async def _relay_team_run():
+            q: asyncio.Queue = _relay_q
+            # フロントはこの run_id を localStorage に保持し、リロード時に復元へ使う
+            yield "data: " + json.dumps({"type": "run_started", "run_id": run_id}, ensure_ascii=False) + "\n\n"
+            try:
+                while True:
+                    item = await q.get()
+                    if item is None:
+                        break
+                    yield item
+            finally:
+                r = _TEAM_RUNS.get(run_id)
+                if r is not None:
+                    r["subs"].discard(q)
+                    # 完了済みでもう誰も見ていなければレジストリから外す（ディスクには残る）
+                    if r.get("status") != "running" and not r["subs"]:
+                        _TEAM_RUNS.pop(run_id, None)
+
+        return StreamingResponse(_relay_team_run(), media_type="text/event-stream")
     else:
         # mode を優先解釈（後方互換: 旧 bypass_approval フラグも auto 扱いで尊重）
         plan_mode = (req.mode == "plan")
         bypass = (req.mode == "auto") or req.bypass_approval
         stream = agent_stream(req.message, req.history, req.images, bypass, req.no_think, req.workspace_scope, plan_mode, req.reasoning_effort)
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@app.get("/multi-agent/runs/{run_id}")
+async def get_team_run(run_id: str):
+    """リロード/クラッシュ後の結果復元用。保存済み SSE ログから、最終メッセージ・
+    ライブビュー用イベント列・状態を組み立てて返す。実行中なら status='running'。"""
+    if not run_id or "/" in run_id or ".." in run_id:
+        return JSONResponse({"error": "bad run_id"}, status_code=400)
+    meta: dict = {}
+    mp = _run_meta_path(run_id)
+    if mp.exists():
+        try:
+            meta = json.loads(mp.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    sse = _run_sse_path(run_id)
+    run = _TEAM_RUNS.get(run_id)
+    if not sse.exists():
+        if run is None and not meta:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({
+            "status": (run.get("status") if run else None) or meta.get("status") or "running",
+            "message": "", "team_events": [], "plan_ready": None, "meta": meta,
+        })
+    message_parts: list[str] = []
+    team_events: list[dict] = []
+    plan_ready = None
+    try:
+        for line in sse.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("data: "):
+                continue
+            try:
+                d = json.loads(line[6:])
+            except Exception:
+                continue
+            t = d.get("type")
+            if t == "answer_chunk":
+                message_parts.append(d.get("content", ""))
+            elif t == "team_event":
+                team_events.append(d.get("event", {}))
+            elif t == "plan_ready":
+                plan_ready = {"job_id": d.get("job_id", ""), "roles": d.get("roles", [])}
+    except OSError:
+        pass
+    status = (run.get("status") if run else None) or meta.get("status") or "done"
+    return JSONResponse({
+        "status": status,
+        "message": "".join(message_parts),
+        "team_events": team_events,
+        "plan_ready": plan_ready,
+        "meta": meta,
+    })
 
 
 # -----------------------------------------------------------------------
@@ -3331,6 +4498,7 @@ class TaskRequest(BaseModel):
     interval_hours: int | None = None
     run_at: str | None = None
     workspace_scope: str = ""
+    model_ref: str | None = None
     enabled: bool = True
 
 
@@ -3344,6 +4512,7 @@ class TaskUpdateRequest(BaseModel):
     interval_hours: int | None = None
     run_at: str | None = None
     workspace_scope: str | None = None
+    model_ref: str | None = None
     enabled: bool | None = None
 
 
@@ -3407,6 +4576,7 @@ async def schedule_task_create_ep(req: TaskRequest):
             day_of_week=req.day_of_week, days_of_week=req.days_of_week,
             interval_hours=req.interval_hours,
             run_at=req.run_at, workspace_scope=req.workspace_scope,
+            model_ref=req.model_ref,
             enabled=req.enabled,
         )
     except ValueError as e:
@@ -3443,11 +4613,12 @@ async def schedule_task_run_now_ep(task_id: int):
     if task is None:
         return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
     try:
-        job_id = _create_job_from_task(task)
+        job_id, actual_model = _create_job_from_task(task)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     # 実行記録に残す（マイクロ秒精度で occurrence の衝突を回避）。結果通知ポーリングが拾う。
-    schedule_db.claim_occurrence(task_id, datetime.now().isoformat(), "executed", job_id=job_id)
+    schedule_db.claim_occurrence(task_id, datetime.now().isoformat(), "executed",
+                                 job_id=job_id, actual_model=actual_model)
     return JSONResponse({"job_id": job_id, "status": "started"})
 
 
@@ -3484,14 +4655,33 @@ async def schedule_run_decide_ep(run_id: int, req: RunDecideRequest):
             schedule_db.decide_run(run_id, "failed")
             return JSONResponse({"error": "タスクが見つかりません"}, status_code=404)
         try:
-            job_id = _scheduler_create_job(task)
+            job_id, actual_model = _scheduler_create_job(task)
             schedule_db.decide_run(run_id, "executed", job_id=job_id)
+            schedule_db.set_run_actual_model(run_id, actual_model)
             return JSONResponse({"id": run_id, "status": "executed", "job_id": job_id})
         except Exception as e:
             schedule_db.decide_run(run_id, "failed")
             return JSONResponse({"error": str(e)}, status_code=500)
 
     return JSONResponse({"error": "action は 'run' か 'skip'"}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# 統計ダッシュボード（利用統計・モデル別利用割合）
+# ---------------------------------------------------------------------------
+@app.get("/stats/usage")
+async def stats_usage(days: int = 30):
+    """
+    利用統計の集計を返す。days で期間指定（0 で全期間）。
+    第1の軸＝モデル別利用割合（breakdown）。サマリー・日別推移も同梱。
+    """
+    d = None if days <= 0 else days
+    return JSONResponse({
+        "days": days,
+        "totals": stats_db.totals(d),
+        "breakdown": stats_db.model_breakdown(d),
+        "daily": stats_db.daily_series(d),
+    })
 
 
 @app.get("/async-agent/mcp-tools")
@@ -4229,17 +5419,45 @@ async def providers_config(req: ProviderConfigRequest):
 _MA_CONFIG_FILE = Path(__file__).parent / ".multi_agent_config.json"
 
 _MA_ROLE_DEFAULTS = ["dispatcher", "design", "coding", "debug", "security", "docs", "research", "infra"]
+_MA_MODES = ["economy", "quality"]   # コスト優先 / 品質優先
 
 
-def _load_ma_config() -> dict:
-    if _MA_CONFIG_FILE.exists():
-        try:
-            return json.loads(_MA_CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    # デフォルト: 現在のアクティブプロバイダーを全役割に適用
+def _default_ma_set() -> dict:
+    """未設定時のフォールバック: 全役割を現在のアクティブプロバイダー＋モデルに割り当てる。"""
     default = {"preset_id": _provider_config.get("preset_id", _provider_config["type"]), "model": _provider_config["model"]}
     return {role: dict(default) for role in _MA_ROLE_DEFAULTS}
+
+
+def _clone_ma_set(s: dict) -> dict:
+    return {r: dict(v) for r, v in s.items() if isinstance(v, dict)}
+
+
+def _load_ma_config_all() -> dict:
+    """economy / quality の2セット構造で返す。
+    旧フラット形式（役割キーが直下）は両セットへ複製して移行扱い。未設定はデフォルトへ。"""
+    raw = None
+    if _MA_CONFIG_FILE.exists():
+        try:
+            raw = json.loads(_MA_CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            raw = None
+    if isinstance(raw, dict) and ("economy" in raw or "quality" in raw):
+        eco  = raw.get("economy") or raw.get("quality") or _default_ma_set()
+        qual = raw.get("quality") or raw.get("economy") or _default_ma_set()
+        return {"economy": _clone_ma_set(eco), "quality": _clone_ma_set(qual)}
+    if isinstance(raw, dict) and raw:
+        # 旧フラット形式（1セットのみ）→ 両セットへ複製して移行
+        return {"economy": _clone_ma_set(raw), "quality": _clone_ma_set(raw)}
+    d = _default_ma_set()
+    return {"economy": d, "quality": _clone_ma_set(d)}
+
+
+def _load_ma_config(mode: str = "economy") -> dict:
+    """指定モード（economy/quality）の役割→モデル割当を返す。
+    旧来の agent_mode（balance 等）が来ても economy にフォールバックする。"""
+    m = mode if mode in _MA_MODES else "economy"
+    allc = _load_ma_config_all()
+    return allc.get(m) or allc.get("economy") or _default_ma_set()
 
 
 def _save_ma_config(cfg: dict):
@@ -4247,6 +5465,19 @@ def _save_ma_config(cfg: dict):
         _MA_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         print(f"[ma_config] save failed: {e}")
+
+
+def _preset_to_provider_type(preset_id: str) -> str:
+    """preset_id（azure / foundry2 / openrouter ...）を統計用プロバイダー種別へ正規化する。
+    マルチAIの利用記録を、チャット/BG と同じ provider 軸に合流させるため。"""
+    pid = (preset_id or "").strip()
+    if not pid:
+        return "multi"
+    if pid.startswith("foundry"):
+        return "foundry"
+    if pid in ("azure", "gemini", "openai", "groq", "openrouter"):
+        return pid
+    return pid  # ローカル等はそのまま
 
 
 def _make_async_client_for(preset_id: str):
@@ -4370,24 +5601,124 @@ async def rerun_models():
     for m in cur_deps:
         _add(cur_pid, cur_name, m)
 
-    # マルチAI設定があれば、その割当モデルも横断候補として追加（重複排除）
+    # マルチAI設定があれば、その割当モデルも横断候補として追加（economy/quality 両セット・重複排除）
     if _MA_CONFIG_FILE.exists():
-        for _role, rc in _load_ma_config().items():
-            pid = rc.get("preset_id")
-            _add(pid, name_by_preset.get(pid, pid), rc.get("model"))
+        for _set in _load_ma_config_all().values():
+            for _role, rc in _set.items():
+                pid = rc.get("preset_id")
+                _add(pid, name_by_preset.get(pid, pid), rc.get("model"))
 
     return JSONResponse({"models": items})
 
 
 @app.get("/multi-agent/config")
 async def ma_config_get():
-    return JSONResponse(_load_ma_config())
+    # economy / quality の2セット構造で返す（旧フラット形式は両セットへ複製済み）
+    return JSONResponse(_load_ma_config_all())
 
 
 @app.post("/multi-agent/config")
 async def ma_config_save(body: dict):
     _save_ma_config(body)
     return JSONResponse({"ok": True})
+
+
+@app.post("/multi-agent/review-plan")
+async def ma_review_plan(body: dict):
+    """チーム方式の計画承認画面の「審議」用。リサーチ役モデルに計画の妥当性を審査させ、
+    判定（approve/revise）＋総評＋具体的な指摘を返す。revise の指摘はそのまま再計画に流せる。"""
+    job_id = (body.get("job_id") or "").strip()
+    scope  = (body.get("workspace_scope") or "").strip()
+    mode   = body.get("agent_mode") or "economy"
+    if not job_id:
+        return JSONResponse({"ok": False, "error": "job_id がありません"}, status_code=400)
+
+    # 制御ディレクトリ（.agent-jobs/<scope>/<id>）から plan.json / original_task.txt を探す
+    job_dir = _agent_job_dir(scope, job_id)
+    if not (job_dir / "plan.json").exists():
+        cands = list(ALLOWED_WORK_DIR.glob(f".agent-jobs/*/{job_id}"))
+        job_dir = next((c for c in cands if (c / "plan.json").exists()), job_dir)
+    plan_file = job_dir / "plan.json"
+    if not plan_file.exists():
+        return JSONResponse({"ok": False, "error": "計画が見つかりません"}, status_code=404)
+
+    try:
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
+    except Exception:
+        return JSONResponse({"ok": False, "error": "計画の読み込みに失敗"}, status_code=500)
+    otf = job_dir / "original_task.txt"
+    original_task = otf.read_text(encoding="utf-8") if otf.exists() else ""
+
+    # スコープ内の既存ファイル一覧（HTML参照の取り違え＝二重化バグを審査させるための材料）
+    base_dir = (ALLOWED_WORK_DIR / scope) if scope else ALLOWED_WORK_DIR
+    scope_files = ""
+    try:
+        names = []
+        for p in sorted(base_dir.rglob("*")):
+            rel = p.relative_to(base_dir)
+            if any(seg in (".agent-jobs", ".team", "jobs", "__pycache__", ".git") for seg in rel.parts):
+                continue
+            if p.is_file():
+                names.append(str(rel))
+            if len(names) >= 60:
+                names.append("…（以下略）"); break
+        scope_files = "\n".join(f"- {n}" for n in names)
+    except Exception:
+        pass
+
+    lines = []
+    for tid, t in (plan.get("tasks", {}) or {}).items():
+        lines.append(
+            f"{tid} [{t.get('role','')}] files={t.get('files', [])} "
+            f"depends_on={t.get('depends_on', [])}: {(t.get('prompt','') or '')}"
+        )
+    plan_text = "\n".join(lines) or "（タスクなし）"
+
+    r_cfg    = _load_ma_config(mode).get("research", {}) or {}
+    r_preset = r_cfg.get("preset_id") or _provider_config.get("preset_id", _provider_config["type"])
+    r_model  = r_cfg.get("model") or _provider_config["model"]
+
+    review_prompt = (
+        "あなたはマルチエージェントの実行計画を審査するリサーチ役です。"
+        "以下の『ユーザーの依頼』と『実行計画』を読み、計画が依頼を的確に満たすかを厳しく審査してください。\n\n"
+        f"## ユーザーの依頼\n{original_task or '（不明）'}\n\n"
+        f"## 作業スコープの既存ファイル\n{scope_files or '（なし＝新規作成）'}\n\n"
+        f"## 実行計画（タスク分解）\n{plan_text}\n\n"
+        "## 重点的に見る観点\n"
+        "- 依頼の要件が漏れていないか\n"
+        "- 既存Webアプリの修正なら、index.html が実際に読み込むファイル（例: js/game.js）を対象にしているか。"
+        "ルートや code/ に同名ファイルを新規作成する計画は『ブラウザに反映されない二重化バグ』なので必ず指摘する\n"
+        "- タスクの依存関係・並列性が妥当か（無駄な直列・依存漏れ・衝突）\n"
+        "- 抜け・リスク\n\n"
+        "## 出力（JSONのみ）\n"
+        '{"verdict": "approve" | "revise", "summary": "一文の総評", "points": ["具体的な指摘/修正指示", ...]}\n'
+        "approve=このまま実行してよい。revise=修正すべき。points は revise のとき具体的に書く（approve なら空配列）。"
+    )
+    try:
+        client = _make_async_client_for(r_preset)
+        resp = await client.chat.completions.create(
+            model=r_model,
+            messages=[{"role": "user", "content": review_prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        stats_db.record_response_usage(_preset_to_provider_type(r_preset), resp, r_model)
+        data = json.loads(resp.choices[0].message.content or "{}")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"審議に失敗: {type(e).__name__}: {e}"}, status_code=500)
+
+    verdict = "revise" if str(data.get("verdict", "")).lower().startswith("rev") else "approve"
+    points = data.get("points") or []
+    if not isinstance(points, list):
+        points = [str(points)]
+    return JSONResponse({
+        "ok": True,
+        "verdict": verdict,
+        "summary": data.get("summary", ""),
+        "points": [str(p) for p in points][:8],
+        "model": r_model,
+        "preset": r_preset,
+    })
 
 
 class CleanupRequest(BaseModel):

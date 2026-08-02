@@ -17,12 +17,12 @@
       "model": "deepseek/deepseek-v4-flash"
     },
     "security": {
-      "preset_id": "openrouter",
-      "model": "nvidia/nemotron-3-super-120b-a12b"
+      "preset_id": "azure",
+      "model": "gpt-5.6-terra"
     },
     "docs": {
       "preset_id": "azure",
-      "model": "gpt-5.4-mini"
+      "model": "gpt-5.6-luna"
     },
     "research": {
       "preset_id": "gemini",
@@ -30,33 +30,33 @@
     },
     "infra": {
       "preset_id": "azure",
-      "model": "gpt-5.4"
+      "model": "gpt-5.6-luna"
     }
   },
   "quality": {
     "dispatcher": {
       "preset_id": "azure",
-      "model": "gpt-5.4"
+      "model": "gpt-5.6-terra"
     },
     "design": {
       "preset_id": "azure",
-      "model": "gpt-5.4"
+      "model": "gpt-5.6-terra"
     },
     "coding": {
       "preset_id": "azure",
-      "model": "gpt-5.4-mini"
+      "model": "gpt-5.6-luna"
     },
     "debug": {
       "preset_id": "azure",
-      "model": "gpt-5.4-mini"
+      "model": "gpt-5.6-luna"
     },
     "security": {
       "preset_id": "azure",
-      "model": "gpt-5.4"
+      "model": "gpt-5.6-terra"
     },
     "docs": {
       "preset_id": "azure",
-      "model": "gpt-5.4-mini"
+      "model": "gpt-5.6-luna"
     },
     "research": {
       "preset_id": "gemini",
@@ -64,7 +64,7 @@
     },
     "infra": {
       "preset_id": "azure",
-      "model": "gpt-5.4"
+      "model": "gpt-5.6-luna"
     }
   }
 }

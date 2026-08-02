@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-08-02（セッション77）gpt-5.6系デプロイ対応＋Gemini履歴補正バグ修正（v2.0.1・main）
+
+> ユーザーが新型 `gpt-5.6-luna`/`gpt-5.6-terra` をデプロイしたところ複数のプロバイダーでエラー多発。原因の異なる3件を切り分けて修正。
+
+### gpt-5.6系の reasoning_effort 非対応（プロバイダーごとに挙動が異なる）
+- 症状: `gpt-5.6-luna` で tools 併用時に400（`Function tools with reasoning_effort are not supported ... in /v1/chat/completions`）。
+- 調査の結果、**プロバイダーごとにエラー文言と回避策が異なる**と判明：
+  - **OpenAI直API**: エラー文に `set reasoning_effort to 'none'` と案内あり → `reasoning_effort="none"` を明示送信すれば通る。
+  - **Azure OpenAI**: エラー文に `'none'` の案内なし → 実際に `'none'` を送っても400。**完全に省略するしかない**。
+- 修正: `server.py`（対話チャット）・`agent_core.py`（BG/定時）の両方で、`gpt-5.6` 系モデルかつ `type=="openai"` のときだけ `reasoning_effort="none"` を送り、`azure`/`foundry` は付与しない条件分岐に変更。他モデル（gpt-5〜5.5・o系）は既存通り。
+- 実機確認: Azure・OpenAI直・Foundry予定分すべて動作確認OK（ユーザー実機・2026-08-02）。
+
+### Gemini「function call turn」400エラー（履歴の先頭が壊れている問題）
+- 症状: 同じ会話を Gemini (`gemini-2.5-flash`) に切り替えると `Please ensure that function call turn comes immediately after a user turn or after a function response turn.` で400。GPT系は同じ履歴でもエラーにならず気づかれていなかった。
+- 調査: 一時的に失敗リクエストの `messages` をダンプして実データを確認 → ブラウザが送っていた履歴が「ツール呼び出し中のassistantメッセージ」から始まる不完全な形になっていた。既存の `_is_recent_head_unsafe` による先頭補正はロジック上 `len(history) > MAX_HISTORY_MESSAGES`(20件超）の場合しか発動せず、20件以下の短い履歴では無防備だった。
+- 修正（`server.py` `_agent_stream_inner`）:
+  1. 先頭安全チェックを常に実行するよう変更（20件以下でも作動）。
+  2. 遡る余地が無い場合は、安全になるまで先頭からメッセージを破棄するフォールバックを追加。
+  3. 新設 `_fix_orphan_tool_calls()`：生成中断等で応答が付かないまま残った tool_calls をテキスト表現に変換（境界に関係なく履歴中どこでも補正）。
+- なぜブラウザ側の履歴がその形になったか（フロント側の根本原因）は未解明。バックエンド側で堅牢化したため実害は解消。次回フロント側のhistory管理を追う場合は要調査。
+
+### バージョン
+- `config.py` `APP_VERSION`: `2.0.0` → `2.0.1`（パッチ・バグ修正）
+
+---
+
 ## 2026-07-01（セッション76 続き）v2.0.0：マルチエージェント方式を main にマージ（Stage移行）
 
 > `feature/multi-agent-team`（2026-06-22 作成・約1週間の開発）を `main` にマージ。**Stage 2（マルチAIエージェント）実用化**の区切りとしてメジャーバージョンを `2.0.0` に更新。チーム方式（審議/即応/パイプライン(旧・塩漬け)の3方式並走）・統計ダッシュボード・キャッシュ可視化がここで main に合流。

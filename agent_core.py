@@ -1162,7 +1162,15 @@ async def run_agent(
         if provider_config.get("type") in ("azure", "foundry", "openai") and (
             "gpt-5" in _model_lc or _model_lc.startswith(("o1", "o3", "o4"))
         ):
-            create_kwargs["reasoning_effort"] = _eff
+            if "gpt-5.6" in _model_lc:
+                # gpt-5.6系は /v1/chat/completions で tools+reasoning_effort 併用不可。
+                # OpenAI直APIは 'none' 指定で bypass 可能だが、Azure/Foundry のエラー文には
+                # 'none' の案内が無く実際に 'none' でも400になるため、完全に省略する。
+                if provider_config.get("type") == "openai" and tools_enabled:
+                    create_kwargs["reasoning_effort"] = "none"
+                # azure/foundry は何も付与しない（省略）
+            else:
+                create_kwargs["reasoning_effort"] = _eff
 
         # OpenRouter: メインが失敗/レート制限時に別モデルへ自動フォールバック。
         # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。

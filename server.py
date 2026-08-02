@@ -3386,6 +3386,36 @@ def _is_recent_head_unsafe(msgs: list) -> bool:
     return False
 
 
+def _fix_orphan_tool_calls(history: list) -> list:
+    """
+    assistant の tool_calls に対応する tool 応答が一つも無い（生成の中断・キャンセル等で
+    抜け落ちた）場合、その tool_calls をテキスト表現に変換して除去する。
+    Gemini は「function call の直後に user turn か function response turn が無い」と
+    400 エラーを返すため、境界トリム時だけでなく履歴中のどこにあっても補正が必要。
+    """
+    responded_ids = {
+        msg.get("tool_call_id") for msg in history if msg.get("role") == "tool"
+    }
+    result = []
+    for msg in history:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            call_ids = [
+                (tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None))
+                for tc in msg["tool_calls"]
+            ]
+            if not all(cid in responded_ids for cid in call_ids):
+                tool_names = ", ".join(
+                    tc["function"]["name"] if isinstance(tc, dict) else tc.function.name
+                    for tc in msg["tool_calls"]
+                )
+                existing_content = msg.get("content") or ""
+                content = f"{existing_content}[ツール呼び出し: {tool_names}]".strip()
+                result.append({"role": "assistant", "content": content})
+                continue
+        result.append(msg)
+    return result
+
+
 def _sanitize_history(history: list) -> list:
     """
     トリミング後に先頭に残った孤立 tool メッセージを除去する。
@@ -3411,7 +3441,25 @@ _NOTIFY_KEYWORDS = ["メールして", "メールで教えて", "メールで知
 
 async def _agent_stream_inner(user_message: str, history: list, images: list = None, bypass_approval: bool = False, no_think: bool = False, workspace_scope: str = "", plan_mode: bool = False, reasoning_effort: str = "medium"):
     _notify_on_done = any(kw in user_message for kw in _NOTIFY_KEYWORDS)
-    trimmed = history[-MAX_HISTORY_MESSAGES:] if len(history) > MAX_HISTORY_MESSAGES else history
+    # 直近 MAX_HISTORY_MESSAGES 件に切り詰めるが、先頭が孤立した tool/tool_calls
+    # メッセージだと Gemini 等で "function call turn must follow user/function-response"
+    # エラーになるため、安全な位置まで history を遡って補完する。
+    if len(history) > MAX_HISTORY_MESSAGES:
+        _old_part = history[:-MAX_HISTORY_MESSAGES]
+        trimmed = history[-MAX_HISTORY_MESSAGES:]
+    else:
+        _old_part = []
+        trimmed = list(history)
+    while _is_recent_head_unsafe(trimmed) and _old_part:
+        trimmed = [_old_part[-1]] + trimmed
+        _old_part = _old_part[:-1]
+    # 遡る余地が無く（history自体がここから始まっている等）それでも先頭が
+    # 孤立した tool/tool_calls メッセージの場合は、安全になるまで先頭から破棄する。
+    while _is_recent_head_unsafe(trimmed):
+        trimmed = trimmed[1:]
+    # 生成の中断・キャンセル等で応答が付かないまま保存された tool_calls を補正
+    # （境界に関わらず履歴中のどこにあっても Gemini の 400 の原因になるため）
+    trimmed = _fix_orphan_tool_calls(trimmed)
     trimmed = _sanitize_history(trimmed)
     # bg_user / bg_result は LLM API に送らない（チャット表示専用ロール）
     trimmed = [m for m in trimmed if m.get("role") not in ("bg_user", "bg_result")]
@@ -3526,7 +3574,15 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         if _provider_config["type"] in ("azure", "foundry", "openai") and (
             "gpt-5" in _model_lc or _model_lc.startswith(("o1", "o3", "o4"))
         ):
-            create_kwargs["reasoning_effort"] = _eff
+            if "gpt-5.6" in _model_lc:
+                # gpt-5.6系は /v1/chat/completions で tools+reasoning_effort 併用不可。
+                # OpenAI直APIは 'none' 指定で bypass 可能だが、Azure/Foundry のエラー文には
+                # 'none' の案内が無く実際に 'none' でも400になるため、完全に省略する。
+                if _provider_config["type"] == "openai" and tools_enabled:
+                    create_kwargs["reasoning_effort"] = "none"
+                # azure/foundry は何も付与しない（省略）
+            else:
+                create_kwargs["reasoning_effort"] = _eff
         # OpenRouter: 最速の提供元（Cerebras→Groq）を優先指定。指定がないと
         # 遅い/混雑した提供元に回されることがあるため。allow_fallbacks=True で
         # 指定先が不可のときは他社へ自動フォールバックする（停止しない）。

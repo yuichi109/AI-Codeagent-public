@@ -1094,6 +1094,16 @@ async def _execute_tool_async(name: str, arguments: dict) -> str:
         return json.dumps({"error": f"ツールがタイムアウトしました ({timeout}秒): {name}"}, ensure_ascii=False)
 
 
+def _is_reasoning_effort_unsupported(exc: Exception) -> bool:
+    """
+    「Function tools with reasoning_effort are not supported for <model> ...」400エラーの判定。
+    モデル名の事前列挙ではなくエラー内容で判定することで、Azure/Foundryに新モデルが
+    追加されるたびに個別対応が要らないようにする。
+    """
+    msg = str(exc)
+    return "reasoning_effort" in msg and "not supported" in msg
+
+
 # -----------------------------------------------------------------------
 # Main agent loop
 # -----------------------------------------------------------------------
@@ -1157,20 +1167,15 @@ async def run_agent(
 
         # 推論エフォート（思考の深さ）: BG/定時は UI がないため .env の REASONING_EFFORT_BG で全体既定を決める（既定 medium）。
         # reasoning 非対応モデルに送ると 400 になるため、対応モデルのみに適用する。
+        # モデルによっては「tools+reasoning_effort 併用不可」の個体差があり、事前にモデル名で
+        # 判定すると新モデルが出るたびに手直しが必要になるため、まず付けて送り、
+        # 400 が返ってきたら reasoning_effort を外して自動リトライする（_call_with_reasoning_retry）。
         _eff = REASONING_EFFORT_BG
         _model_lc = (provider_config.get("model", "") or "").lower()
         if provider_config.get("type") in ("azure", "foundry", "openai") and (
             "gpt-5" in _model_lc or _model_lc.startswith(("o1", "o3", "o4"))
         ):
-            if "gpt-5.6" in _model_lc:
-                # gpt-5.6系は /v1/chat/completions で tools+reasoning_effort 併用不可。
-                # OpenAI直APIは 'none' 指定で bypass 可能だが、Azure/Foundry のエラー文には
-                # 'none' の案内が無く実際に 'none' でも400になるため、完全に省略する。
-                if provider_config.get("type") == "openai" and tools_enabled:
-                    create_kwargs["reasoning_effort"] = "none"
-                # azure/foundry は何も付与しない（省略）
-            else:
-                create_kwargs["reasoning_effort"] = _eff
+            create_kwargs["reasoning_effort"] = _eff
 
         # OpenRouter: メインが失敗/レート制限時に別モデルへ自動フォールバック。
         # OpenRouter は models 配列を合計3個までに制限するため [:3] で切り詰める。
@@ -1186,8 +1191,24 @@ async def run_agent(
         try:
             stream = await client.chat.completions.create(**create_kwargs)
         except Exception as e:
-            await emit("error", f"LLM API エラー: {e}")
-            raise
+            if _is_reasoning_effort_unsupported(e):
+                # モデル・デプロイによって「reasoning_effort='none' を明示すれば通る」
+                # 場合と「完全に省略すれば通る」場合の両方があるため、現在の状態と
+                # 逆側を試す（現状に値があれば省略、無ければ明示的に'none'を付与）。
+                retry_kwargs = dict(create_kwargs)
+                if "reasoning_effort" in retry_kwargs:
+                    retry_kwargs.pop("reasoning_effort")
+                else:
+                    retry_kwargs["reasoning_effort"] = "none"
+                try:
+                    stream = await client.chat.completions.create(**retry_kwargs)
+                    create_kwargs = retry_kwargs
+                except Exception as e2:
+                    await emit("error", f"LLM API エラー: {e2}")
+                    raise
+            else:
+                await emit("error", f"LLM API エラー: {e}")
+                raise
 
         content_parts: list[str] = []
         tool_calls_map: dict[int, dict] = {}

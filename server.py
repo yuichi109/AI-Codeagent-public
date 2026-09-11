@@ -3416,6 +3416,16 @@ def _fix_orphan_tool_calls(history: list) -> list:
     return result
 
 
+def _is_reasoning_effort_unsupported(exc: Exception) -> bool:
+    """
+    「Function tools with reasoning_effort are not supported for <model> ...」400エラーの判定。
+    モデル名の事前列挙ではなくエラー内容で判定することで、Azure/Foundryに新モデルが
+    追加されるたびに個別対応が要らないようにする。
+    """
+    msg = str(exc)
+    return "reasoning_effort" in msg and "not supported" in msg
+
+
 def _sanitize_history(history: list) -> list:
     """
     トリミング後に先頭に残った孤立 tool メッセージを除去する。
@@ -3569,20 +3579,15 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
         # reasoning 非対応モデルに送ると 400 になるため、対応モデルのみに適用する。
         # - Azure/Foundry/OpenAI: gpt-5 系・o系（o1/o3/o4）のみ reasoning_effort を付与。
         # - OpenRouter: extra_body.reasoning で渡す（非対応モデルは OpenRouter 側で無視される）。
+        # モデルによっては「tools+reasoning_effort 併用不可」の個体差があり、事前にモデル名で
+        # 判定すると新モデルが出るたびに手直しが必要になるため、まず付けて送り、
+        # 400 が返ってきたら reasoning_effort を外して自動リトライする（_is_reasoning_effort_unsupported）。
         _eff = reasoning_effort if reasoning_effort in ("low", "medium", "high") else "medium"
         _model_lc = (_provider_config.get("model", "") or "").lower()
         if _provider_config["type"] in ("azure", "foundry", "openai") and (
             "gpt-5" in _model_lc or _model_lc.startswith(("o1", "o3", "o4"))
         ):
-            if "gpt-5.6" in _model_lc:
-                # gpt-5.6系は /v1/chat/completions で tools+reasoning_effort 併用不可。
-                # OpenAI直APIは 'none' 指定で bypass 可能だが、Azure/Foundry のエラー文には
-                # 'none' の案内が無く実際に 'none' でも400になるため、完全に省略する。
-                if _provider_config["type"] == "openai" and tools_enabled:
-                    create_kwargs["reasoning_effort"] = "none"
-                # azure/foundry は何も付与しない（省略）
-            else:
-                create_kwargs["reasoning_effort"] = _eff
+            create_kwargs["reasoning_effort"] = _eff
         # OpenRouter: 最速の提供元（Cerebras→Groq）を優先指定。指定がないと
         # 遅い/混雑した提供元に回されることがあるため。allow_fallbacks=True で
         # 指定先が不可のときは他社へ自動フォールバックする（停止しない）。
@@ -3600,7 +3605,22 @@ async def _agent_stream_inner(user_message: str, history: list, images: list = N
                 _extra["models"] = ([_main] + [m for m in OPENROUTER_FALLBACK_MODELS if m != _main])[:3]
                 _extra["route"] = "fallback"
             create_kwargs["extra_body"] = _extra
-        stream = await _make_async_client().chat.completions.create(**create_kwargs)
+        try:
+            stream = await _make_async_client().chat.completions.create(**create_kwargs)
+        except Exception as e:
+            if _is_reasoning_effort_unsupported(e):
+                # モデル・デプロイによって「reasoning_effort='none' を明示すれば通る」
+                # 場合と「完全に省略すれば通る」場合の両方があるため、現在の状態と
+                # 逆側を試す（現状に値があれば省略、無ければ明示的に'none'を付与）。
+                retry_kwargs = dict(create_kwargs)
+                if "reasoning_effort" in retry_kwargs:
+                    retry_kwargs.pop("reasoning_effort")
+                else:
+                    retry_kwargs["reasoning_effort"] = "none"
+                stream = await _make_async_client().chat.completions.create(**retry_kwargs)
+                create_kwargs = retry_kwargs
+            else:
+                raise
 
         content_parts = []
         tool_calls_map = {}  # index -> {id, name, arguments}

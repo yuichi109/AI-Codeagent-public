@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-09-11（セッション78）gpt-6-astra デプロイ対応：reasoning_effort 400エラーの汎用リトライ化（v2.0.2・main）
+
+> gpt-5.6系（v2.0.1）と同じ「Function tools with reasoning_effort are not supported」400が、新モデル `gpt-6-astra` デプロイでも発生。今回はモデル名の個別対応ではなく、エラー内容ベースの自動リトライに一般化した。
+
+### 症状と原因
+- `gpt-6-astra` は `_model_lc` に `"gpt-5"` を含まず o1/o3/o4 系でもないため、v2.0.1時点の条件分岐では `reasoning_effort` を**送っていない**のに同じ400が発生。
+- gpt-5.6系（値ありで拒否→省略が正解）とは逆に、gpt-6-astra は**省略していても拒否され、明示的に `reasoning_effort="none"` を送る必要がある**個体差だった（マルチAIチーム内の別エージェント「Luna」の分析でも同結論）。
+- モデル名の文字列判定（`"gpt-5.6" in _model_lc` 等）で個別対応を続けると、Azureに新モデルが追加されるたびに同じ修正が必要になる。
+
+### 修正（`server.py` `_agent_stream_inner`・`agent_core.py` `run_agent` 両方）
+- モデル名によるハードコード分岐を撤去。`reasoning_effort` はこれまで通り対象モデル（gpt-5系・o系）にはまず付けて送る。
+- 新設 `_is_reasoning_effort_unsupported(exc)`：エラーメッセージに `reasoning_effort` と `not supported` を含むかで判定（モデル名を見ない）。
+- この400を検知したら、**現在の設定と逆側**（`reasoning_effort` が付いていれば外す／付いていなければ `"none"` を明示）を自動的に1回だけリトライする方式に変更。gpt-5.6系・gpt-6-astra系どちらの個体差にも同じロジックで対応でき、今後の新モデルにも手直し不要。
+- 実機確認: `gpt-6-astra`（Azure）で動作確認OK（ユーザー実機・2026-09-11）。
+
+### バージョン
+- `config.py` `APP_VERSION`: `2.0.1` → `2.0.2`（パッチ・バグ修正）
+
+---
+
 ## 2026-08-02（セッション77）gpt-5.6系デプロイ対応＋Gemini履歴補正バグ修正（v2.0.1・main）
 
 > ユーザーが新型 `gpt-5.6-luna`/`gpt-5.6-terra` をデプロイしたところ複数のプロバイダーでエラー多発。原因の異なる3件を切り分けて修正。

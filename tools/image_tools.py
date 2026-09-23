@@ -17,7 +17,7 @@ from config import (
 
 # プロバイダー別の代表的な画像生成モデル一覧（setup.html のプルダウン用）
 IMAGE_MODELS_BY_PROVIDER = {
-    "openai":  ["gpt-image-2", "gpt-image-1"],
+    "openai":  ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2", "gpt-image-1"],
     "gemini":  ["gemini-2.5-flash-image"],
     "azure":   ["gpt-image-1", "dall-e-3"],
     "foundry": ["gpt-image-1"],

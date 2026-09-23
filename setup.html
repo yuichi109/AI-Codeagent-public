@@ -319,11 +319,9 @@
         </div>
         <div class="field">
           <label>モデル</label>
-          <select id="img-model">
-            <option value="gpt-image-2">gpt-image-2</option>
-            <option value="gpt-image-1">gpt-image-1</option>
-          </select>
-          <input type="text" id="img-model-text" style="display:none" placeholder="例: gpt-image-2">
+          <!-- 候補から選択 or 自由入力（新モデルが出てもコード修正不要） -->
+          <input type="text" id="img-model-text" list="img-model-list" placeholder="例: gpt-image-2" autocomplete="off">
+          <datalist id="img-model-list"></datalist>
         </div>
       </div>
       <div class="row">
@@ -1021,44 +1019,29 @@ function onRagEnabledChange() {
 
 // ---- 画像生成プロバイダー変更 ----
 const _IMAGE_MODELS = {
-  openai:  ['gpt-image-2', 'gpt-image-1'],
+  openai:  ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2', 'gpt-image-1'],
   gemini:  ['gemini-2.5-flash-image'],
 };
-const _IMAGE_MODEL_TEXT_PROVIDERS = new Set(['azure', 'foundry']);
+// Azure/Foundry はデプロイ名なので候補なし（自由入力のみ）
 
 function getImgModel() {
-  const provider = document.getElementById('img-provider').value;
-  if (_IMAGE_MODEL_TEXT_PROVIDERS.has(provider)) {
-    return document.getElementById('img-model-text').value.trim();
-  }
-  return document.getElementById('img-model').value;
+  return document.getElementById('img-model-text').value.trim();
 }
 function setImgModel(val) {
-  const provider = document.getElementById('img-provider').value;
-  if (_IMAGE_MODEL_TEXT_PROVIDERS.has(provider)) {
-    document.getElementById('img-model-text').value = val || '';
-  } else {
-    const sel = document.getElementById('img-model');
-    if (val && ![...sel.options].some(o => o.value === val)) {
-      sel.insertAdjacentHTML('afterbegin', `<option value="${val}">${val}</option>`);
-    }
-    sel.value = val || sel.options[0]?.value || '';
-  }
+  document.getElementById('img-model-text').value = val || '';
 }
 function onImageProviderChange() {
   const provider = document.getElementById('img-provider').value;
-  const useText = _IMAGE_MODEL_TEXT_PROVIDERS.has(provider);
-  const sel = document.getElementById('img-model');
+  const models = _IMAGE_MODELS[provider] || [];
   const txt = document.getElementById('img-model-text');
-  sel.style.display = useText ? 'none' : '';
-  txt.style.display = useText ? '' : 'none';
-  if (!useText) {
-    const models = _IMAGE_MODELS[provider] || [];
-    const current = sel.value;
-    sel.innerHTML = models.map(m =>
-      `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`
-    ).join('');
-    if (!sel.value && models.length) sel.value = models[0];
+  document.getElementById('img-model-list').innerHTML =
+    models.map(m => `<option value="${m}"></option>`).join('');
+  txt.placeholder = models.length ? `例: ${models[0]}` : '例: gpt-image-1（デプロイ名）';
+  // 空 or 他プロバイダーの候補値のままなら、先頭候補（候補なしなら空）に置き換え
+  const cur = txt.value.trim();
+  const allSuggested = Object.values(_IMAGE_MODELS).flat();
+  if (!cur || (allSuggested.includes(cur) && !models.includes(cur))) {
+    txt.value = models[0] || '';
   }
   onImageInheritChange();
 }

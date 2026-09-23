@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-09-24（セッション79）画像生成モデル欄を候補付き自由入力に変更（v2.0.3・main）
+
+> 詳細設定の画像生成で OpenAI を選ぶとモデル名がプルダウン固定になっており、新リリースの `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` が選べなかった。
+
+### 修正
+- `setup.html`: モデル欄を `<select>`＋Azure/Foundry用テキスト欄の切替式から、**datalist 付きテキスト入力1本**に統一（全プロバイダー共通）。候補から選択も自由入力も可＝今後新モデルが出てもコード修正不要。
+  - プロバイダー切替時は「空」または「他プロバイダーの候補値」のときだけ先頭候補（Azure/Foundryは空）に置換。手入力値は保持。
+- OpenAI の候補に `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` を追加（`setup.html` `_IMAGE_MODELS`・`tools/image_tools.py` `IMAGE_MODELS_BY_PROVIDER`）。
+- 生成本体（`generate_image`）はもともと設定値をそのまま渡すため無変更。
+- 検証: ブラウザでJSロジック確認（候補4件・任意値の保持・切替時の置換）。**新モデルでの実生成は未確認**（`quality` パラメータ受理可否も含む）。
+
+### その他
+- Windows 機で `git pull` が `HTTP Basic: Access denied` → Windows資格情報マネージャーの古いトークンが原因。`cmdkey /delete:git:https://gitlab.com` → 再認証（PATをパスワード欄に）で案内。コード変更なし。
+
+### バージョン
+- `config.py` `APP_VERSION`: `2.0.2` → `2.0.3`（パッチ）
+
+---
+
 ## 2026-09-11（セッション78）gpt-6-astra デプロイ対応：reasoning_effort 400エラーの汎用リトライ化（v2.0.2・main）
 
 > gpt-5.6系（v2.0.1）と同じ「Function tools with reasoning_effort are not supported」400が、新モデル `gpt-6-astra` デプロイでも発生。今回はモデル名の個別対応ではなく、エラー内容ベースの自動リトライに一般化した。
